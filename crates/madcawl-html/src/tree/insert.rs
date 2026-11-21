@@ -189,7 +189,10 @@ impl<S: TreeSink> TreeBuilder<S> {
 }
 
 /// A form-associated element that the form element pointer applies to:
-/// not a listed one with its own `form` attribute.
+/// not a listed one with its own `form` attribute. `label` is labelable
+/// but not form-associated: its `form` IDL attribute reads the form of
+/// the control it labels. Form-associated custom elements are not known
+/// at parse time without a custom element registry.
 fn form_associated(s: &Start<'_>) -> bool {
     match s.name.tag {
         Tag::Button
@@ -199,7 +202,7 @@ fn form_associated(s: &Start<'_>) -> bool {
         | Tag::Output
         | Tag::Select
         | Tag::Textarea => s.attr(b"form").is_none(),
-        Tag::Img | Tag::Label => true,
+        Tag::Img => true,
         _ => false,
     }
 }

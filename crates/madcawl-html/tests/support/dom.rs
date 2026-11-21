@@ -27,6 +27,9 @@ pub struct Node {
 /// A DOM just big enough to print what the parser built.
 pub struct Dom {
     pub nodes: Vec<Node>,
+    /// Every `associate_form` call: element, form, whether the intended
+    /// parent was in the form's tree (and so the two were associated).
+    pub forms: Vec<(usize, usize, bool)>,
 }
 
 impl Dom {
@@ -37,6 +40,23 @@ impl Dom {
                 parent: None,
                 children: Vec::new(),
             }],
+            forms: Vec::new(),
+        }
+    }
+
+    fn root(&self, mut node: usize) -> usize {
+        while let Some(p) = self.nodes[node].parent {
+            node = p;
+        }
+        node
+    }
+
+    /// The element's tag name, for tests that look at what was recorded.
+    #[allow(dead_code)]
+    pub fn name(&self, node: usize) -> &[u8] {
+        match &self.nodes[node].kind {
+            Kind::Element { name, .. } => name,
+            _ => b"",
         }
     }
 
@@ -184,6 +204,11 @@ impl TreeSink for Dom {
     }
 
     fn set_quirks_mode(&mut self, _mode: QuirksMode) {}
+
+    fn associate_form(&mut self, element: usize, form: usize, intended_parent: usize) {
+        let same = self.root(intended_parent) == self.root(form);
+        self.forms.push((element, form, same));
+    }
 
     fn children_finished(&mut self, element: usize) {
         if self.is_html(element, b"option") {
