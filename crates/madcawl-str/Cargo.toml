@@ -1,0 +1,14 @@
+[package]
+name = "madcawl-str"
+description = "Reference-counted Latin-1 / UTF-16 strings shared by the DOM and the script engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+madcawl-abi = { path = "../madcawl-abi" }

@@ -1,0 +1,11 @@
+[package]
+name = "madcawl-abi"
+description = "Byte layout of heap blocks shared with the script engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true

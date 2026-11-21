@@ -3,5 +3,16 @@
 version = 4
 
 [[package]]
+name = "madcawl-abi"
+version = "0.0.1"
+
+[[package]]
 name = "madcawl-html"
 version = "0.0.1"
+
+[[package]]
+name = "madcawl-str"
+version = "0.0.1"
+dependencies = [
+ "madcawl-abi",
+]
