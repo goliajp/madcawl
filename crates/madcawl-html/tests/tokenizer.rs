@@ -147,10 +147,13 @@ fn html5lib_tokenizer_tests() {
         .filter(|p| p.extension().is_some_and(|e| e == "test"))
     {
         let doc = parse(&std::fs::read_to_string(path).unwrap());
+        let name = path.file_name().unwrap().to_string_lossy();
         // xmlViolation.test is for a parser in XML-compatible mode
         let Some(tests) = doc.get("tests") else {
+            eprintln!("file {name} runs 0 failed 0 skipped as xml");
             continue;
         };
+        let (ran_before, failed_before) = (ran, failures.len());
         for test in tests.arr() {
             let double = test.get("doubleEscaped") == Some(&Json::Bool(true));
             let mut input = test
@@ -202,6 +205,11 @@ fn html5lib_tokenizer_tests() {
                 }
             }
         }
+        eprintln!(
+            "file {name} runs {} failed {}",
+            ran - ran_before,
+            failures.len() - failed_before
+        );
     }
     for f in failures.iter().take(15) {
         eprintln!("{f}\n");

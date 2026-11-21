@@ -146,17 +146,28 @@ fn wpt_tree_construction_tests() {
         .filter(|p| p.extension().is_some_and(|e| e == "dat"))
         .collect();
     files.sort();
+    let skip_list = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/expect/wpt-parsing-skip.txt"),
+    )
+    .unwrap();
+    let mut to_skip: std::collections::BTreeSet<String> = skip_list
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .map(|l| l.split_whitespace().next().unwrap().to_string())
+        .collect();
     let (mut tests_total, mut passed, mut bytewise_passed, mut skipped) = (0, 0, 0, 0);
     let mut failures = Vec::new();
     for path in &files {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let (mut f_total, mut f_whole, mut f_byte, mut f_skip) = (0, 0, 0, 0);
         for test in parse_tests(&std::fs::read(path).unwrap()) {
-            // these expect scripts to run, which takes a script engine
-            if name.starts_with("scripted_") {
+            if to_skip.remove(&format!("{name}:{}", test.line)) {
                 skipped += 1;
+                f_skip += 1;
                 continue;
             }
             tests_total += 1;
+            f_total += 1;
             let modes: &[bool] = match test.script {
                 Some(s) => {
                     if s {
@@ -187,13 +198,20 @@ fn wpt_tree_construction_tests() {
                 if ok {
                     if bytewise {
                         bytewise_passed += 1;
+                        f_byte += 1;
                     } else {
                         passed += 1;
+                        f_whole += 1;
                     }
                 }
             }
         }
+        eprintln!("file {name} whole {f_whole}/{f_total} bytewise {f_byte}/{f_total} skipped {f_skip}");
     }
+    assert!(
+        to_skip.is_empty(),
+        "listed as skipped but not in the data: {to_skip:?}"
+    );
     let shown: usize = std::env::var("TREE_FAILURES")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -203,7 +221,7 @@ fn wpt_tree_construction_tests() {
     }
     eprintln!(
         "{passed}/{tests_total} passed whole, {bytewise_passed}/{tests_total} byte at a time, \
-         {skipped} skipped as they run scripts"
+         {skipped} skipped as listed"
     );
     assert!(failures.is_empty(), "{} runs failed", failures.len());
 }

@@ -1,0 +1,9 @@
+# Tree construction cases the suite does not run, one per line as
+# <file>:<line of its #data or #description>, each with why.  A case
+# missing from the data, or skipped without a line here, fails the test.
+scripted_adoption01.dat:1 runs a script while parsing
+scripted_ark.dat:1 runs a script while parsing
+scripted_foster01.dat:1 runs a script while parsing
+scripted_foster01.dat:12 runs a script while parsing
+scripted_webkit01.dat:1 runs a script while parsing
+scripted_webkit01.dat:14 runs a script while parsing
