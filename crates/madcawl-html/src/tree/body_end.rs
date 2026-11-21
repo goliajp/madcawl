@@ -95,6 +95,7 @@ impl<S: TreeSink> TreeBuilder<S> {
 
     pub(crate) fn any_other_end(&mut self, n: Name) {
         for i in (0..self.open.len()).rev() {
+            step!(1);
             let e = self.open[i];
             if e.ns == Namespace::Html && e.name == n {
                 self.generate_implied(Some(n.tag));

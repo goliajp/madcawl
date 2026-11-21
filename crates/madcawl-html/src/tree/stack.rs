@@ -245,6 +245,7 @@ pub(crate) fn is_heading<H>(e: &Open<H>) -> bool {
 impl<S: TreeSink> TreeBuilder<S> {
     pub(crate) fn in_scope_by(&self, scope: Scope, f: impl Fn(&Open<S::Handle>) -> bool) -> bool {
         for e in self.open.iter().rev() {
+            step!(1);
             if f(e) {
                 return true;
             }
@@ -348,6 +349,7 @@ impl<S: TreeSink> TreeBuilder<S> {
 
     pub(crate) fn reset_mode(&mut self) {
         for i in (0..self.open.len()).rev() {
+            step!(1);
             let last = i == 0;
             let node = match self.context {
                 Some(c) if last => c,

@@ -39,6 +39,7 @@ impl<S: TreeSink> TreeBuilder<S> {
         let mut since_marker = 0;
         let mut first_after_marker = None;
         for (i, e) in self.active.iter().enumerate().rev() {
+            step!(1 + attrs.len());
             match e {
                 Active::Marker => break,
                 Active::Element {
@@ -84,18 +85,21 @@ impl<S: TreeSink> TreeBuilder<S> {
     }
 
     pub(crate) fn active_index(&self, node: S::Handle) -> Option<usize> {
+        step!(self.active.len());
         self.active
             .iter()
             .rposition(|e| matches!(e, Active::Element { node: n, .. } if *n == node))
     }
 
     pub(crate) fn open_index(&self, node: S::Handle) -> Option<usize> {
+        step!(self.open.len());
         self.open.iter().rposition(|e| e.node == node)
     }
 
     /// The last formatting element named `tag` after the last marker.
     pub(crate) fn active_after_marker(&self, tag: Tag) -> Option<usize> {
         for (i, e) in self.active.iter().enumerate().rev() {
+            step!(1);
             match e {
                 Active::Marker => return None,
                 Active::Element { tag: t, .. } if *t == tag => return Some(i),

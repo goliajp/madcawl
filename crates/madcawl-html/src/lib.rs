@@ -1,5 +1,16 @@
 //! WHATWG HTML parsing: the tokenizer and the tree builder.
 
+/// Count `n` units of work for the `steps` feature; nothing without it.
+macro_rules! step {
+    ($n:expr) => {
+        #[cfg(feature = "steps")]
+        $crate::steps::add($n as u64);
+    };
+}
+
+#[cfg(feature = "steps")]
+pub mod steps;
+
 mod entities;
 mod error;
 mod input;

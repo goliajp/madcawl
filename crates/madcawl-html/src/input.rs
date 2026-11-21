@@ -59,6 +59,7 @@ impl Input {
     /// rest has not arrived.
     #[inline]
     pub(crate) fn next(&mut self) -> u32 {
+        step!(1);
         let Some(&b) = self.buf.get(self.pos) else {
             // reading the end reads nothing: putting it back stays here
             self.prev = self.pos;
@@ -129,6 +130,7 @@ impl Input {
                 _ => break,
             }
         }
+        step!(i - start + 1);
         if i > start {
             self.prev = i;
             self.pos = i;
@@ -147,6 +149,7 @@ impl Input {
         ci: bool,
         report: &mut impl FnMut(ParseError),
     ) -> Option<bool> {
+        step!(pat.len());
         for (at, &want) in (self.pos..).zip(pat) {
             let Some(&b) = self.buf.get(at) else {
                 return if self.done { Some(false) } else { None };

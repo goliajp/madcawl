@@ -100,6 +100,7 @@ impl<S: TreeSink> TreeBuilder<S> {
                 }
                 let mut i = self.open.len() - 1;
                 loop {
+                    step!(1);
                     if i == 0 {
                         return Step::Done;
                     }

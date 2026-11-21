@@ -353,6 +353,7 @@ impl Tokenizer {
             return;
         };
         let repeat = if earlier.len() < LINEAR_ATTRS {
+            step!(earlier.len());
             earlier.iter().any(|a| a.name == last.name)
         } else {
             if self.attr_names.is_empty() {
