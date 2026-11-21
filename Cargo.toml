@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/goliajp/madcawl"
+rust-version = "1.100"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+
+[profile.dev]
+debug = 1
+split-debuginfo = "packed"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
