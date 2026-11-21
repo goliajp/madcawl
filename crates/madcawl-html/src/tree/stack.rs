@@ -4,6 +4,84 @@
 use super::tag::{Name, Tag};
 use super::{Mode, Namespace, Open, TreeBuilder, TreeSink};
 
+/// How deep the parser nests elements in the tree. Past it, an element
+/// still goes on the stack of open elements but is inserted beside the
+/// deepest one rather than inside it, as Blink does
+/// (`kMaximumHTMLParserDOMTreeDepth`): the standard has no limit, and
+/// everything that walks the tree afterwards would otherwise have to
+/// survive any depth a page asks for.
+pub(crate) const MAX_TREE_DEPTH: usize = 512;
+
+const TAGS: usize = Tag::Other as usize + 1;
+
+/// The stack of open elements, with a count of the open HTML elements
+/// of each known name, so "is there a `p` (or a `template`) open at
+/// all" is answered without walking a stack that a page can make as
+/// deep as it likes.
+pub(crate) struct OpenStack<H> {
+    items: Vec<Open<H>>,
+    html: [u32; TAGS],
+}
+
+impl<H> OpenStack<H> {
+    pub(crate) fn new() -> Self {
+        Self {
+            items: Vec::new(),
+            html: [0; TAGS],
+        }
+    }
+
+    fn count(&mut self, e: &Open<H>, add: bool) {
+        if e.ns == Namespace::Html {
+            let c = &mut self.html[e.name.tag as usize];
+            if add {
+                *c += 1;
+            } else {
+                *c -= 1;
+            }
+        }
+    }
+
+    pub(crate) fn push(&mut self, e: Open<H>) {
+        self.count(&e, true);
+        self.items.push(e);
+    }
+
+    pub(crate) fn pop(&mut self) -> Option<Open<H>> {
+        let e = self.items.pop()?;
+        self.count(&e, false);
+        Some(e)
+    }
+
+    pub(crate) fn remove(&mut self, i: usize) -> Open<H> {
+        let e = self.items.remove(i);
+        self.count(&e, false);
+        e
+    }
+
+    pub(crate) fn insert(&mut self, i: usize, e: Open<H>) {
+        self.count(&e, true);
+        self.items.insert(i, e);
+    }
+
+    /// Replace the node of entry `i`, keeping its name.
+    pub(crate) fn set_node(&mut self, i: usize, node: H) {
+        self.items[i].node = node;
+    }
+
+    /// Open HTML elements named `tag`, anywhere on the stack.
+    pub(crate) fn html_open(&self, tag: Tag) -> u32 {
+        self.html[tag as usize]
+    }
+}
+
+impl<H> std::ops::Deref for OpenStack<H> {
+    type Target = [Open<H>];
+    fn deref(&self) -> &[Open<H>] {
+        &self.items
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Scope {
     Default,
@@ -179,6 +257,9 @@ impl<S: TreeSink> TreeBuilder<S> {
 
     /// An HTML element of this name is in scope.
     pub(crate) fn in_scope(&self, scope: Scope, name: Name) -> bool {
+        if name.tag != Tag::Other && self.open.html_open(name.tag) == 0 {
+            return false;
+        }
         self.in_scope_by(scope, |e| e.ns == Namespace::Html && e.name == name)
     }
 

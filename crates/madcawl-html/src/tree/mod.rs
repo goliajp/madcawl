@@ -48,7 +48,7 @@ pub struct TreeBuilder<S: TreeSink> {
     mode: Mode,
     original_mode: Mode,
     template_modes: Vec<Mode>,
-    open: Vec<Open<S::Handle>>,
+    open: stack::OpenStack<S::Handle>,
     active: Vec<Active<S::Handle>>,
     /// Attribute lists of formatting entries that are gone, kept for
     /// their allocations.
@@ -68,6 +68,8 @@ pub struct TreeBuilder<S: TreeSink> {
     table_text_dirty: bool,
     next_state: Option<State>,
     stopped: bool,
+    /// The depth limit has been hit once; it is reported once.
+    depth_capped: bool,
 }
 
 impl<S: TreeSink> TreeBuilder<S> {
@@ -80,7 +82,7 @@ impl<S: TreeSink> TreeBuilder<S> {
             mode: Mode::Initial,
             original_mode: Mode::Initial,
             template_modes: Vec::new(),
-            open: Vec::new(),
+            open: stack::OpenStack::new(),
             active: Vec::new(),
             spare_attrs: Vec::new(),
             head: None,
@@ -97,6 +99,7 @@ impl<S: TreeSink> TreeBuilder<S> {
             table_text_dirty: false,
             next_state: None,
             stopped: false,
+            depth_capped: false,
         }
     }
 

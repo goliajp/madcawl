@@ -68,6 +68,8 @@ errors! {
     SurrogateInInputStream => "surrogate-in-input-stream",
     UnexpectedCharacterAfterDoctypeSystemIdentifier => "unexpected-character-after-doctype-system-identifier",
     UnexpectedCharacterInAttributeName => "unexpected-character-in-attribute-name",
+    // not one of the standard's: the parser stopped nesting at its depth limit
+    TreeTooDeep => "tree-too-deep",
     UnexpectedCharacterInUnquotedAttributeValue => "unexpected-character-in-unquoted-attribute-value",
     UnexpectedEqualsSignBeforeAttributeName => "unexpected-equals-sign-before-attribute-name",
     UnexpectedNullCharacter => "unexpected-null-character",

@@ -2,8 +2,10 @@
 
 use super::names::svg_tag;
 use super::sink::{Adjust, Attrs};
+use super::stack::MAX_TREE_DEPTH;
 use super::tag::Tag;
 use super::{Namespace, Open, Start, TreeBuilder, TreeSink};
+use crate::error::ParseError;
 
 type Place<H> = (H, Option<H>);
 
@@ -31,6 +33,7 @@ impl<S: TreeSink> TreeBuilder<S> {
     /// The appropriate place for inserting a node, in `target` or else
     /// in the current node.
     pub(crate) fn place(&mut self, target: Option<Open<S::Handle>>) -> Place<S::Handle> {
+        let at_current = target.is_none();
         let mut target = target.unwrap_or(*self.current());
         if self.foster
             && target.ns == Namespace::Html
@@ -57,6 +60,17 @@ impl<S: TreeSink> TreeBuilder<S> {
         }
         if target.html(Tag::Template) {
             return (self.sink.template_contents(target.node), None);
+        }
+        // the html element is the first entry and does not count
+        if at_current
+            && self.open.len() > MAX_TREE_DEPTH + 1
+            && let Some(parent) = self.sink.parent(target.node)
+        {
+            if !self.depth_capped {
+                self.depth_capped = true;
+                self.sink.parse_error(ParseError::TreeTooDeep);
+            }
+            return (parent, None);
         }
         (target.node, None)
     }
@@ -169,7 +183,7 @@ impl<S: TreeSink> TreeBuilder<S> {
     }
 
     pub(crate) fn in_template_contents(&self) -> bool {
-        self.open.iter().any(|e| e.html(Tag::Template))
+        self.open.html_open(Tag::Template) > 0
             || self.context.is_some_and(|c| c.html(Tag::Template))
     }
 }

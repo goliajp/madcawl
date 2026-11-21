@@ -31,7 +31,7 @@ impl<S: TreeSink> TreeBuilder<S> {
     }
 
     fn has_template(&self) -> bool {
-        self.open.iter().any(|e| e.html(Tag::Template))
+        self.open.html_open(Tag::Template) > 0
     }
 
     fn body_start(&mut self, s: &Start<'_>, tok: Tok<'_>) -> Step {

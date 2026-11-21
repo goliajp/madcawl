@@ -206,7 +206,9 @@ fn wpt_tree_construction_tests() {
                 }
             }
         }
-        eprintln!("file {name} whole {f_whole}/{f_total} bytewise {f_byte}/{f_total} skipped {f_skip}");
+        eprintln!(
+            "file {name} whole {f_whole}/{f_total} bytewise {f_byte}/{f_total} skipped {f_skip}"
+        );
     }
     assert!(
         to_skip.is_empty(),

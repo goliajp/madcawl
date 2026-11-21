@@ -4,6 +4,9 @@ use super::tag::{Name, Tag};
 use super::{Active, Start, TreeBuilder, TreeSink};
 use crate::token::Attribute;
 
+/// The most formatting elements the list keeps after its last marker.
+const MAX_ACTIVE: usize = 256;
+
 fn same_attrs(a: &[Attribute], b: &[Attribute]) -> bool {
     a.len() == b.len()
         && a.iter()
@@ -23,9 +26,18 @@ fn copy_attrs(to: &mut Vec<Attribute>, from: &[Attribute]) {
 impl<S: TreeSink> TreeBuilder<S> {
     /// Push onto the list of active formatting elements, with the
     /// Noah's Ark clause.
+    ///
+    /// The list after the last marker holds at most `MAX_ACTIVE`
+    /// elements: when it is full, the earliest one leaves it, as an
+    /// element the Noah's Ark clause drops does. The standard has no
+    /// limit, and every new entry is compared with the ones before it,
+    /// so without one a page of distinct `<b x=…>` tags costs the
+    /// square of its length.
     pub(crate) fn push_active(&mut self, node: S::Handle, tag: Tag, attrs: &[Attribute]) {
         let mut count = 0;
         let mut earliest = None;
+        let mut since_marker = 0;
+        let mut first_after_marker = None;
         for (i, e) in self.active.iter().enumerate().rev() {
             match e {
                 Active::Marker => break,
@@ -34,12 +46,21 @@ impl<S: TreeSink> TreeBuilder<S> {
                 } if *t == tag && same_attrs(a, attrs) => {
                     count += 1;
                     earliest = Some(i);
+                    since_marker += 1;
+                    first_after_marker = Some(i);
                 }
-                Active::Element { .. } => {}
+                Active::Element { .. } => {
+                    since_marker += 1;
+                    first_after_marker = Some(i);
+                }
             }
         }
         if count >= 3
             && let Some(i) = earliest
+        {
+            self.remove_active(i);
+        } else if since_marker >= MAX_ACTIVE
+            && let Some(i) = first_after_marker
         {
             self.remove_active(i);
         }

@@ -2,7 +2,6 @@
 //! rest interned so that names compare as integers too.
 
 use std::collections::HashMap;
-use std::hash::{BuildHasherDefault, Hasher};
 
 macro_rules! tags {
     ($($v:ident => $s:literal,)*) => {
@@ -181,25 +180,14 @@ impl From<Tag> for Name {
     }
 }
 
-#[derive(Default)]
-struct Fx(u64);
-
-impl Hasher for Fx {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-    fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.0 = (self.0.rotate_left(5) ^ u64::from(b)).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
-        }
-    }
-}
-
 /// Names of elements that are not known tags. It grows with the
 /// number of distinct names in one document, which the input bounds.
+/// The names are the page's, so the hash is keyed per table
+/// (`RandomState`): with a fixed one a page can pick names that all
+/// collide.
 #[derive(Default)]
 pub(crate) struct Atoms {
-    map: HashMap<Box<[u8]>, u32, BuildHasherDefault<Fx>>,
+    map: HashMap<Box<[u8]>, u32>,
 }
 
 impl Atoms {

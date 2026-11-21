@@ -246,7 +246,13 @@ impl Clone for DomString {
             // SAFETY: a counted block's first word is its count
             unsafe {
                 let rc = self.block.as_ptr().cast::<u32>();
-                rc.write(rc.read() + 1);
+                let n = rc.read();
+                // wrapping to zero would free a block that still has
+                // owners; a release build does not check the addition
+                if n == u32::MAX {
+                    std::process::abort();
+                }
+                rc.write(n + 1);
             }
         }
         Self {

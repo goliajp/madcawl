@@ -76,3 +76,36 @@ fn the_header_is_the_engine_layout() {
         abi::STR_FLAG_IS_LATIN1 | abi::STR_FLAG_IS_ASCII
     );
 }
+
+/// A count at its maximum aborts the process on the next clone rather
+/// than wrapping to zero. The abort is watched from outside: the test
+/// runs itself again as a child that does the clone.
+#[test]
+fn a_count_at_its_limit_aborts_instead_of_wrapping() {
+    const CHILD: &str = "MADCAWL_STR_COUNT_LIMIT_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        let s = DomString::from_wtf8("counted, not static".as_bytes());
+        assert_eq!(s.flags() & abi::FLAG_STATIC, 0);
+        // SAFETY: a counted block's first word is its count
+        unsafe { s.block.as_ptr().cast::<u32>().write(u32::MAX) };
+        let _again = s.clone();
+        unreachable!("the clone above returned");
+    }
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tests::a_count_at_its_limit_aborts_instead_of_wrapping",
+            "--nocapture",
+        ])
+        .env(CHILD, "1")
+        .output()
+        .unwrap();
+    use std::os::unix::process::ExitStatusExt;
+    assert_eq!(
+        out.status.signal(),
+        Some(6),
+        "the child should die of SIGABRT: {:?}\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

@@ -68,7 +68,7 @@ impl<S: TreeSink> TreeBuilder<S> {
                 continue;
             };
             let el = self.recreate_active(ai, false, common.node);
-            self.open[node_i] = Open { node: el, ..node };
+            self.open.set_node(node_i, el);
             self.sink.children_finished(node.node);
             if last == furthest.node {
                 bookmark = ai + 1;

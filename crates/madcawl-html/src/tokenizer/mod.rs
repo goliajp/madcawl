@@ -13,6 +13,10 @@ mod text;
 use crate::error::ParseError;
 use crate::input::{Input, encode_char};
 use crate::token::{Attribute, Doctype, Tag, Token};
+
+/// Up to this many attributes on a tag, a new one is compared with each
+/// of the others; past it, they go in a hash set.
+const LINEAR_ATTRS: usize = 8;
 pub use state::State;
 
 /// What the sink wants after a token.
@@ -82,6 +86,10 @@ pub struct Tokenizer {
     /// The attribute being read repeats an earlier one and is dropped
     /// when it ends.
     attr_is_duplicate: bool,
+    /// The names of the current tag's attributes once it has more than
+    /// `LINEAR_ATTRS`, so a tag with many of them is checked for a
+    /// repeat in constant time each rather than against all before it.
+    attr_names: std::collections::HashSet<Vec<u8>>,
     last_start_tag: Vec<u8>,
     temp: Vec<u8>,
     comment: Vec<u8>,
@@ -107,6 +115,7 @@ impl Tokenizer {
             is_end_tag: false,
             spare_attrs: Vec::new(),
             attr_is_duplicate: false,
+            attr_names: std::collections::HashSet::new(),
             last_start_tag: Vec::new(),
             temp: Vec::new(),
             comment: Vec::new(),
@@ -269,8 +278,6 @@ impl Tokenizer {
         }
     }
 
-    // ── emitting ──────────────────────────────────────────────────
-
     fn emit_char<S: Sink>(&mut self, sink: &mut S, c: u32) {
         let (b, n) = encode_char(c);
         sink.token(Token::Chars(&b[..n]));
@@ -328,6 +335,7 @@ impl Tokenizer {
         self.tag.name.clear();
         self.tag.self_closing = false;
         self.attr_is_duplicate = false;
+        self.attr_names.clear();
         self.spare_attrs.append(&mut self.tag.attrs);
     }
 
@@ -344,7 +352,16 @@ impl Tokenizer {
         let Some((last, earlier)) = self.tag.attrs.split_last() else {
             return;
         };
-        if earlier.iter().any(|a| a.name == last.name) {
+        let repeat = if earlier.len() < LINEAR_ATTRS {
+            earlier.iter().any(|a| a.name == last.name)
+        } else {
+            if self.attr_names.is_empty() {
+                self.attr_names
+                    .extend(earlier.iter().map(|a| a.name.clone()));
+            }
+            !self.attr_names.insert(last.name.clone())
+        };
+        if repeat {
             sink.error(ParseError::DuplicateAttribute);
             self.attr_is_duplicate = true;
         }
