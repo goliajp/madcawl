@@ -1,140 +1,13 @@
 //! The WPT tree construction tests (html5lib format), every one of
-//! them, run with the whole input at once and fed one byte at a time.
-
-use madcawl_html::{
-    Attrs, FragmentContext, Namespace, Options, QuirksMode, Step, Tokenizer, TreeBuilder, TreeSink,
-};
+//! them, run with the whole input at once, fed one byte at a time, and
+//! fed in chunks of random size.
 
 #[path = "support/dom.rs"]
 mod dom;
+#[path = "support/wpt.rs"]
+mod wpt;
 
-use dom::{Dom, print};
-
-#[derive(Default)]
-struct Test {
-    data: Vec<u8>,
-    fragment: Option<Vec<u8>>,
-    script: Option<bool>,
-    document: Vec<u8>,
-    line: usize,
-}
-
-fn parse_tests(text: &[u8]) -> Vec<Test> {
-    let mut tests = Vec::new();
-    let mut section: &[u8] = b"";
-    let mut prev_empty = true;
-    let mut cur: Option<Test> = None;
-    let mut lines: Vec<&[u8]> = Vec::new();
-    let flush = |cur: &mut Option<Test>, section: &[u8], lines: &mut Vec<&[u8]>| {
-        let Some(t) = cur else { return };
-        match section {
-            b"#data" => t.data = lines.join(&b'\n'),
-            b"#document-fragment" => t.fragment = Some(lines.join(&b'\n')),
-            b"#document" => {
-                while lines.last().is_some_and(|l| l.is_empty()) {
-                    lines.pop();
-                }
-                t.document = lines.join(&b'\n');
-            }
-            _ => {}
-        }
-        lines.clear();
-    };
-    for (n, line) in text.split(|&b| b == b'\n').enumerate() {
-        let header = line.starts_with(b"#") && section != b"#document" || line == b"#data";
-        if matches!(line, b"#data" | b"#description") && prev_empty {
-            flush(&mut cur, section, &mut lines);
-            tests.extend(cur.take());
-            cur = Some(Test {
-                line: n + 1,
-                ..Test::default()
-            });
-            section = line;
-        } else if line == b"#data" && section == b"#description" {
-            lines.clear();
-            section = line;
-        } else if header
-            && matches!(
-                line,
-                b"#errors"
-                    | b"#new-errors"
-                    | b"#document-fragment"
-                    | b"#script-on"
-                    | b"#script-off"
-                    | b"#document"
-                    | b"#description"
-            )
-        {
-            flush(&mut cur, section, &mut lines);
-            section = line;
-            if let Some(t) = cur.as_mut() {
-                match line {
-                    b"#script-on" => t.script = Some(true),
-                    b"#script-off" => t.script = Some(false),
-                    _ => {}
-                }
-            }
-        } else {
-            lines.push(line);
-        }
-        prev_empty = line.is_empty();
-    }
-    flush(&mut cur, section, &mut lines);
-    tests.extend(cur);
-    tests
-}
-
-fn run(test: &Test, scripting: bool, bytewise: bool) -> Vec<u8> {
-    let opts = Options {
-        scripting,
-        ..Options::default()
-    };
-    let mut dom = Dom::new();
-    let mut tok = Tokenizer::new();
-    let mut root = 0;
-    let mut builder = match &test.fragment {
-        None => TreeBuilder::new(dom, opts),
-        Some(ctx) => {
-            let (ns, local) = match ctx.split(|&b| b == b' ').collect::<Vec<_>>()[..] {
-                [b"svg", l] => (Namespace::Svg, l),
-                [b"math", l] => (Namespace::MathMl, l),
-                [l] => (Namespace::Html, l),
-                _ => panic!("bad fragment context"),
-            };
-            let form = (ns == Namespace::Html && local == b"form")
-                .then(|| dom.create_element(Namespace::Html, b"form", Attrs::empty()));
-            root = dom.nodes.len();
-            let b = TreeBuilder::new_fragment(
-                dom,
-                opts,
-                FragmentContext {
-                    ns,
-                    local,
-                    attrs: &[],
-                    form,
-                    quirks: QuirksMode::NoQuirks,
-                },
-            );
-            tok.set_state(b.tokenizer_state());
-            b
-        }
-    };
-    if bytewise {
-        for b in &test.data {
-            tok.feed(std::slice::from_ref(b));
-            assert_eq!(tok.run(&mut builder), Step::NeedInput);
-        }
-    } else {
-        tok.feed(&test.data);
-    }
-    tok.end();
-    assert_eq!(tok.run(&mut builder), Step::Done);
-    let dom = builder.into_sink();
-    let mut out = Vec::new();
-    print(&dom, root, 0, &mut out);
-    out.pop();
-    out
-}
+use wpt::{Feed, parse_tests, run};
 
 #[test]
 fn wpt_tree_construction_tests() {
@@ -155,11 +28,13 @@ fn wpt_tree_construction_tests() {
         .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
         .map(|l| l.split_whitespace().next().unwrap().to_string())
         .collect();
-    let (mut tests_total, mut passed, mut bytewise_passed, mut skipped) = (0, 0, 0, 0);
+    let (mut tests_total, mut skipped) = (0, 0);
+    let mut passed = [0usize; 3];
     let mut failures = Vec::new();
     for path in &files {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        let (mut f_total, mut f_whole, mut f_byte, mut f_skip) = (0, 0, 0, 0);
+        let (mut f_total, mut f_skip) = (0, 0);
+        let mut f_passed = [0usize; 3];
         for test in parse_tests(&std::fs::read(path).unwrap()) {
             if to_skip.remove(&format!("{name}:{}", test.line)) {
                 skipped += 1;
@@ -178,14 +53,22 @@ fn wpt_tree_construction_tests() {
                 }
                 None => &[false, true],
             };
-            for bytewise in [false, true] {
+            let feeds = [
+                Feed::Whole,
+                Feed::Bytewise,
+                Feed::Chunks {
+                    seed: 0x6d61_6463_6177_6c00 ^ ((test.line as u64) << 8),
+                    max: 17,
+                },
+            ];
+            for (i, feed) in feeds.into_iter().enumerate() {
                 let mut ok = true;
                 for &scripting in modes {
-                    let got = run(&test, scripting, bytewise);
+                    let got = run(&test, scripting, feed);
                     if got != test.document {
                         ok = false;
                         failures.push(format!(
-                            "{name}:{} scripting={scripting} bytewise={bytewise}{}\n#data\n{}\n#want\n{}\n#got\n{}",
+                            "{name}:{} scripting={scripting} feed={feed:?}{}\n#data\n{}\n#want\n{}\n#got\n{}",
                             test.line,
                             test.fragment.as_ref().map(|f| format!(" fragment={}", String::from_utf8_lossy(f))).unwrap_or_default(),
                             String::from_utf8_lossy(&test.data),
@@ -196,18 +79,14 @@ fn wpt_tree_construction_tests() {
                     }
                 }
                 if ok {
-                    if bytewise {
-                        bytewise_passed += 1;
-                        f_byte += 1;
-                    } else {
-                        passed += 1;
-                        f_whole += 1;
-                    }
+                    passed[i] += 1;
+                    f_passed[i] += 1;
                 }
             }
         }
         eprintln!(
-            "file {name} whole {f_whole}/{f_total} bytewise {f_byte}/{f_total} skipped {f_skip}"
+            "file {name} whole {}/{f_total} bytewise {}/{f_total} chunked {}/{f_total} skipped {f_skip}",
+            f_passed[0], f_passed[1], f_passed[2]
         );
     }
     assert!(
@@ -222,8 +101,9 @@ fn wpt_tree_construction_tests() {
         eprintln!("{f}\n");
     }
     eprintln!(
-        "{passed}/{tests_total} passed whole, {bytewise_passed}/{tests_total} byte at a time, \
-         {skipped} skipped as listed"
+        "{}/{tests_total} passed whole, {}/{tests_total} byte at a time, \
+         {}/{tests_total} in random chunks, {skipped} skipped as listed",
+        passed[0], passed[1], passed[2]
     );
     assert!(failures.is_empty(), "{} runs failed", failures.len());
 }
