@@ -5,7 +5,12 @@ mod error;
 mod input;
 mod token;
 mod tokenizer;
+mod tree;
 
 pub use error::ParseError;
 pub use token::{Attribute, Doctype, Tag, Token};
 pub use tokenizer::{Flow, Sink, State, Step, Tokenizer};
+pub use tree::{
+    AttrNamespace, AttrRef, Attrs, FragmentContext, Namespace, Options, QuirksMode, TreeBuilder,
+    TreeSink,
+};
