@@ -1,0 +1,21 @@
+[package]
+name = "madcawl-fuzz"
+description = "Deterministic mutation fuzzing of the HTML tokenizer and tree builder"
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# its own workspace: the `steps` feature it turns on must never reach a
+# build of the main workspace
+[workspace]
+
+[dependencies]
+madcawl-html = { path = "../../crates/madcawl-html", features = ["steps"] }
+
+[profile.release]
+# a panic is a finding: unwind so the driver can record it and go on
+panic = "unwind"
+debug-assertions = true
+overflow-checks = true
+debug = 1
