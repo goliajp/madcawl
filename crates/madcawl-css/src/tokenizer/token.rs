@@ -72,14 +72,16 @@ impl Token {
         Span::new(self.unit_start as usize, self.span.end as usize)
     }
 
-    /// The numeric value of a number, percentage or dimension.
+    /// The numeric value of a number, percentage or dimension; a value
+    /// too large to represent is clamped to the largest finite one.
     pub fn number(&self, src: &str) -> f64 {
         let repr = self.value.of(src);
-        repr.parse().unwrap_or_else(|_| {
+        let v: f64 = repr.parse().unwrap_or_else(|_| {
             // a mantissa `repr` cannot parse is a long run of digits
             // ending in `.`, which the tokenizer never produces
             unreachable!("number token {repr:?}")
-        })
+        });
+        v.clamp(f64::MIN, f64::MAX)
     }
 
     /// The decoded characters of the value.

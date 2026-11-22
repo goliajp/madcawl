@@ -78,6 +78,7 @@ const SELECTOR_SEEDS: &[&str] = &[
     ":nth-child(2n+1 of .a, .b):nth-last-of-type(-n+3)",
     ":lang(en, \"fr\"):dir(rtl)",
     "&.a > & .b",
+    "a{b{} c:d}",
     "p:first-line, li::marker",
     ".a\\:b, #\\31 0",
 ];
