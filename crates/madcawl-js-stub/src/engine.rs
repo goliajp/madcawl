@@ -1,0 +1,368 @@
+//! The engine interface on the stub.
+
+use std::any::TypeId;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
+
+use madcawl_js::{
+    ClassDef, Control, Deadline, Engine, ErrorKind, Host, HostFn, HostRef, Interrupt, Key, Owned,
+    ScriptOrigin, Step, ValueKind,
+};
+use madcawl_str::DomString;
+
+use crate::cell::{Body, Cell, ErasedClass};
+use crate::collect::{StubTracer, StubUnlinker, Vertex};
+use crate::isolate::{Realm, Stub, string_at};
+use crate::props::{class_as, detach};
+use crate::value::{FALSE, NULL, THROWN, TRUE, UNDEFINED, Value};
+
+const NO_SCRIPT: &str = "the stub engine runs no script";
+
+impl Engine for Stub {
+    type Value = Value;
+    type Realm = Realm;
+    type Weak = u32;
+    type Tracer = StubTracer;
+    type Unlinker = StubUnlinker;
+    type ModulePayload = ();
+
+    fn undefined() -> Value {
+        UNDEFINED
+    }
+
+    fn null() -> Value {
+        NULL
+    }
+
+    fn boolean(b: bool) -> Value {
+        if b { TRUE } else { FALSE }
+    }
+
+    fn number(n: f64) -> Value {
+        Value::number(n)
+    }
+
+    fn thrown() -> Owned<Value> {
+        Stub::owned(THROWN)
+    }
+
+    fn is_thrown(v: Value) -> bool {
+        v == THROWN
+    }
+
+    fn kind(&self, v: Value) -> ValueKind {
+        match v {
+            UNDEFINED => ValueKind::Undefined,
+            NULL => ValueKind::Null,
+            TRUE | FALSE => ValueKind::Boolean,
+            _ if v.as_number().is_some() => ValueKind::Number,
+            _ if v.is_string() => ValueKind::String,
+            _ if self.is_callable(v) => ValueKind::Function,
+            _ => ValueKind::Object,
+        }
+    }
+
+    fn as_boolean(&self, v: Value) -> Option<bool> {
+        v.as_boolean()
+    }
+
+    fn as_number(&self, v: Value) -> Option<f64> {
+        v.as_number()
+    }
+
+    fn as_string(&self, v: Value) -> Option<DomString> {
+        // SAFETY: borrowed for the clone; the value keeps its count
+        v.is_string()
+            .then(|| std::mem::ManuallyDrop::new(unsafe { string_at(v) }).clone())
+            .map(std::mem::ManuallyDrop::into_inner)
+    }
+
+    fn retain(&mut self, v: Value) -> Owned<Value> {
+        self.retain_value(v);
+        Stub::owned(v)
+    }
+
+    fn release(&mut self, v: Owned<Value>) {
+        self.release_value(v.into_raw());
+    }
+
+    fn string(&mut self, s: DomString) -> Owned<Value> {
+        Stub::owned(Value(s.into_raw().as_ptr() as u64))
+    }
+
+    fn to_string<H: Host<Stub>>(&mut self, _host: &mut H, v: Value) -> Option<DomString> {
+        if let Some(s) = self.as_string(v) {
+            return Some(s);
+        }
+        let text = match self.kind(v) {
+            ValueKind::Undefined => "undefined".to_owned(),
+            ValueKind::Null => "null".to_owned(),
+            ValueKind::Boolean => (v == TRUE).to_string(),
+            ValueKind::Number => number_text(v.as_number().expect("a number")),
+            ValueKind::Function => "function () { [native code] }".to_owned(),
+            _ => "[object Object]".to_owned(),
+        };
+        Some(DomString::from_wtf8(text.as_bytes()))
+    }
+
+    fn to_number<H: Host<Stub>>(&mut self, _host: &mut H, v: Value) -> Option<f64> {
+        Some(match self.kind(v) {
+            ValueKind::Number => v.as_number().expect("a number"),
+            ValueKind::Boolean => (v == TRUE) as u8 as f64,
+            ValueKind::Null => 0.0,
+            ValueKind::String => {
+                let mut b = Vec::new();
+                self.as_string(v).expect("a string").write_wtf8(&mut b);
+                let t = String::from_utf8_lossy(&b);
+                let t = t.trim();
+                if t.is_empty() { 0.0 } else { t.parse().unwrap_or(f64::NAN) }
+            }
+            _ => f64::NAN,
+        })
+    }
+
+    fn to_boolean(&self, v: Value) -> bool {
+        match self.kind(v) {
+            ValueKind::Undefined | ValueKind::Null => false,
+            ValueKind::Boolean => v == TRUE,
+            ValueKind::Number => v.as_number().is_some_and(|n| n != 0.0 && !n.is_nan()),
+            ValueKind::String => self.as_string(v).is_some_and(|s| !s.is_empty()),
+            _ => true,
+        }
+    }
+
+    fn new_realm(&mut self) -> Realm {
+        self.make_realm()
+    }
+
+    fn global(&mut self, realm: Realm) -> Owned<Value> {
+        let g = self.realm_data(realm.0).global;
+        self.retain(g)
+    }
+
+    fn detach_realm(&mut self, realm: Realm) {
+        detach(self, realm);
+    }
+
+    fn new_object(&mut self, realm: Realm) -> Owned<Value> {
+        Stub::owned(self.alloc(realm.0, Body::Object))
+    }
+
+    fn get<H: Host<Stub>>(&mut self, host: &mut H, obj: Value, key: Key<'_>) -> Owned<Value> {
+        self.get_prop(host, obj, key)
+    }
+
+    fn set<H: Host<Stub>>(&mut self, host: &mut H, obj: Value, key: Key<'_>, v: Value) -> bool {
+        self.set_prop(host, obj, key, v)
+    }
+
+    fn delete<H: Host<Stub>>(&mut self, _host: &mut H, obj: Value, key: Key<'_>) -> bool {
+        self.delete_prop(obj, key)
+    }
+
+    fn is_callable(&self, v: Value) -> bool {
+        // SAFETY: a live cell, read only
+        v.is_cell() && matches!(unsafe { Cell::at(v) }.body, Body::Function { .. })
+    }
+
+    fn call<H: Host<Stub>>(&mut self, host: &mut H, f: Value, this: Value, args: &[Value]) -> Owned<Value> {
+        self.call_value(host, f, this, args)
+    }
+
+    fn new_function<H: Host<Stub>>(&mut self, realm: Realm, name: &'static str, length: u8, f: HostFn<Stub, H>) -> Owned<Value> {
+        self.function(realm.0, name, length, f)
+    }
+
+    fn throw(&mut self, exception: Owned<Value>) -> Owned<Value> {
+        if let Some(old) = self.exception.replace(exception.into_raw()) {
+            self.release_value(old);
+        }
+        Stub::thrown()
+    }
+
+    fn throw_error(&mut self, kind: ErrorKind, message: &str) -> Owned<Value> {
+        let e = self.error(kind, message);
+        self.throw(e)
+    }
+
+    fn take_exception(&mut self) -> Option<Owned<Value>> {
+        self.exception.take().map(Stub::owned)
+    }
+
+    fn new_wrapper<H: Host<Stub>>(&mut self, realm: Realm, class: &'static ClassDef<Stub, H>, obj: HostRef) -> Owned<Value> {
+        let class = ErasedClass {
+            def: std::ptr::from_ref(class).cast(),
+            host: TypeId::of::<H>(),
+            id: class.id,
+        };
+        let body = Body::Wrapper { class, obj, preserved: false, dead: false, noticed: false };
+        Stub::owned(self.alloc(realm.0, body))
+    }
+
+    fn wrapper_word(wrapper: Value) -> u64 {
+        wrapper.0
+    }
+
+    fn wrapper_value(word: u64) -> Value {
+        Value(word)
+    }
+
+    fn host_of<H: Host<Stub>>(&self, v: Value, class: &'static ClassDef<Stub, H>) -> Option<HostRef> {
+        if !v.is_cell() {
+            return None;
+        }
+        // SAFETY: a live cell, read only
+        match unsafe { Cell::at(v) }.body {
+            Body::Wrapper { class: c, obj, .. } => {
+                (c.host == TypeId::of::<H>() && class.contains(c.id)).then_some(obj)
+            }
+            _ => None,
+        }
+    }
+
+    fn drain_host<H: Host<Stub>>(&mut self, host: &mut H) -> usize {
+        let mut n = 0;
+        while let Some(v) = self.notices.pop() {
+            // SAFETY: a noticed cell is not freed before its notice
+            let c = unsafe { Cell::at(v) };
+            let Body::Wrapper { class, obj, dead, noticed, .. } = &mut c.body else { unreachable!() };
+            *noticed = false;
+            if !*dead {
+                continue;
+            }
+            let (class, obj) = (*class, *obj);
+            (class_as::<H>(&class).host_ops().wrapper_died)(host, obj);
+            self.free_cell(v);
+            n += 1;
+        }
+        n
+    }
+
+    fn weak(&mut self, v: Value) -> u32 {
+        assert!(v.is_cell(), "a weak handle to an object");
+        let slot = match self.weak_free.pop() {
+            Some(s) => {
+                self.weak[s as usize] = Some(v);
+                s
+            }
+            None => {
+                self.weak.push(Some(v));
+                (self.weak.len() - 1) as u32
+            }
+        };
+        self.weak_of.entry(v).or_default().push(slot);
+        slot
+    }
+
+    fn weak_get(&mut self, w: &u32) -> Option<Owned<Value>> {
+        let v = self.weak[*w as usize]?;
+        Some(self.retain(v))
+    }
+
+    fn weak_drop(&mut self, w: u32) {
+        if let Some(v) = self.weak[w as usize].take()
+            && let Some(slots) = self.weak_of.get_mut(&v)
+        {
+            slots.retain(|&s| s != w);
+        }
+        self.weak_free.push(w);
+    }
+
+    fn suspect(&mut self, obj: HostRef) {
+        self.buffer_vertex(Vertex::Host(obj));
+    }
+
+    fn forget(&mut self, obj: HostRef) {
+        self.unbuffer(Vertex::Host(obj));
+    }
+
+    fn collect_cycles<H: Host<Stub>>(&mut self, host: &mut H, deadline: Deadline) -> Step {
+        self.collect(host, deadline)
+    }
+
+    fn enqueue_microtask(&mut self, job: Owned<Value>, arg: Owned<Value>) {
+        self.microtasks.push_back((job.into_raw(), arg.into_raw()));
+    }
+
+    fn run_microtasks<H: Host<Stub>>(&mut self, host: &mut H) {
+        if std::mem::replace(&mut self.in_checkpoint, true) {
+            return;
+        }
+        while let Some((job, arg)) = self.microtasks.pop_front() {
+            let r = self.call_value(host, job, UNDEFINED, &[arg]).into_raw();
+            if r == THROWN {
+                let e = self.take_exception().expect("a thrown exception");
+                host.report_exception(self, e);
+            }
+            for v in [r, job, arg] {
+                self.release_value(v);
+            }
+        }
+        self.in_checkpoint = false;
+    }
+
+    fn evaluate<H: Host<Stub>>(&mut self, _host: &mut H, _realm: Realm, _source: &DomString, _origin: &ScriptOrigin<'_>) -> Owned<Value> {
+        self.throw_error(ErrorKind::Syntax, NO_SCRIPT)
+    }
+
+    fn compile_handler<H: Host<Stub>>(
+        &mut self,
+        _host: &mut H,
+        _realm: Realm,
+        _params: &[&str],
+        _body: &DomString,
+        _scopes: &[Value],
+        _origin: &ScriptOrigin<'_>,
+    ) -> Owned<Value> {
+        self.throw_error(ErrorKind::Syntax, NO_SCRIPT)
+    }
+
+    fn finish_loading_module<H: Host<Stub>>(&mut self, _host: &mut H, _payload: (), result: Owned<Value>) {
+        self.release(result);
+    }
+}
+
+fn number_text(n: f64) -> String {
+    if n.is_nan() {
+        "NaN".to_owned()
+    } else if n.is_infinite() {
+        if n > 0.0 { "Infinity" } else { "-Infinity" }.to_owned()
+    } else if n == n.trunc() && n.abs() < 1e21 {
+        format!("{}", n as i64)
+    } else {
+        format!("{n}")
+    }
+}
+
+#[derive(Clone)]
+pub struct StubInterrupt(Arc<AtomicU8>);
+
+impl Interrupt for StubInterrupt {
+    fn terminate(&self) {
+        self.0.fetch_or(1, Ordering::Relaxed);
+    }
+
+    fn request_callback(&self) {
+        self.0.fetch_or(2, Ordering::Relaxed);
+    }
+}
+
+impl Control for Stub {
+    type Interrupt = StubInterrupt;
+
+    fn interrupt_handle(&self) -> StubInterrupt {
+        StubInterrupt(self.interrupt.clone())
+    }
+
+    fn set_memory_limits(&mut self, soft: usize, hard: usize) {
+        self.limits = (soft, hard);
+    }
+
+    fn adjust_external_memory(&mut self, delta: isize) {
+        self.external += delta;
+    }
+
+    fn memory_usage(&self) -> usize {
+        self.live * size_of::<Cell>() + self.external.max(0) as usize
+    }
+}

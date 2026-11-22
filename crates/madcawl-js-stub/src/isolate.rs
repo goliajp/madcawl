@@ -1,0 +1,247 @@
+//! The stub isolate: its cells, counts and realms.
+
+use std::collections::{HashMap, HashSet};
+use std::mem::ManuallyDrop;
+use std::ptr::NonNull;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU8;
+
+use madcawl_js::{Key, Owned};
+use madcawl_str::{Atom, DomString, HeldAtoms};
+
+use crate::cell::{Body, Cell, PropKey};
+use crate::collect::{Collector, Vertex};
+use crate::value::Value;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Realm(pub(crate) u32);
+
+pub(crate) struct RealmData {
+    pub global: Value,
+    pub detached: bool,
+    /// The function objects of host operations, one per class table
+    /// entry, so that reading a method twice gives the same function.
+    pub methods: HashMap<(usize, u16), Value>,
+}
+
+/// One isolate. It runs no script: tests do through the engine
+/// interface what script would.
+pub struct Stub {
+    pub(crate) realms: Vec<RealmData>,
+    pub(crate) current: u32,
+    pub(crate) exception: Option<Value>,
+    pub(crate) live: usize,
+    pub(crate) names: HeldAtoms,
+    pub(crate) microtasks: std::collections::VecDeque<(Value, Value)>,
+    pub(crate) in_checkpoint: bool,
+    /// Dead wrappers whose host has not been told.
+    pub(crate) notices: Vec<Value>,
+    /// While a batch of unlinks runs, released values wait here.
+    pub(crate) deferred: Option<Vec<Value>>,
+    /// Cycle candidates, in the order they came, and the set that says
+    /// which entries still stand (the engine's buffered mark).
+    pub(crate) buffer: Vec<Vertex>,
+    pub(crate) buffered: HashSet<Vertex>,
+    pub(crate) collector: Collector,
+    pub(crate) weak: Vec<Option<Value>>,
+    pub(crate) weak_free: Vec<u32>,
+    pub(crate) weak_of: HashMap<Value, Vec<u32>>,
+    pub(crate) interrupt: Arc<AtomicU8>,
+    pub(crate) external: isize,
+    pub(crate) limits: (usize, usize),
+}
+
+impl Stub {
+    pub fn new() -> Self {
+        Stub {
+            realms: Vec::new(),
+            current: 0,
+            exception: None,
+            live: 0,
+            names: HeldAtoms::new(),
+            microtasks: Default::default(),
+            in_checkpoint: false,
+            notices: Vec::new(),
+            deferred: None,
+            buffer: Vec::new(),
+            buffered: HashSet::new(),
+            collector: Collector::default(),
+            weak: Vec::new(),
+            weak_free: Vec::new(),
+            weak_of: HashMap::new(),
+            interrupt: Arc::new(AtomicU8::new(0)),
+            external: 0,
+            limits: (usize::MAX, usize::MAX),
+        }
+    }
+
+    /// Cells alive, wrappers waiting for their host's notice included.
+    pub fn live_cells(&self) -> usize {
+        self.live
+    }
+
+    /// The count of a cell or a string, for tests.
+    pub fn count_of(&self, v: Value) -> u32 {
+        assert!(v.is_block(), "a counted value");
+        // SAFETY: a block value points at a live block, header first
+        madcawl_abi::refcount(unsafe { *(v.0 as *const u64) })
+    }
+
+    pub(crate) fn alloc(&mut self, realm: u32, body: Body) -> Value {
+        self.live += 1;
+        Cell::alloc(realm, body)
+    }
+
+    pub(crate) fn owned(v: Value) -> Owned<Value> {
+        // SAFETY: called on a value whose count the caller passes on
+        unsafe { Owned::from_raw(v) }
+    }
+
+    pub(crate) fn retain_value(&mut self, v: Value) {
+        if v.is_string() {
+            // SAFETY: a string value is a block pointer with a count
+            let s = ManuallyDrop::new(unsafe { string_at(v) });
+            std::mem::forget(ManuallyDrop::into_inner(s.clone()));
+        } else if v.is_cell() {
+            // SAFETY: a live cell
+            let c = unsafe { Cell::at(v) };
+            c.set_count(c.count() + 1);
+            if let Body::Wrapper { dead, .. } = &mut c.body {
+                *dead = false;
+            }
+        }
+    }
+
+    /// Give up one count on `v`, and everything that frees.
+    pub(crate) fn release_value(&mut self, v: Value) {
+        if let Some(d) = self.deferred.as_mut() {
+            if v.is_block() {
+                d.push(v);
+            }
+            return;
+        }
+        let mut work = vec![v];
+        while let Some(v) = work.pop() {
+            if v.is_string() {
+                // SAFETY: the count being given up
+                drop(unsafe { string_at(v) });
+                continue;
+            }
+            if !v.is_cell() {
+                continue;
+            }
+            // SAFETY: a live cell
+            let c = unsafe { Cell::at(v) };
+            let n = c.count() - 1;
+            c.set_count(n);
+            if n != 0 {
+                self.buffer_vertex(Vertex::Cell(v));
+                continue;
+            }
+            c.take_held(&mut work);
+            self.clear_weak(v);
+            match &mut c.body {
+                Body::Wrapper {
+                    dead,
+                    noticed,
+                    preserved,
+                    ..
+                } => {
+                    // the host gave up the preserved edge, in unlink
+                    *preserved = false;
+                    *dead = true;
+                    if !*noticed {
+                        *noticed = true;
+                        self.notices.push(v);
+                    }
+                }
+                _ => self.free_cell(v),
+            }
+        }
+    }
+
+    pub(crate) fn free_cell(&mut self, v: Value) {
+        self.unbuffer(Vertex::Cell(v));
+        self.clear_weak(v);
+        self.live -= 1;
+        // SAFETY: a cell whose count is 0 and that nothing refers to
+        unsafe { Cell::free(v) };
+    }
+
+    pub(crate) fn buffer_vertex(&mut self, v: Vertex) {
+        if self.buffered.insert(v) {
+            self.buffer.push(v);
+        }
+    }
+
+    pub(crate) fn unbuffer(&mut self, v: Vertex) {
+        self.buffered.remove(&v);
+        self.collector.forget(v);
+    }
+
+    pub(crate) fn clear_weak(&mut self, v: Value) {
+        if let Some(slots) = self.weak_of.remove(&v) {
+            for s in slots {
+                self.weak[s as usize] = None;
+            }
+        }
+    }
+
+    pub(crate) fn key(&self, key: Key<'_>) -> PropKey {
+        match key {
+            Key::Name(a) => {
+                self.names.keep(a);
+                PropKey::Name(a)
+            }
+            Key::Index(i) => PropKey::Index(i),
+            Key::Str(s) => {
+                let mut b = Vec::new();
+                s.write_wtf8(&mut b);
+                match std::str::from_utf8(&b).ok().and_then(|t| t.parse::<u32>().ok()) {
+                    Some(i) if i != u32::MAX && !(b.len() > 1 && b[0] == b'0') => PropKey::Index(i),
+                    _ => PropKey::Name(self.names.hold(&b)),
+                }
+            }
+        }
+    }
+
+    pub(crate) fn realm_data(&mut self, r: u32) -> &mut RealmData {
+        &mut self.realms[r as usize]
+    }
+}
+
+impl Default for Stub {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for Stub {
+    fn drop(&mut self) {
+        for r in 0..self.realms.len() as u32 {
+            crate::props::detach(self, Realm(r));
+        }
+        if let Some(e) = self.exception.take() {
+            self.release_value(e);
+        }
+        while let Some((j, a)) = self.microtasks.pop_front() {
+            self.release_value(j);
+            self.release_value(a);
+        }
+    }
+}
+
+/// # Safety
+/// `v` is a string value, and the string made takes one of its counts.
+pub(crate) unsafe fn string_at(v: Value) -> DomString {
+    // SAFETY: the caller's
+    unsafe { DomString::from_raw(NonNull::new_unchecked(v.0 as *mut u8)) }
+}
+
+/// The name an atom spells, as bytes.
+pub(crate) fn name_bytes(a: Atom) -> Vec<u8> {
+    let mut b = Vec::new();
+    a.write_wtf8(&mut b);
+    b
+}
+

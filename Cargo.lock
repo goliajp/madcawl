@@ -24,6 +24,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "madcawl-js"
+version = "0.0.1"
+dependencies = [
+ "madcawl-str",
+]
+
+[[package]]
+name = "madcawl-js-stub"
+version = "0.0.1"
+dependencies = [
+ "madcawl-abi",
+ "madcawl-js",
+ "madcawl-str",
+]
+
+[[package]]
 name = "madcawl-str"
 version = "0.0.1"
 dependencies = [

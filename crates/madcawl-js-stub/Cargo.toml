@@ -1,0 +1,16 @@
+[package]
+name = "madcawl-js-stub"
+description = "A script engine that runs no script: the engine interface and its cycle collector, for testing bindings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+madcawl-abi = { path = "../madcawl-abi" }
+madcawl-js = { path = "../madcawl-js" }
+madcawl-str = { path = "../madcawl-str" }
