@@ -1,0 +1,22 @@
+[package]
+name = "madcawl-css"
+description = "CSS syntax, selectors and the stylesheet model"
+version.workspace = true
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+madcawl-str = { path = "../madcawl-str" }
+# the encodings a stylesheet's bytes may be in are the ones the HTML
+# decoder already has
+madcawl-html = { path = "../madcawl-html" }
+
+[features]
+# count the tokenizer's work, for the fuzz driver (src/steps.rs)
+steps = []

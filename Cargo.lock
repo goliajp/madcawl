@@ -18,6 +18,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "madcawl-css"
+version = "0.0.1"
+dependencies = [
+ "madcawl-html",
+ "madcawl-str",
+]
+
+[[package]]
 name = "madcawl-dom"
 version = "0.0.1"
 dependencies = [

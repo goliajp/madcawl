@@ -1,0 +1,36 @@
+# files of css-parsing-tests this crate does not run, one per line: the
+# file, then why. every case in a listed file counts as skipped
+#
+# the color files test the <color> value grammar of CSS Color 3, 4 and 5
+# and the serialization of computed colors: property values, which the
+# cascade and computed values parse, not the syntax this crate covers
+color_function_4.json values: <color>
+color_functions_5.json values: <color>
+color_hexadecimal_3.json values: <color>
+color_hexadecimal_4.json values: <color>
+color_hsl_3.json values: <color>
+color_hsl_4.json values: <color>
+color_hwb_4.json values: <color>
+color_keywords_3.json values: <color>
+color_keywords_4.json values: <color>
+color_lab_4.json values: <color>
+color_lch_4.json values: <color>
+color_oklab_4.json values: <color>
+color_oklch_4.json values: <color>
+#
+# cases of stylesheet_bytes.json (numbered from 1) whose bytes are in
+# ISO-8859-2 or ISO-8859-5: the encoding is determined right, but the
+# decoder madcawl-html has decodes every non-ASCII byte of a legacy
+# encoding as U+FFFD until it has the index tables. a listed case that
+# passes fails the test, so this list goes when the tables come
+stylesheet_bytes.json#8 legacy decoding: ISO-8859-2
+stylesheet_bytes.json#9 legacy decoding: ISO-8859-5
+stylesheet_bytes.json#10 legacy decoding: ISO-8859-2
+stylesheet_bytes.json#12 legacy decoding: ISO-8859-5
+stylesheet_bytes.json#21 legacy decoding: ISO-8859-2
+stylesheet_bytes.json#22 legacy decoding: ISO-8859-5
+stylesheet_bytes.json#23 legacy decoding: ISO-8859-2
+stylesheet_bytes.json#24 legacy decoding: ISO-8859-5
+stylesheet_bytes.json#25 legacy decoding: ISO-8859-5
+stylesheet_bytes.json#26 legacy decoding: ISO-8859-2
+stylesheet_bytes.json#27 legacy decoding: ISO-8859-2
