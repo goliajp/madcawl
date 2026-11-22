@@ -1,11 +1,11 @@
-//! The longer tokens: numbers, names and functions, urls, strings and
-//! unicode ranges.
+//! The longer tokens: numbers, names and functions, urls and strings.
+//! `U+...` is not a token of its own: the standard dropped the
+//! unicode-range token, and `<urange>` is read from ordinary tokens
+//! where a descriptor takes one.
 
 use super::{AT_EOF, ESCAPED, INTEGER, Kind, Token, Tokenizer};
 use crate::Span;
-use crate::escape::{
-    EOF, hex_value, is_digit, is_hex, is_newline, is_non_printable, is_whitespace,
-};
+use crate::escape::{EOF, is_digit, is_newline, is_non_printable, is_whitespace};
 
 impl Tokenizer<'_> {
     pub(super) fn numeric(&mut self, start: usize) -> Token {
@@ -208,37 +208,5 @@ impl Tokenizer<'_> {
             flags |= if c == 0 { ESCAPED } else { 0 };
             self.pos += 1;
         }
-    }
-
-    pub(super) fn unicode_range(&mut self, start: usize) -> Token {
-        let mut i = start + 2;
-        let (mut lo, mut hi, mut n) = (0u32, 0u32, 0);
-        while n < 6 && is_hex(self.at(i)) {
-            let d = hex_value(self.s[i]);
-            lo = lo * 16 + d;
-            hi = hi * 16 + d;
-            i += 1;
-            n += 1;
-        }
-        let mut wild = false;
-        while n < 6 && self.at(i) == b'?' as u16 {
-            lo *= 16;
-            hi = hi * 16 + 15;
-            i += 1;
-            n += 1;
-            wild = true;
-        }
-        if !wild && self.at(i) == b'-' as u16 && is_hex(self.at(i + 1)) {
-            i += 1;
-            hi = 0;
-            let mut k = 0;
-            while k < 6 && is_hex(self.at(i)) {
-                hi = hi * 16 + hex_value(self.s[i]);
-                i += 1;
-                k += 1;
-            }
-        }
-        self.pos = i;
-        self.make(Kind::UnicodeRange { start: lo, end: hi }, start, start, 0)
     }
 }

@@ -103,24 +103,43 @@ pub struct Stylesheet {
     rules: Vec<Rule>,
 }
 
-/// Where a list of rules is.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Place {
-    /// The top of the stylesheet: `@import` and `@namespace` may come
-    /// first, CDO and CDC are dropped
-    Top,
-    /// Inside a conditional or layer rule outside any style rule
-    Group,
+/// Where a rule is: how deep in style and group rules, and whether
+/// inside a style rule (where a group rule's block holds declarations
+/// too). Every level parses its block once more, so `depth` stays under
+/// `MAX_NESTING`.
+#[derive(Clone, Copy)]
+struct At {
+    depth: u32,
+    in_style: bool,
 }
+
+const TOP: At = At {
+    depth: 0,
+    in_style: false,
+};
+
+/// How far into a stylesheet the rules that must come first go. A rule
+/// that is dropped does not move it on.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Phase {
+    /// `@charset`, `@layer` statements and `@import` so far
+    Imports,
+    /// and `@namespace`
+    Namespaces,
+    /// Anything else came
+    Body,
+}
+
+/// A source over 4 GiB, past the positions spans can hold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SourceTooLarge;
 
 struct Builder<'a> {
     src: &'a str,
     names: Names,
     default_ns: Option<Name>,
     prefixes: Vec<(Name, Name)>,
-    /// Only `@charset`, `@import`, `@layer` statements and `@namespace`
-    /// so far
-    preamble: bool,
+    phase: Phase,
 }
 
 fn declarations(src: &str, span: Span) -> Vec<Declaration> {
@@ -148,22 +167,20 @@ impl Builder<'_> {
         parse(self.src, prelude, &mut self.names, &cx).ok()
     }
 
-    fn style_rule(
-        &mut self,
-        prelude: Span,
-        block: Span,
-        may_nest: bool,
-        depth: u32,
-    ) -> Option<Rule> {
-        let selectors = self.selectors(prelude, depth > 0)?;
-        if !may_nest || depth >= MAX_NESTING {
+    fn style_rule(&mut self, prelude: Span, block: Span, may_nest: bool, at: At) -> Option<Rule> {
+        let selectors = self.selectors(prelude, at.in_style)?;
+        if !may_nest || at.depth + 1 >= MAX_NESTING {
             return Some(Rule::Style(StyleRule {
                 selectors,
                 body: Body::lazy(block),
                 rules: Vec::new(),
             }));
         }
-        let (decls, rules) = self.style_body(block, depth + 1);
+        let inner = At {
+            depth: at.depth + 1,
+            in_style: true,
+        };
+        let (decls, rules) = self.style_body(block, inner);
         Some(Rule::Style(StyleRule {
             selectors,
             body: Body::parsed(block, decls),
@@ -172,8 +189,8 @@ impl Builder<'_> {
     }
 
     /// The declarations and the nested rules of a style rule's block, or
-    /// of a conditional rule nested in one.
-    fn style_body(&mut self, block: Span, depth: u32) -> (Vec<Declaration>, Vec<Rule>) {
+    /// of a group rule nested in one.
+    fn style_body(&mut self, block: Span, at: At) -> (Vec<Declaration>, Vec<Rule>) {
         let mut p = Parser::new(self.src, block);
         let (mut decls, mut rules, mut after) = (Vec::new(), Vec::new(), Vec::new());
         while let Some(item) = p.next_block_item() {
@@ -190,21 +207,22 @@ impl Builder<'_> {
                 BlockItem::Rule(r) => r,
             };
             let may_nest = p.block_may_nest();
-            if !after.is_empty() {
-                rules.push(Rule::NestedDeclarations(std::mem::take(&mut after).into()));
-            }
             let rule = match rule {
-                ParsedRule::Qualified { prelude, block } if depth < MAX_NESTING => {
-                    self.style_rule(prelude, block, may_nest, depth)
+                ParsedRule::Qualified { prelude, block } => {
+                    self.style_rule(prelude, block, may_nest, at)
                 }
-                ParsedRule::Qualified { .. } => None,
                 ParsedRule::At {
                     name,
                     prelude,
                     block,
-                } => self.at_rule(name, prelude, block, Some(depth)),
+                } => self.at_rule(name, prelude, block, at),
             };
-            rules.extend(rule);
+            if let Some(rule) = rule {
+                if !after.is_empty() {
+                    rules.push(Rule::NestedDeclarations(std::mem::take(&mut after).into()));
+                }
+                rules.push(rule);
+            }
         }
         if !after.is_empty() {
             rules.push(Rule::NestedDeclarations(after.into()));
@@ -212,71 +230,68 @@ impl Builder<'_> {
         (decls, rules)
     }
 
-    /// The rules of a block of a conditional or layer rule: a rule list,
-    /// or, nested in a style rule (`depth`), a style rule's body whose
-    /// leading declarations become the first rule.
-    fn group(&mut self, block: Span, depth: Option<u32>) -> Vec<Rule> {
-        match depth {
-            Some(d) if d < MAX_NESTING => {
-                let (decls, mut rules) = self.style_body(block, d + 1);
-                if !decls.is_empty() {
-                    rules.insert(0, Rule::NestedDeclarations(decls.into()));
-                }
-                rules
-            }
-            Some(_) => Vec::new(),
-            None => self.rules(block, Place::Group),
+    /// The rules of a group rule's block (`@media`, `@supports`,
+    /// `@layer`): a rule list, or in a style rule a style rule's body
+    /// whose leading declarations become the first rule. `None` past
+    /// the nesting limit, and the rule is dropped.
+    fn group(&mut self, block: Span, at: At) -> Option<Vec<Rule>> {
+        if at.depth + 1 >= MAX_NESTING {
+            return None;
         }
+        let inner = At {
+            depth: at.depth + 1,
+            ..at
+        };
+        if !at.in_style {
+            return Some(self.rules(block, false, inner));
+        }
+        let (decls, mut rules) = self.style_body(block, inner);
+        if !decls.is_empty() {
+            rules.insert(0, Rule::NestedDeclarations(decls.into()));
+        }
+        Some(rules)
     }
 
-    fn at_rule(
-        &mut self,
-        name: Token,
-        prelude: Span,
-        block: Option<Span>,
-        depth: Option<u32>,
-    ) -> Option<Rule> {
+    fn at_rule(&mut self, name: Token, prelude: Span, block: Option<Span>, at: At) -> Option<Rule> {
         let src = self.src;
         let is = |n: &str| name.value_is(src, n);
-        let preamble = std::mem::replace(&mut self.preamble, false);
+        let top = at.depth == 0;
         let rule = match block {
             Some(b) if is("media") => Rule::Media {
                 query: prelude,
-                rules: self.group(b, depth),
+                rules: self.group(b, at)?,
             },
             Some(b) if is("supports") => Rule::Supports {
                 condition: prelude,
-                rules: self.group(b, depth),
+                rules: self.group(b, at)?,
             },
             Some(b) if is("layer") => Rule::Layer {
                 names: prelude,
-                rules: Some(self.group(b, depth)),
+                rules: Some(self.group(b, at)?),
             },
             None if is("layer") => {
-                self.preamble = preamble;
-                Rule::Layer {
+                return Some(Rule::Layer {
                     names: prelude,
                     rules: None,
+                });
+            }
+            None if is("import") => {
+                return (top && self.phase == Phase::Imports).then_some(Rule::Import { prelude });
+            }
+            None if is("namespace") => {
+                if !top || self.phase > Phase::Namespaces {
+                    return None;
                 }
+                let rule = self.namespace(prelude)?;
+                self.phase = Phase::Namespaces;
+                return Some(rule);
             }
-            None if is("import") && preamble && depth.is_none() => {
-                self.preamble = true;
-                Rule::Import { prelude }
-            }
-            None if is("namespace") && preamble && depth.is_none() => {
-                self.preamble = true;
-                return self.namespace(prelude);
-            }
-            None if is("charset") && depth.is_none() => {
-                self.preamble = preamble;
-                return None;
-            }
-            Some(b) if is("font-face") && depth.is_none() => Rule::FontFace(Body::lazy(b)),
-            Some(b) if is("page") && depth.is_none() => Rule::Page {
+            Some(b) if is("font-face") && !at.in_style => Rule::FontFace(Body::lazy(b)),
+            Some(b) if is("page") && !at.in_style => Rule::Page {
                 selector: prelude,
                 body: Body::lazy(b),
             },
-            Some(b) if (is("keyframes") || is("-webkit-keyframes")) && depth.is_none() => {
+            Some(b) if (is("keyframes") || is("-webkit-keyframes")) && !at.in_style => {
                 Rule::Keyframes {
                     name: prelude,
                     block: b,
@@ -284,6 +299,9 @@ impl Builder<'_> {
             }
             _ => return None,
         };
+        if top {
+            self.phase = Phase::Body;
+        }
         Some(rule)
     }
 
@@ -327,21 +345,26 @@ impl Builder<'_> {
         Some(Rule::Namespace { prefix, url })
     }
 
-    fn rules(&mut self, span: Span, place: Place) -> Vec<Rule> {
+    /// A list of rules: the stylesheet's (`top_level`, where CDO and
+    /// CDC are dropped) or a group rule's outside any style rule.
+    fn rules(&mut self, span: Span, top_level: bool, at: At) -> Vec<Rule> {
         let mut p = Parser::new(self.src, span);
         let mut out = Vec::new();
-        while let Some(item) = p.next_rule(place == Place::Top) {
+        while let Some(item) = p.next_rule(top_level) {
             let rule = match item {
                 BlockItem::Rule(ParsedRule::Qualified { prelude, block }) => {
-                    self.preamble = false;
                     let may_nest = p.block_may_nest();
-                    self.style_rule(prelude, block, may_nest, 0)
+                    let rule = self.style_rule(prelude, block, may_nest, at);
+                    if rule.is_some() && at.depth == 0 {
+                        self.phase = Phase::Body;
+                    }
+                    rule
                 }
                 BlockItem::Rule(ParsedRule::At {
                     name,
                     prelude,
                     block,
-                }) => self.at_rule(name, prelude, block, None),
+                }) => self.at_rule(name, prelude, block, at),
                 _ => None,
             };
             out.extend(rule);
@@ -353,22 +376,25 @@ impl Builder<'_> {
 impl Stylesheet {
     /// Parse a stylesheet's text. Touches no state outside the sheet, so
     /// any thread may run it.
-    pub fn parse(source: String) -> Stylesheet {
+    pub fn parse(source: String) -> Result<Stylesheet, SourceTooLarge> {
+        if source.len() > u32::MAX as usize {
+            return Err(SourceTooLarge);
+        }
         let source = source.into_boxed_str();
         let mut b = Builder {
             src: &source,
             names: Names::new(),
             default_ns: None,
             prefixes: Vec::new(),
-            preamble: true,
+            phase: Phase::Imports,
         };
-        let rules = b.rules(Span::new(0, source.len()), Place::Top);
+        let rules = b.rules(Span::new(0, source.len()), true, TOP);
         let names = b.names;
-        Stylesheet {
+        Ok(Stylesheet {
             source,
             names,
             rules,
-        }
+        })
     }
 
     pub fn source(&self) -> &str {

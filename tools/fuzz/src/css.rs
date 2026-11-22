@@ -3,8 +3,10 @@
 //! out flattened to bytes, and the tokenizer's work.
 //!
 //! The tokenizer: fed whole, every token of the input, and the input
-//! parsed as a `Stylesheet` with every declaration block asked for (no
-//! panic, work bounded); fed in chunks,
+//! parsed as a `Stylesheet`, each style rule's declarations (asked for,
+//! or parsed with the sheet when the block held nested rules, then
+//! those after a nested rule) checked against the declarations of its
+//! block parsed on its own; fed in chunks,
 //! the input is cut at a seeded choice of the boundaries the rule
 //! parser reports (preludes, blocks, declaration values, down to
 //! `MAX_DEPTH` nested blocks) and each piece tokenized on its own. The
@@ -18,8 +20,8 @@
 
 use madcawl_css::selector::{Context, parse_selector_list};
 use madcawl_css::{
-    BlockItem, Kind, Names, ParsedRule, Parser, Rule, Span, Stylesheet, Token, Tokenizer,
-    decode_stylesheet, steps,
+    BlockItem, Declaration, Kind, Names, ParsedRule, Parser, Rule, Span, Stylesheet, Token,
+    Tokenizer, decode_stylesheet, parse_block_contents, steps,
 };
 
 use crate::targets::Out;
@@ -42,7 +44,7 @@ fn put_token(t: &Token, src: &str, out: &mut Vec<u8>) {
             out.extend_from_slice(t.value.of(src).as_bytes());
             out.extend_from_slice(&t.number(src).to_bits().to_le_bytes());
         }
-        Kind::Whitespace | Kind::Delim(_) | Kind::UnicodeRange { .. } => {}
+        Kind::Whitespace | Kind::Delim(_) => {}
         _ => {
             for c in t.chars(src) {
                 let mut b = [0; 4];
@@ -111,19 +113,38 @@ fn walk(src: &str, rules: &mut Vec<Span>, cuts: &mut Vec<u32>) {
     }
 }
 
-/// Ask for every declaration block of the sheet.
-fn force(sheet: &Stylesheet, rules: &[Rule]) {
+/// Every style rule's declarations as the sheet has them: those its
+/// body gives, then those of each `NestedDeclarations` among its rules,
+/// must be the declarations of its block parsed on its own, in order.
+fn check(sheet: &Stylesheet, rules: &[Rule]) {
     for r in rules {
         match r {
             Rule::Style(s) => {
-                sheet.declarations(&s.body);
-                force(sheet, &s.rules);
+                let mut got: Vec<Declaration> = sheet.declarations(&s.body).to_vec();
+                for n in &s.rules {
+                    if let Rule::NestedDeclarations(d) = n {
+                        got.extend_from_slice(d);
+                    }
+                }
+                let want: Vec<Declaration> = parse_block_contents(sheet.source(), s.body.span)
+                    .into_iter()
+                    .filter_map(|i| match i {
+                        BlockItem::Declaration(d) => Some(d),
+                        _ => None,
+                    })
+                    .collect();
+                assert!(
+                    got == want,
+                    "declarations of the block at {:?}",
+                    s.body.span
+                );
+                check(sheet, &s.rules);
             }
             Rule::FontFace(b) | Rule::Page { body: b, .. } => {
                 sheet.declarations(b);
             }
-            Rule::Media { rules, .. } | Rule::Supports { rules, .. } => force(sheet, rules),
-            Rule::Layer { rules: Some(r), .. } => force(sheet, r),
+            Rule::Media { rules, .. } | Rule::Supports { rules, .. } => check(sheet, rules),
+            Rule::Layer { rules: Some(r), .. } => check(sheet, r),
             _ => {}
         }
     }
@@ -152,10 +173,8 @@ pub fn tokenizer(input: &[u8], feed: Feed) -> Out {
         }
         _ => {
             tokens(src, Span::new(0, src.len()), &mut flat);
-            let sheet = Stylesheet::parse(src.clone());
-            force(&sheet, sheet.rules());
-            let (all, parsed) = sheet.bodies();
-            assert_eq!(all, parsed, "a declaration block left unparsed");
+            let sheet = Stylesheet::parse(src.clone()).expect("under 4 GiB");
+            check(&sheet, sheet.rules());
         }
     }
     Out {

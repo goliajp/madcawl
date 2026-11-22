@@ -275,7 +275,9 @@ impl<'a> Parser<'a> {
             Some((_, bang, _)) if important => bang,
             _ => end,
         };
-        let custom = name.value.of(self.src).starts_with("--");
+        // the name as it decodes: `\2d-x` is a custom property too
+        let mut chars = name.chars(self.src);
+        let custom = chars.next() == Some('-') && chars.next() == Some('-');
         if until == Until::Nested && !custom && block && other {
             return None;
         }

@@ -21,10 +21,6 @@ pub enum Kind {
     Number,
     Percentage,
     Dimension,
-    UnicodeRange {
-        start: u32,
-        end: u32,
-    },
     Whitespace,
     Cdo,
     Cdc,

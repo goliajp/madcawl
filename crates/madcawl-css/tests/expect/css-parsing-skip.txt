@@ -17,3 +17,17 @@ stylesheet_bytes.json#24 legacy decoding: ISO-8859-5
 stylesheet_bytes.json#25 legacy decoding: ISO-8859-5
 stylesheet_bytes.json#26 legacy decoding: ISO-8859-2
 stylesheet_bytes.json#27 legacy decoding: ISO-8859-2
+#
+# cases of component_value_list.json that expect a unicode-range token:
+# the current CSS Syntax 3 no longer has one (`u+1` is an identifier and
+# a number), and `<urange>` is read from those tokens where a descriptor
+# takes one. these stay skipped while the vendored revision expects it
+component_value_list.json#39 unicode-range token, removed from the standard
+component_value_list.json#40 unicode-range token, removed from the standard
+component_value_list.json#41 unicode-range token, removed from the standard
+component_value_list.json#42 unicode-range token, removed from the standard
+component_value_list.json#43 unicode-range token, removed from the standard
+component_value_list.json#44 unicode-range token, removed from the standard
+component_value_list.json#45 unicode-range token, removed from the standard
+component_value_list.json#46 unicode-range token, removed from the standard
+component_value_list.json#47 unicode-range token, removed from the standard

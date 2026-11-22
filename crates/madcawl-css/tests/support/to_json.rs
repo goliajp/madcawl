@@ -55,11 +55,6 @@ fn token(t: &Token, src: &str, out: &mut Vec<Json>) {
             v.push(s(&t.unit_chars(src).collect::<String>()));
             arr(v)
         }
-        Kind::UnicodeRange { start, end } => arr(vec![
-            s("unicode-range"),
-            Json::Num(start as f64),
-            Json::Num(end as f64),
-        ]),
         Kind::Whitespace => s(" "),
         Kind::Cdo => s("<!--"),
         Kind::Cdc => s("-->"),

@@ -64,6 +64,7 @@ fn serializes_what_it_parsed() {
         (".a\\:b", ".a\\:b"),
         ("#-\\-x", "#--x"),
         ("a, b , c", "a, b, c"),
+        ("u+a", "u + a"),
     ] {
         assert_eq!(css(src), want, "{src:?}");
         assert_eq!(css(&css(src)), css(src), "{src:?} again");

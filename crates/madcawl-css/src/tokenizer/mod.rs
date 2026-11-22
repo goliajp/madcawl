@@ -212,12 +212,6 @@ impl<'a> Tokenizer<'a> {
             }
             0x5C if self.valid_escape(start) => return self.ident_like(start),
             0x30..=0x39 => return self.numeric(start),
-            0x55 | 0x75
-                if self.at(start + 1) == b'+' as u16
-                    && (is_hex(self.at(start + 2)) || self.at(start + 2) == b'?' as u16) =>
-            {
-                return self.unicode_range(start);
-            }
             0x7E | 0x7C | 0x5E | 0x24 | 0x2A if self.at(start + 1) == b'=' as u16 => {
                 let k = match c as u8 {
                     b'~' => Kind::IncludeMatch,

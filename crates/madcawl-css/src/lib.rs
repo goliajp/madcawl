@@ -41,10 +41,10 @@ pub use parser::{
     BlockItem, Declaration, ParsedRule, Parser, SyntaxError, parse_block_contents,
     parse_declaration, parse_declaration_list, parse_rule, parse_rule_list,
 };
-pub use sheet::{Body, MAX_NESTING, Rule, StyleRule, Stylesheet};
+pub use sheet::{Body, MAX_NESTING, Rule, SourceTooLarge, StyleRule, Stylesheet};
 pub use tokenizer::{AT_EOF, ESCAPED, INTEGER, Kind, Token, Tokenizer};
 pub use tree::{ComponentValue, parse_component_value, parse_component_value_list};
-pub use worker::{Parsed, Source, Worker};
+pub use worker::{Parsed, Refused, Source, Worker};
 
 /// A byte range of a stylesheet's source.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]

@@ -18,6 +18,22 @@ pub enum ComponentValue {
     },
 }
 
+/// Dropping takes the nested blocks apart with a stack of its own, so a
+/// value nested as deep as its input allows does not recurse.
+impl Drop for ComponentValue {
+    fn drop(&mut self) {
+        let ComponentValue::Block { contents, .. } = self else {
+            return;
+        };
+        let mut stack = std::mem::take(contents);
+        while let Some(mut v) = stack.pop() {
+            if let ComponentValue::Block { contents, .. } = &mut v {
+                stack.append(contents);
+            }
+        }
+    }
+}
+
 /// Consume component values; after the first one when `one`.
 fn consume(tok: &mut Tokenizer<'_>, one: bool) -> Vec<ComponentValue> {
     let mut stack: Vec<(Token, Kind, Vec<ComponentValue>)> = Vec::new();
