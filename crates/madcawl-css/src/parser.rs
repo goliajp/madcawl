@@ -237,9 +237,17 @@ impl<'a> Parser<'a> {
         let name = self.next_token();
         self.skip_whitespace();
         if self.peek().kind != Kind::Colon {
-            self.skip_until(until);
+            // in a block the caller goes back and reads a rule from the
+            // same place: skipping to the `;` or `}` here would read the
+            // rest of the block once per nested rule
+            if until != Until::Nested {
+                self.skip_until(until);
+            }
             return None;
         }
+        // the name as it decodes: `\2d-x` is a custom property too
+        let mut chars = name.chars(self.src);
+        let custom = chars.next() == Some('-') && chars.next() == Some('-');
         let colon = self.next_token();
         let start = colon.span.end as usize;
         // the last two non-whitespace component values: (kind, start, is `important`)
@@ -259,6 +267,12 @@ impl<'a> Parser<'a> {
                     self.skip_block(k);
                     block |= k == Kind::OpenCurly;
                     other |= k != Kind::OpenCurly;
+                    // a value with a `{}` block and anything else is a
+                    // nested rule, not a declaration, whatever follows:
+                    // stop here rather than read to the end of the block
+                    if until == Until::Nested && !custom && block && other {
+                        return None;
+                    }
                     let important = k == Kind::Ident && t.value_is(self.src, "important");
                     last = [last[1], Some((k, t.span.start, important))];
                 }
@@ -275,12 +289,6 @@ impl<'a> Parser<'a> {
             Some((_, bang, _)) if important => bang,
             _ => end,
         };
-        // the name as it decodes: `\2d-x` is a custom property too
-        let mut chars = name.chars(self.src);
-        let custom = chars.next() == Some('-') && chars.next() == Some('-');
-        if until == Until::Nested && !custom && block && other {
-            return None;
-        }
         Some(Declaration {
             name,
             value: Span::new(start, end as usize),
