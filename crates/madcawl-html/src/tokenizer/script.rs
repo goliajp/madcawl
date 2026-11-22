@@ -3,9 +3,9 @@
 
 use super::{Go, NUL, REPLACEMENT, Sink, State, Tokenizer, getc, is_alpha, is_space, lower};
 use crate::error::ParseError;
-use crate::input::{EOF, stops};
+use crate::input::{EOF, Stops, stops};
 
-static ESCAPED_STOPS: [bool; 128] = stops(b"-<");
+static ESCAPED_STOPS: Stops = stops(b"-<");
 
 impl Tokenizer {
     pub(super) fn script_data_less_than<S: Sink>(&mut self, sink: &mut S) -> Go {

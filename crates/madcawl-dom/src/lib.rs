@@ -35,6 +35,7 @@ mod reclaim;
 mod select;
 mod select_cache;
 mod serialize;
+mod short;
 mod sink;
 mod sys;
 mod text;

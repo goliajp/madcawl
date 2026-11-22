@@ -114,23 +114,49 @@ impl Input {
     /// the first ASCII byte marked in `stop`, a problem code point, or
     /// the end of what has arrived. Returns the byte range read.
     #[inline]
-    pub(crate) fn run(&mut self, stop: &[bool; 128]) -> (usize, usize) {
+    pub(crate) fn run(&mut self, stop: &Stops) -> (usize, usize) {
         let start = self.pos;
         let buf = &self.buf;
         let mut i = start;
-        while i < buf.len() {
-            let b = buf[i];
-            if b < 0x80 {
-                if stop[b as usize] {
-                    break;
-                }
+        loop {
+            while let Some(w) = buf.get(i..i + 4)
+                && !(stop[w[0] as usize]
+                    | stop[w[1] as usize]
+                    | stop[w[2] as usize]
+                    | stop[w[3] as usize])
+            {
+                i += 4;
+            }
+            let Some(&b) = buf.get(i) else { break };
+            if !stop[b as usize] {
                 i += 1;
                 continue;
             }
-            match decode(&buf[i..], false) {
-                Some((c, n)) if problem(c).is_none() && c != REPLACEMENT_FOR_INVALID => i += n,
-                _ => break,
+            if b < 0x80 {
+                break;
             }
+            let rest = &buf[i..];
+            let cont = |k: usize| rest.get(k).is_some_and(|&t| t & 0xC0 == 0x80);
+            // sequences that can be neither a problem nor broken: no C1
+            // controls, surrogates or noncharacters start this way
+            i += match b {
+                0xC3..=0xDF if cont(1) => 2,
+                0xE1..=0xEC | 0xEE if cont(1) && cont(2) => {
+                    let mut k = 3;
+                    while let Some(w) = rest.get(k..k + 3)
+                        && matches!(w[0], 0xE1..=0xEC | 0xEE)
+                        && w[1] & 0xC0 == 0x80
+                        && w[2] & 0xC0 == 0x80
+                    {
+                        k += 3;
+                    }
+                    k
+                }
+                _ => match decode(rest, false) {
+                    Some((c, n)) if problem(c).is_none() && c != REPLACEMENT_FOR_INVALID => n,
+                    _ => break,
+                },
+            };
         }
         step!(i - start + 1);
         if i > start {
@@ -265,13 +291,17 @@ fn problem(c: u32) -> Option<ParseError> {
     }
 }
 
+/// A stop table for `run`: a byte marked stops the run. Every byte past
+/// ASCII is marked, so that a code point that is not ASCII is looked at.
+pub(crate) type Stops = [bool; 256];
+
 /// Stop tables for `run`: the ASCII a text state treats specially,
 /// plus CR and the controls the input stream reports.
-pub(crate) const fn stops(extra: &[u8]) -> [bool; 128] {
-    let mut t = [false; 128];
+pub(crate) const fn stops(extra: &[u8]) -> Stops {
+    let mut t = [false; 256];
     let mut c = 0;
-    while c < 128 {
-        t[c] = matches!(c, 0x00..=0x08 | 0x0B | 0x0D..=0x1F | 0x7F);
+    while c < 256 {
+        t[c] = matches!(c, 0x00..=0x08 | 0x0B | 0x0D..=0x1F | 0x7F..);
         c += 1;
     }
     let mut i = 0;

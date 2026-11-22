@@ -26,7 +26,6 @@ pub use atom::{Atom, HeldAtoms, NameHash, STATIC_ATOMS};
 pub use static_str::StaticStr;
 
 use block::{Block, View};
-use wtf8::Wtf8Chars;
 
 /// `repr(transparent)`: a `DomString` is the bits of its block pointer,
 /// so a word that holds such a pointer can be read as one.
@@ -84,36 +83,68 @@ impl DomString {
         if s.is_ascii() {
             return Self::latin1(s, true);
         }
-        let mut units = 0usize;
-        let mut latin1 = true;
-        for c in Wtf8Chars(s) {
-            units += if c > 0xFFFF { 2 } else { 1 };
-            latin1 &= c < 0x100;
+        // one code unit per byte that starts a code point, two for a
+        // four-byte one; Latin-1 when no lead byte is past 0xC3
+        let mut continuations = 0usize;
+        let mut fours = 0usize;
+        let mut max = 0u8;
+        for &b in s {
+            continuations += usize::from(b & 0xC0 == 0x80);
+            fours += usize::from(b >= 0xF0);
+            max = max.max(b);
         }
-        if latin1 {
+        let units = s.len() - continuations + fours;
+        if max < 0xC4 {
             let mut out = Self::alloc(units, abi::STR_FLAG_IS_LATIN1);
             let dst = out.payload_mut();
-            for (d, c) in dst.iter_mut().zip(Wtf8Chars(s)) {
-                *d = c as u8;
+            let (mut i, mut j) = (0, 0);
+            while i < s.len() {
+                let b = s[i];
+                if b < 0x80 {
+                    dst[j] = b;
+                    i += 1;
+                } else {
+                    dst[j] = (b << 6) | (s[i + 1] & 0x3F);
+                    i += 2;
+                }
+                j += 1;
             }
+            assert_eq!(j, units, "well-formed WTF-8");
             return out;
         }
         let mut out = Self::alloc(units, 0);
-        let dst = out.payload_mut();
-        let mut i = 0;
-        for c in Wtf8Chars(s) {
-            let mut put = |u: u16| {
-                dst[i..i + 2].copy_from_slice(&u.to_ne_bytes());
+        let dst = out.payload_mut().as_chunks_mut::<2>().0;
+        let (mut i, mut j) = (0, 0);
+        while i < s.len() {
+            let b = s[i];
+            let c = if b < 0x80 {
+                i += 1;
+                u32::from(b)
+            } else if b < 0xE0 {
+                let c = (u32::from(b & 0x1F) << 6) | u32::from(s[i + 1] & 0x3F);
                 i += 2;
-            };
-            if c > 0xFFFF {
-                let c = c - 0x1_0000;
-                put(0xD800 | (c >> 10) as u16);
-                put(0xDC00 | (c & 0x3FF) as u16);
+                c
+            } else if b < 0xF0 {
+                let c = (u32::from(b & 0x0F) << 12)
+                    | (u32::from(s[i + 1] & 0x3F) << 6)
+                    | u32::from(s[i + 2] & 0x3F);
+                i += 3;
+                c
             } else {
-                put(c as u16);
-            }
+                let c = (u32::from(b & 0x07) << 18)
+                    | (u32::from(s[i + 1] & 0x3F) << 12)
+                    | (u32::from(s[i + 2] & 0x3F) << 6)
+                    | u32::from(s[i + 3] & 0x3F);
+                i += 4;
+                let c = c - 0x1_0000;
+                dst[j] = (0xD800 | (c >> 10) as u16).to_ne_bytes();
+                j += 1;
+                0xDC00 | (c & 0x3FF)
+            };
+            dst[j] = (c as u16).to_ne_bytes();
+            j += 1;
         }
+        assert_eq!(j, units, "well-formed WTF-8");
         out
     }
 

@@ -196,6 +196,19 @@ fn longest_match(rest: &[u8], done: bool) -> Option<(Option<Entity>, Option<u8>)
     let (mut lo, mut hi) = (0, NAMES.len());
     let mut best = None;
     let mut i = 0;
+    if let Some(&b) = rest.first()
+        && b < 0x80
+    {
+        let (a, z) = BY_FIRST[b as usize];
+        if a == z {
+            return Some((None, None));
+        }
+        (lo, hi) = (a as usize, z as usize);
+        i = 1;
+        if NAMES[lo].len() == 1 {
+            best = Some((lo, 1));
+        }
+    }
     loop {
         let Some(&b) = rest.get(i) else {
             // every name still in range is longer than what has arrived
@@ -219,6 +232,21 @@ fn longest_match(rest: &[u8], done: bool) -> Option<(Option<Entity>, Option<u8>)
     let next = best.and_then(|(_, len)| rest.get(len).copied());
     Some((best, next))
 }
+
+/// The range of `NAMES` that starts with each ASCII byte.
+static BY_FIRST: [(u16, u16); 128] = {
+    let mut out = [(0, 0); 128];
+    let mut i = 0;
+    while i < NAMES.len() {
+        let b = NAMES[i][0] as usize;
+        if out[b].0 == out[b].1 {
+            out[b].0 = i as u16;
+        }
+        out[b].1 = i as u16 + 1;
+        i += 1;
+    }
+    out
+};
 
 /// What a numeric reference to U+0080..U+009F means: what windows-1252
 /// puts there. Zero where it has nothing.

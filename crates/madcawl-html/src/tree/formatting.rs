@@ -13,15 +13,25 @@ fn same_attrs(a: &[Attribute], b: &[Attribute]) -> bool {
             .all(|x| b.iter().any(|y| y.name == x.name && y.value == x.value))
 }
 
-fn copy_attrs(to: &mut Vec<Attribute>, from: &[Attribute]) {
-    to.truncate(from.len());
+/// Make `to` a copy of `from`, taking attributes from `pool` and giving
+/// the ones left over back to it, so their buffers are used again.
+fn copy_attrs(to: &mut Vec<Attribute>, from: &[Attribute], pool: &mut Vec<Attribute>) {
+    while to.len() > from.len() {
+        pool.push(to.pop().expect("longer than from"));
+    }
     let n = to.len();
     for (d, s) in to.iter_mut().zip(from) {
         d.name.clone_from(&s.name);
         d.atom = s.atom;
         d.value.clone_from(&s.value);
     }
-    to.extend_from_slice(&from[n..]);
+    for s in &from[n..] {
+        let mut a = pool.pop().unwrap_or_default();
+        a.name.clone_from(&s.name);
+        a.atom = s.atom;
+        a.value.clone_from(&s.value);
+        to.push(a);
+    }
 }
 
 impl<S: TreeSink> TreeBuilder<S> {
@@ -67,7 +77,7 @@ impl<S: TreeSink> TreeBuilder<S> {
             self.remove_active(i);
         }
         let mut v = self.spare_attrs.pop().unwrap_or_default();
-        copy_attrs(&mut v, attrs);
+        copy_attrs(&mut v, attrs, &mut self.spare_attr);
         self.active.push(Active::Element {
             node,
             tag,

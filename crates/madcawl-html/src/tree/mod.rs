@@ -55,6 +55,8 @@ pub struct TreeBuilder<S: TreeSink> {
     /// Attribute lists of formatting entries that are gone, kept for
     /// their allocations.
     spare_attrs: Vec<Vec<Attribute>>,
+    /// Attributes those lists gave back, kept for their buffers.
+    spare_attr: Vec<Attribute>,
     head: Option<S::Handle>,
     form: Option<S::Handle>,
     /// The fragment context element; its node is the root, never used.
@@ -89,6 +91,7 @@ impl<S: TreeSink> TreeBuilder<S> {
             open: stack::OpenStack::new(),
             active: Vec::new(),
             spare_attrs: Vec::new(),
+            spare_attr: Vec::new(),
             head: None,
             form: None,
             context: None,
@@ -240,6 +243,24 @@ impl<S: TreeSink> TreeBuilder<S> {
             if s.first() == Some(&b'\n') {
                 s = &s[1..];
             }
+        }
+        if s.is_empty() {
+            return;
+        }
+        // in these modes a run without NUL is handled the same split
+        // into whitespace and the rest or not: as one piece
+        let html = self
+            .adjusted_current()
+            .is_some_and(|n| n.ns == Namespace::Html);
+        if html && matches!(self.mode, Mode::InBody | Mode::Text) && !s.contains(&0) {
+            if self.mode == Mode::InBody {
+                self.reconstruct_active();
+                if !s.iter().all(|&b| class_of(b) == Class::Space) {
+                    self.frameset_ok = false;
+                }
+            }
+            self.insert_chars(s);
+            return;
         }
         while let Some(&first) = s.first() {
             let class = class_of(first);

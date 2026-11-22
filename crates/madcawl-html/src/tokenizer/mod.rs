@@ -327,9 +327,11 @@ impl Tokenizer {
             }
             sink.token(Token::EndTag(&self.tag))
         } else {
-            self.last_start_tag.clear();
-            self.last_start_tag.extend_from_slice(&self.tag.name);
-            sink.token(Token::StartTag(&self.tag))
+            let flow = sink.token(Token::StartTag(&self.tag));
+            // the next tag starts by clearing the name, so the buffers
+            // trade places instead of the name being copied
+            std::mem::swap(&mut self.last_start_tag, &mut self.tag.name);
+            flow
         };
         match flow {
             Flow::Continue => Go::On,

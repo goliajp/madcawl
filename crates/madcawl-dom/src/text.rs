@@ -84,7 +84,7 @@ impl Dom {
     /// A string for new text, shared when it is short whitespace.
     fn text_string(&mut self, s: &[u8]) -> DomString {
         if s.len() > SPACES_LEN || !s.iter().all(|&b| is_space(b)) {
-            return DomString::from_wtf8(s);
+            return self.short.get(s);
         }
         if let Some(x) = self.spaces.iter().find(|x| x.as_latin1() == Some(s)) {
             return x.clone();

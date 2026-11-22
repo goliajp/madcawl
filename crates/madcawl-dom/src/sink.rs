@@ -73,7 +73,7 @@ impl Dom {
             let (s, k) = self.classes.intern(v, &self.atoms);
             (s, Some(k))
         } else {
-            (DomString::from_wtf8(v), None)
+            (self.short.get(v), None)
         };
         let id = (plain && a.local == atom!("id") && !v.is_empty()).then(|| self.atoms.hold(v));
         let mut b = self.n(el).attrs;

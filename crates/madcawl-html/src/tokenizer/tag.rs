@@ -2,10 +2,10 @@
 
 use super::{Go, NUL, REPLACEMENT, Sink, State, Tokenizer, getc, is_alpha, is_space, lower};
 use crate::error::ParseError;
-use crate::input::{EOF, push_char, stops};
+use crate::input::{EOF, Stops, push_char, stops};
 
 /// Bytes a tag or attribute name state does more with than append.
-static NAME_STOPS: [bool; 128] = {
+static NAME_STOPS: Stops = {
     let mut t = stops(b"\t\n\x0c />=\"'<");
     let mut c = b'A';
     while c <= b'Z' {
@@ -14,9 +14,9 @@ static NAME_STOPS: [bool; 128] = {
     }
     t
 };
-static DOUBLE_QUOTED_STOPS: [bool; 128] = stops(b"\"&");
-static SINGLE_QUOTED_STOPS: [bool; 128] = stops(b"'&");
-static UNQUOTED_STOPS: [bool; 128] = stops(b"\t\n\x0c >&\"'<=`");
+static DOUBLE_QUOTED_STOPS: Stops = stops(b"\"&");
+static SINGLE_QUOTED_STOPS: Stops = stops(b"'&");
+static UNQUOTED_STOPS: Stops = stops(b"\t\n\x0c >&\"'<=`");
 
 impl Tokenizer {
     pub(super) fn tag_open<S: Sink>(&mut self, sink: &mut S) -> Go {
@@ -222,7 +222,7 @@ impl Tokenizer {
         }
     }
 
-    fn value_run(&mut self, stops: &[bool; 128]) {
+    fn value_run(&mut self, stops: &Stops) {
         let (a, b) = self.input.run(stops);
         if b > a {
             let bytes = self.input.bytes(a, b);

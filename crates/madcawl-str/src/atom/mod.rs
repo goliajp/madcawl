@@ -10,11 +10,12 @@
 #[rustfmt::skip]
 mod generated;
 mod hash;
+mod held;
 mod statics;
 mod table;
 
 pub use hash::NameHash;
-pub use table::HeldAtoms;
+pub use held::HeldAtoms;
 
 use crate::{DomString, StaticStr};
 

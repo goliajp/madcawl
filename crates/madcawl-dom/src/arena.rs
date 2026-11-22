@@ -3,6 +3,7 @@
 //! arena of an address is found by a mask.
 
 use std::ptr::NonNull;
+use std::sync::{Mutex, PoisonError};
 
 use crate::node::Node;
 use crate::sys;
@@ -13,6 +14,16 @@ const SLOT_SHIFT: u32 = 6;
 pub(crate) const RESERVED: usize = SLOTS << SLOT_SHIFT;
 /// Slots in a 16 KiB page, the unit memory is given back in.
 pub(crate) const PAGE_SLOTS: usize = 256;
+
+/// Reservations of dropped arenas, their memory given back, kept with
+/// their zeroed page counts for the next arena: mapping and unmapping
+/// 1 GiB of address space costs more than parsing a small page.
+static SPARE: Mutex<Vec<(usize, Box<[u16]>)>> = Mutex::new(Vec::new());
+const SPARE_MAX: usize = 2;
+/// The first bytes of a spare reservation keep their memory: giving it
+/// back and faulting it in again costs a small page more than parsing
+/// it. At most `SPARE_MAX` times this stays resident while unused.
+const SPARE_KEEP: usize = 2 << 20;
 
 pub(crate) struct Arena {
     base: NonNull<Node>,
@@ -29,12 +40,19 @@ pub(crate) struct Arena {
 
 impl Arena {
     pub(crate) fn new() -> Self {
-        let p = sys::reserve_aligned(RESERVED);
+        let spare = SPARE.lock().unwrap_or_else(PoisonError::into_inner).pop();
+        let (p, live) = spare.map_or_else(
+            || {
+                let live = vec![0; SLOTS / PAGE_SLOTS].into_boxed_slice();
+                (sys::reserve_aligned(RESERVED), live)
+            },
+            |(p, live)| (p as *mut u8, live),
+        );
         Arena {
             base: NonNull::new(p.cast()).expect("mmap gives a nonnull mapping"),
             next: 1,
             free: Vec::new(),
-            live: vec![0; SLOTS / PAGE_SLOTS].into_boxed_slice(),
+            live,
             count: 0,
             group: (sys::page_size() / (PAGE_SLOTS << SLOT_SHIFT)).max(1),
         }
@@ -119,8 +137,8 @@ impl Arena {
     }
 
     pub(crate) fn get(&self, i: u32) -> &Node {
-        // SAFETY: the slot is mapped memory; a slot never written reads
-        // as zeros, a valid (free) node
+        // SAFETY: the slot is mapped memory, and any bytes are a valid
+        // node; slots at or past `next` are never asked for
         unsafe { &*self.slot(i) }
     }
 
@@ -138,6 +156,30 @@ impl Default for Arena {
 
 impl Drop for Arena {
     fn drop(&mut self) {
+        let page = self.group * (PAGE_SLOTS << SLOT_SHIFT);
+        let used = ((self.next as usize) << SLOT_SHIFT).next_multiple_of(page);
+        let keep = SPARE_KEEP.next_multiple_of(page).min(used);
+        if used > keep {
+            // SAFETY: the pages of the reservation that were ever written,
+            // past the ones kept; a later arena writes each slot before it
+            // reads it
+            unsafe { sys::give_back(self.base.as_ptr().add(keep).cast(), used - keep) };
+        }
+        let mut spare = SPARE.lock().unwrap_or_else(PoisonError::into_inner);
+        if spare.len() < SPARE_MAX {
+            // a debug build wipes the kept pages, so a node address held past
+            // its arena reads zeros instead of the old tree or the next one's
+            #[cfg(debug_assertions)]
+            // SAFETY: the first `keep` bytes are mapped pages of this reservation
+            unsafe {
+                std::ptr::write_bytes(self.base.as_ptr().cast::<u8>(), 0, keep)
+            };
+            let mut live = std::mem::take(&mut self.live);
+            live[..(self.next as usize).div_ceil(PAGE_SLOTS)].fill(0);
+            spare.push((self.base.as_ptr() as usize, live));
+            return;
+        }
+        drop(spare);
         // SAFETY: the reservation made in new
         unsafe { sys::release(self.base.as_ptr().cast(), RESERVED) };
     }

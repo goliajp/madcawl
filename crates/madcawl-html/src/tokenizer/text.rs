@@ -3,17 +3,17 @@
 
 use super::{Go, NUL, REPLACEMENT, Sink, State, Tokenizer, getc, is_alpha, is_space, lower};
 use crate::error::ParseError;
-use crate::input::{EOF, stops};
+use crate::input::{EOF, Stops, stops};
 use crate::token::Token;
 
-static DATA_STOPS: [bool; 128] = stops(b"<&");
-static RAWTEXT_STOPS: [bool; 128] = stops(b"<");
-static PLAINTEXT_STOPS: [bool; 128] = stops(b"");
+static DATA_STOPS: Stops = stops(b"<&");
+static RAWTEXT_STOPS: Stops = stops(b"<");
+static PLAINTEXT_STOPS: Stops = stops(b"");
 
 impl Tokenizer {
     /// Emit the run of plain text that starts here, uncopied.
     #[inline]
-    pub(super) fn text_run<S: Sink>(&mut self, sink: &mut S, stops: &[bool; 128]) {
+    pub(super) fn text_run<S: Sink>(&mut self, sink: &mut S, stops: &Stops) {
         let (a, b) = self.input.run(stops);
         if b > a {
             sink.token(Token::Chars(self.input.bytes(a, b)));
@@ -81,7 +81,7 @@ impl Tokenizer {
         &mut self,
         sink: &mut S,
         here: State,
-        stops: &[bool; 128],
+        stops: &Stops,
         references: bool,
         less_than: Option<State>,
     ) -> Go {

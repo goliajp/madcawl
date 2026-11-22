@@ -2,11 +2,11 @@
 
 use super::{Go, NUL, REPLACEMENT, Sink, State, Step, Tokenizer, getc};
 use crate::error::ParseError;
-use crate::input::{EOF, push_char, stops};
+use crate::input::{EOF, Stops, push_char, stops};
 
-static COMMENT_STOPS: [bool; 128] = stops(b"<-");
-static BOGUS_STOPS: [bool; 128] = stops(b">");
-static CDATA_STOPS: [bool; 128] = {
+static COMMENT_STOPS: Stops = stops(b"<-");
+static BOGUS_STOPS: Stops = stops(b">");
+static CDATA_STOPS: Stops = {
     let mut t = stops(b"]");
     // NUL and the controls pass through CDATA as they are, but they
     // still go through `next`, which reports the controls
@@ -40,7 +40,7 @@ impl Tokenizer {
         }
     }
 
-    fn comment_run(&mut self, stops: &[bool; 128]) {
+    fn comment_run(&mut self, stops: &Stops) {
         let (a, b) = self.input.run(stops);
         if b > a {
             self.comment.extend_from_slice(self.input.bytes(a, b));

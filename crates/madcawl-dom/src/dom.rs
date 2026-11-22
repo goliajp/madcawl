@@ -13,6 +13,7 @@ use crate::classes::ClassLists;
 use crate::node::{
     IN_DOCUMENT, INERT, KIND_MASK, NS_MASK, NS_SHIFT, Node, NodeKind, QUIRKS_MASK, QUIRKS_SHIFT,
 };
+use crate::short::ShortStrings;
 use crate::text::Tail;
 
 /// A node of one `Dom`: its slot index, never 0.
@@ -58,6 +59,8 @@ pub struct Dom {
     /// Short whitespace strings, shared by the text nodes that are only
     /// whitespace.
     pub(crate) spaces: Vec<DomString>,
+    /// Short attribute values and texts, shared.
+    pub(crate) short: ShortStrings,
     pub(crate) tail: RefCell<Option<Tail>>,
     /// The dynamic atoms names, ids and classes use.
     pub(crate) atoms: HeldAtoms,
@@ -101,6 +104,7 @@ impl Dom {
             rare: vec![Rare::default()],
             rare_free: Vec::new(),
             spaces: Vec::new(),
+            short: ShortStrings::default(),
             tail: RefCell::new(None),
             atoms: HeldAtoms::new(),
             doc: 0,
