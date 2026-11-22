@@ -1,0 +1,4 @@
+# Encoding cases the suite does not run, one per line as
+# <file>:<line of its #data>, each with why.  A case missing from the
+# data, or skipped without a line here, fails the test.
+scripted/tests1.dat:1 its meta comes from document.write in a script, which needs a script engine

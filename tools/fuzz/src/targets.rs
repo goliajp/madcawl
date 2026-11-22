@@ -1,7 +1,9 @@
 //! The two targets: each parses one input fed one way and returns what
 //! came out, flattened to bytes, and the work it took.
 
-use madcawl_html::{Flow, Options, ParseError, Sink, Token, Tokenizer, TreeBuilder, steps};
+use madcawl_html::{
+    Decoder, Encoding, Flow, Options, ParseError, Sink, Token, Tokenizer, TreeBuilder, steps,
+};
 
 use crate::dom::{Dom, print};
 use crate::wpt::{Feed, feed_all};
@@ -77,7 +79,16 @@ impl Sink for Flat {
     }
 }
 
+/// The tokenizer reads WTF-8: a mutated input goes through the UTF-8
+/// decoder first, as a document's bytes do.
+fn utf8(input: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(input.len());
+    Decoder::new(Encoding::Utf8).decode(input, &mut out, true);
+    out
+}
+
 pub fn tokenizer(input: &[u8], feed: Feed) -> (Vec<u8>, u64) {
+    let input = &utf8(input);
     steps::take();
     let mut tok = Tokenizer::new();
     let mut sink = Flat::default();
@@ -86,6 +97,7 @@ pub fn tokenizer(input: &[u8], feed: Feed) -> (Vec<u8>, u64) {
 }
 
 pub fn tree(input: &[u8], feed: Feed) -> (Vec<u8>, u64) {
+    let input = &utf8(input);
     steps::take();
     let mut tok = Tokenizer::new();
     let mut b = TreeBuilder::new(Dom::new(), Options::default());

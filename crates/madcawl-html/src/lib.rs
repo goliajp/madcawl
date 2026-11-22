@@ -11,6 +11,8 @@ macro_rules! step {
 #[cfg(feature = "steps")]
 pub mod steps;
 
+mod document;
+pub mod encoding;
 mod entities;
 mod error;
 mod input;
@@ -18,6 +20,8 @@ mod token;
 mod tokenizer;
 mod tree;
 
+pub use document::{DocumentParser, Source};
+pub use encoding::{Confidence, Decoder, Encoding};
 pub use error::ParseError;
 pub use madcawl_str::{Atom, HeldAtoms, atom};
 pub use token::{Attribute, Doctype, Tag, Token};

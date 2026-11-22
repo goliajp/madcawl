@@ -134,7 +134,9 @@ impl Tokenizer {
         }
     }
 
-    /// More bytes of the document, WTF-8.
+    /// More bytes of the document, WTF-8. Bytes in any other encoding,
+    /// or bytes from outside, go through a `Decoder` or a
+    /// `DocumentParser` first.
     pub fn feed(&mut self, bytes: &[u8]) {
         self.input.push(bytes);
     }

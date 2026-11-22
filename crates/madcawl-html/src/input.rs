@@ -1,6 +1,8 @@
 //! The input stream: bytes as they arrive, read a code point at a time.
 //!
-//! The bytes are WTF-8. CR and CRLF read as LF. Each code point the
+//! The bytes are WTF-8, as a decoder or a script makes them: a debug
+//! build stops on a byte that is not, a release build reads it as
+//! U+FFFD on its own. CR and CRLF read as LF. Each code point the
 //! standard calls a problem in the input stream is reported once, the
 //! first time it is read, however often a state reads it again.
 
@@ -198,9 +200,8 @@ impl Input {
 /// byte is read on its own by `next`.
 const REPLACEMENT_FOR_INVALID: u32 = u32::MAX - 2;
 
-/// Decode one non-ASCII code point. Broken bytes read as U+FFFD one
-/// byte at a time; `None` when a sequence is cut off by the end of
-/// what has arrived and more may come.
+/// Decode one non-ASCII code point; `None` when a sequence is cut off
+/// by the end of what has arrived and more may come.
 #[inline]
 fn decode(s: &[u8], done: bool) -> Option<(u32, usize)> {
     let b = s[0];
@@ -208,26 +209,35 @@ fn decode(s: &[u8], done: bool) -> Option<(u32, usize)> {
         0xC2..=0xDF => (2, u32::from(b & 0x1F)),
         0xE0..=0xEF => (3, u32::from(b & 0x0F)),
         0xF0..=0xF4 => (4, u32::from(b & 0x07)),
-        _ => return Some((REPLACEMENT_FOR_INVALID, 1)),
+        _ => return broken(),
     };
     if s.len() < n {
         if !done && s[1..].iter().all(|&c| c & 0xC0 == 0x80) {
             return None;
         }
-        return Some((REPLACEMENT_FOR_INVALID, 1));
+        return broken();
     }
     let mut c = init;
     for &t in &s[1..n] {
         if t & 0xC0 != 0x80 {
-            return Some((REPLACEMENT_FOR_INVALID, 1));
+            return broken();
         }
         c = (c << 6) | u32::from(t & 0x3F);
     }
     let min = [0, 0, 0x80, 0x800, 0x1_0000][n];
     if c < min || c > 0x10_FFFF {
-        return Some((REPLACEMENT_FOR_INVALID, 1));
+        return broken();
     }
     Some((c, n))
+}
+
+/// A byte that is not WTF-8: the caller fed bytes no decoder made.
+#[cold]
+fn broken() -> Option<(u32, usize)> {
+    if cfg!(debug_assertions) {
+        panic!("the tokenizer's input is not WTF-8: decode it first");
+    }
+    Some((REPLACEMENT_FOR_INVALID, 1))
 }
 
 /// Read a code point decoded by `next`: the broken-byte marker becomes
