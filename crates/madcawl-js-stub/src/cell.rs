@@ -4,7 +4,7 @@
 use std::any::TypeId;
 
 use madcawl_abi as abi;
-use madcawl_js::{ClassId, HostRef};
+use madcawl_js::{ClassId, HostFn, HostRef};
 use madcawl_str::Atom;
 
 use crate::value::Value;
@@ -30,7 +30,7 @@ pub(crate) struct ErasedClass {
 }
 
 pub(crate) enum Call {
-    Host { f: *const (), host: TypeId },
+    Host { f: HostFn, host: TypeId },
     /// A test's stand-in for a script function: a Rust body and the
     /// values it closes over, which the cell holds.
     Closure {
@@ -42,6 +42,17 @@ pub(crate) enum Call {
 
 pub(crate) enum Body {
     Object,
+    /// A string that is a view into flat string `s`, which it holds.
+    StrView {
+        s: Value,
+        start: u32,
+        len: u32,
+    },
+    /// A WindowProxy, holding the global it forwards to.
+    Proxy {
+        global: Value,
+        realm: u32,
+    },
     Function {
         name: &'static str,
         length: u8,
@@ -54,11 +65,16 @@ pub(crate) enum Body {
         preserved: bool,
         /// The count reached 0 and the host has not been told: the
         /// cell stays, still holding its host object, until it is
-        /// (`drain_host`) or until it is read again from the wrapper
-        /// word (`retain`).
+        /// (`drain_host`). Its memory is not reused before that, so the
+        /// host may still read the wrapper word.
         dead: bool,
-        /// A notice for this cell is queued.
-        noticed: bool,
+        /// The collector found the cell to be garbage; it is being
+        /// unlinked, and `wrapper_upgrade` no longer gives it out.
+        condemned: bool,
+        /// `wrapper_upgrade` refused it and the host let go of it: the
+        /// wrapper word no longer names it, its edge to the host object
+        /// is no longer counted, and it gets no `wrapper_died`.
+        orphan: bool,
     },
 }
 
@@ -66,15 +82,18 @@ pub(crate) enum Body {
 pub(crate) struct Cell {
     pub header: u64,
     pub realm: u32,
+    /// The isolate that made it: a value never crosses to another.
+    pub isolate: u32,
     pub props: Props,
     pub body: Body,
 }
 
 impl Cell {
-    pub(crate) fn alloc(realm: u32, body: Body) -> Value {
+    pub(crate) fn alloc(isolate: u32, realm: u32, body: Body) -> Value {
         let p = Box::into_raw(Box::new(Cell {
             header: abi::header(TAG_CELL, 0),
             realm,
+            isolate,
             props: Vec::new(),
             body,
         }));
@@ -108,24 +127,28 @@ impl Cell {
     /// The values this cell holds a count on.
     pub(crate) fn held(&self, out: &mut Vec<Value>) {
         out.extend(self.props.iter().map(|&(_, v)| v));
-        if let Body::Function {
-            call: Call::Closure { captures, .. },
-            ..
-        } = &self.body
-        {
-            out.extend_from_slice(captures);
+        match &self.body {
+            Body::Function {
+                call: Call::Closure { captures, .. },
+                ..
+            } => out.extend_from_slice(captures),
+            Body::StrView { s: v, .. } | Body::Proxy { global: v, .. } => out.push(*v),
+            _ => {}
         }
     }
 
     /// Give up every value this cell holds, into `out`.
     pub(crate) fn take_held(&mut self, out: &mut Vec<Value>) {
         out.extend(self.props.drain(..).map(|(_, v)| v));
-        if let Body::Function {
-            call: Call::Closure { captures, .. },
-            ..
-        } = &mut self.body
-        {
-            out.append(captures);
+        match &mut self.body {
+            Body::Function {
+                call: Call::Closure { captures, .. },
+                ..
+            } => out.append(captures),
+            Body::StrView { s: v, .. } | Body::Proxy { global: v, .. } => {
+                out.push(std::mem::replace(v, crate::value::UNDEFINED));
+            }
+            _ => {}
         }
     }
 }

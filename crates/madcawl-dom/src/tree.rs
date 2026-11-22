@@ -2,7 +2,7 @@
 //! in-document bit, and reports the change in one place (`notify`).
 
 use crate::dom::{Dom, Rare};
-use crate::node::{IN_DOCUMENT, INERT, Node, NodeKind, STYLE_DIRTY};
+use crate::node::{IN_DOCUMENT, INERT, Node, NodeKind, STYLE_DIRTY, SUSPECTED};
 
 /// What changed, as styles and later observers need to know.
 pub(crate) enum Change {
@@ -18,11 +18,25 @@ impl Dom {
         n.set_count(n.count() + 1);
     }
 
+    /// Every decrement goes through here. One that leaves a node outside
+    /// every document still counted may have left it in a cycle only
+    /// the collector can free, so it makes the node a suspect: the
+    /// child moved out, the parent it left, a template's contents.
     pub(crate) fn dec(&mut self, i: u32) {
         let n = self.m(i);
         n.set_count(n.count() - 1);
         if n.count() == 0 {
             self.zero.push(i);
+        } else {
+            self.suspect_if_held(i);
+        }
+    }
+
+    pub(crate) fn suspect_if_held(&mut self, i: u32) {
+        let n = self.m(i);
+        if n.count() != 0 && n.flags & (IN_DOCUMENT | SUSPECTED) == 0 {
+            n.flags |= SUSPECTED;
+            self.suspects.push(i);
         }
     }
 
@@ -115,9 +129,8 @@ impl Dom {
         }
         if self.n(c).flags & IN_DOCUMENT != 0 {
             self.set_in_document(c, false);
-        }
-        if self.n(c).count() != 0 {
-            self.suspects.push(c);
+            // its decrement came while it was still in the document
+            self.suspect_if_held(c);
         }
     }
 

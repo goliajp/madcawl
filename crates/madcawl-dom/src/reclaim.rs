@@ -79,7 +79,11 @@ impl Dom {
             }
         }
         self.zero.clear();
-        self.suspects.clear();
+        for i in std::mem::take(&mut self.suspects) {
+            if self.arena.is_live(i) {
+                self.m(i).flags &= !crate::node::SUSPECTED;
+            }
+        }
         freed
     }
 }

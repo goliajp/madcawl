@@ -17,7 +17,9 @@ pub const REFCOUNT_OFF: usize = 0;
 pub const TAG_OFF: usize = 4;
 pub const FLAGS_OFF: usize = 6;
 
-/// Type tags.
+/// Type tags. `TAG_STR` is for making madcawl's own string blocks;
+/// whether a script value is a string is the engine's to say (an
+/// engine string need not be a flat block), never read from a tag.
 pub const TAG_STR: u16 = 0;
 
 /// A block that lives for the whole program: never counted, never

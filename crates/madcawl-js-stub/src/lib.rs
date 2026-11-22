@@ -15,7 +15,9 @@ mod collect;
 mod engine;
 mod isolate;
 mod props;
+mod strings;
 mod value;
+mod window;
 
 pub use engine::StubInterrupt;
 

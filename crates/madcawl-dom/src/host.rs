@@ -13,7 +13,7 @@ use madcawl_html::Namespace;
 use madcawl_str::DomString;
 
 use crate::dom::{Dom, NodeId};
-use crate::node::{IN_DOCUMENT, NodeKind};
+use crate::node::{NodeKind, SUSPECTED};
 
 /// A counted edge out of a node: the counting rules, from the source's
 /// side.
@@ -119,7 +119,6 @@ impl Dom {
         assert_ne!(self.n(i).wrapper, 0, "a node with a wrapper");
         self.m(i).wrapper = 0;
         self.dec(i);
-        self.suspect_if_held(i);
     }
 
     /// Mark the edge from the node to its wrapper strong or weak again.
@@ -175,12 +174,17 @@ impl Dom {
         self.detach(i);
     }
 
-    /// The nodes that left every document while still counted since the
-    /// last call: candidates for the cycle collector.
+    /// The nodes whose count dropped and stayed above 0 while outside
+    /// every document, since the last call: candidates for the cycle
+    /// collector.
     pub fn take_suspects(&mut self, out: &mut Vec<NodeId>) {
         let mut list = std::mem::take(&mut self.suspects);
         for &i in &list {
-            if self.arena.is_live(i) && self.n(i).count() != 0 {
+            if !self.arena.is_live(i) {
+                continue;
+            }
+            self.m(i).flags &= !SUSPECTED;
+            if self.n(i).count() != 0 {
                 out.push(NodeId::at(i));
             }
         }
@@ -196,6 +200,7 @@ impl Dom {
     /// nodes no count records.
     pub fn free_dead(&mut self, freed: &mut Vec<NodeId>) {
         let first = freed.len();
+        let mut stale = false;
         while let Some(i) = self.zero.pop() {
             if i == self.doc || !self.arena.is_live(i) || self.n(i).count() != 0 {
                 continue;
@@ -215,8 +220,15 @@ impl Dom {
                 }
                 self.rare_free.push(rare);
             }
+            stale |= self.n(i).flags & SUSPECTED != 0;
             self.arena.free(i);
             freed.push(NodeId::at(i));
+        }
+        // the suspects stay live nodes, each once: the list is never
+        // longer than the nodes, and a slot used again is not listed twice
+        if stale {
+            let arena = &self.arena;
+            self.suspects.retain(|&s| arena.is_live(s));
         }
         if freed.len() > first {
             for r in self.rare.iter_mut() {
@@ -224,12 +236,6 @@ impl Dom {
                     r.form = 0;
                 }
             }
-        }
-    }
-
-    fn suspect_if_held(&mut self, i: u32) {
-        if self.n(i).count() != 0 && self.n(i).flags & IN_DOCUMENT == 0 {
-            self.suspects.push(i);
         }
     }
 }
@@ -284,5 +290,64 @@ mod tests {
         assert_eq!(freed, vec![a, b]);
         assert_eq!(dom.ref_count(doc), 0);
         assert_eq!(dom.audit().mismatches(), 0);
+    }
+
+    #[test]
+    fn every_decrement_left_outside_a_document_makes_a_suspect_once() {
+        let mut dom = Dom::new();
+        let doc = dom.document();
+        let p = dom.new_element(b"div").unwrap();
+        let (a, b) = (dom.new_element(b"a").unwrap(), dom.new_element(b"b").unwrap());
+        dom.insert_node(p, a, None);
+        dom.insert_node(p, b, None);
+        let mut s = Vec::new();
+        dom.take_suspects(&mut s);
+        assert!(s.is_empty(), "nothing dropped yet");
+        // a script wrapper holds p as well
+        dom.set_wrapper(p, 0x1000);
+        // a moves into the document: p, left holding b, is the suspect;
+        // then b leaves it too
+        dom.insert_node(doc, a, None);
+        dom.remove_node(b);
+        dom.take_suspects(&mut s);
+        assert_eq!(s, vec![p], "once, however often it dropped");
+        assert_eq!(dom.ref_count(p), 1);
+        dom.take_suspects(&mut s);
+        assert_eq!(s.len(), 1, "taken, the list starts again empty");
+        dom.clear_wrapper(p);
+        dom.take_suspects(&mut s);
+        assert_eq!(s.len(), 1, "a node no one counts is no suspect");
+    }
+
+    #[test]
+    fn freed_suspects_leave_the_list_and_a_reused_slot_is_listed_once() {
+        let mut dom = Dom::new();
+        let mut freed = Vec::new();
+        for _ in 0..100 {
+            let p = dom.new_element(b"div").unwrap();
+            let (a, b) = (dom.new_element(b"a").unwrap(), dom.new_element(b"b").unwrap());
+            dom.insert_node(p, a, None);
+            dom.insert_node(p, b, None);
+            // p, left holding b, becomes a suspect; then the pair is
+            // unlinked as the collector would, and freed, with no host
+            // ever taking the suspects
+            dom.remove_node(a);
+            dom.unlink_node(p);
+            dom.free_dead(&mut freed);
+            assert!(dom.suspects.len() <= dom.node_count() as usize);
+            assert_eq!(dom.suspects.len(), 0);
+        }
+        assert_eq!(dom.node_count(), 1);
+        // a node in a slot a freed suspect had
+        let p = dom.new_element(b"div").unwrap();
+        let a = dom.new_element(b"a").unwrap();
+        dom.insert_node(p, a, None);
+        dom.set_wrapper(p, 0x1000);
+        dom.remove_node(a);
+        let mut s = Vec::new();
+        dom.take_suspects(&mut s);
+        assert_eq!(s, vec![p]);
+        dom.clear_wrapper(p);
+        dom.free_dead(&mut freed);
     }
 }

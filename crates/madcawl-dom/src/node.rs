@@ -67,6 +67,8 @@ pub(crate) const NS_MASK: u32 = 0b11 << NS_SHIFT;
 pub(crate) const IN_DOCUMENT: u32 = 1 << 5;
 /// The node changed since its style was last computed.
 pub(crate) const STYLE_DIRTY: u32 = 1 << 6;
+/// The node is in the suspects list, which then holds it once.
+pub(crate) const SUSPECTED: u32 = 1 << 7;
 pub(crate) const HAS_ID: u32 = 1 << 8;
 pub(crate) const HAS_CLASS: u32 = 1 << 9;
 pub(crate) const HAS_STYLE: u32 = 1 << 10;

@@ -11,7 +11,9 @@ preorder over the inheritance tree, so a class and its subclasses are
 one id range. The glue converts `this` and the arguments by their IDL
 types (`convert.rs`), calls the member's implementation
 `impls::<interface>::<member>` (`set_<member>` for a setter), and
-converts the result.
+converts the result. The table holds a C-ABI shell per member
+(`<glue>_abi`), which takes the words the engine passes and calls the
+glue (`shell.rs`).
 
 The parser reads the subset of Web IDL the files use: interfaces with
 a parent, constants, attributes, operations with optional arguments and
@@ -109,6 +111,15 @@ def glue(fn, iface, body, kind, uses_args=True):
              f"        let this = cv::this_node(e, h, this, &{iface['name']}Class::<E>::DEF)?;"]
     lines += ['        ' + b for b in body]
     lines += ['    })', '}', '']
+    call = {
+        'op': f'shell::op(ctx, this, argv, argc, {fn}::<E>)',
+        'get': f'shell::get(ctx, this, {fn}::<E>)',
+        'set': f'shell::set(ctx, this, argv, argc, {fn}::<E>)',
+    }[kind]
+    words = '_: *const u64, _: usize' if kind == 'get' else 'argv: *const u64, argc: usize'
+    lines += ['// SAFETY: called as the host function of its table entry',
+              f'unsafe extern "C" fn {fn}_abi<E: Engine>(ctx: *mut Ctx, this: u64, {words}) -> u64 {{ unsafe {{ {call} }} }}',
+              '']
     return lines
 
 
@@ -118,23 +129,25 @@ def emit(ifaces, sources):
            '//! The class tables of the bound interfaces, and the glue between',
            '//! script values and the implementations in `impls`.', '',
            'use std::marker::PhantomData;', '',
-           'use madcawl_js::{Attribute, ClassDef, ClassId, Constant, Engine, Operation, Owned};', '',
-           'use crate::convert as cv;', 'use crate::gc::NodeOps;', 'use crate::host::DomHost;', 'use crate::impls;', '']
+           'use madcawl_js::{Attribute, Bound, ClassDef, ClassId, Constant, Ctx, Engine, Operation, Owned};', '',
+           'use crate::convert as cv;', 'use crate::gc::NodeOps;', 'use crate::host::DomHost;', 'use crate::impls;',
+           'use crate::shell;', '']
     for i in sorted(ifaces, key=lambda i: i['id']):
         n, m = i['name'], snake(i['name'])
         out += [f'pub struct {n}Class<E>(PhantomData<E>);', '',
                 f'impl<E: Engine> {n}Class<E> {{',
+                '    // SAFETY: every shell in the table reads its context as E and DomHost<E>',
                 f'    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {{',
                 f'        name: "{n}",', f"        id: ClassId({i['id']}),", f"        last: ClassId({i['last']}),",
                 f"        parent: {'Some(&' + i['parent'] + 'Class::<E>::DEF)' if i['parent'] else 'None'},"]
         attrs = []
         for a in i['attrs']:
-            s = 'None' if a['readonly'] else f"Some({m}_set_{snake(a['name'])}::<E>)"
-            attrs.append(f"Attribute {{ name: \"{a['name']}\", get: {m}_get_{snake(a['name'])}::<E>, set: {s} }},")
+            s = 'None' if a['readonly'] else f"Some(unsafe {{ Bound::host_fn({m}_set_{snake(a['name'])}_abi::<E>) }})"
+            attrs.append(f"Attribute {{ name: \"{a['name']}\", get: unsafe {{ Bound::host_fn({m}_get_{snake(a['name'])}_abi::<E>) }}, set: {s} }},")
         ops = []
         for o in i['ops']:
             length = sum(1 for a in o['args'] if not a['optional'])
-            ops.append(f"Operation {{ name: \"{o['name']}\", length: {length}, call: {m}_{snake(o['name'])}::<E> }},")
+            ops.append(f"Operation {{ name: \"{o['name']}\", length: {length}, call: unsafe {{ Bound::host_fn({m}_{snake(o['name'])}_abi::<E>) }} }},")
         consts = [f'Constant {{ name: "{c}", value: {float(int(v, 0))!r} }},' for c, v in i['consts']]
         for field, items in (('attributes', attrs), ('operations', ops), ('constants', consts)):
             if items:

@@ -14,6 +14,7 @@ mod convert;
 mod gc;
 mod host;
 mod impls;
+mod shell;
 
 #[rustfmt::skip]
 mod generated;

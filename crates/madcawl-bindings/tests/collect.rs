@@ -308,3 +308,105 @@ fn traverse_reports_each_counted_edge_once() {
     }
     js.audit();
 }
+
+#[test]
+fn a_garbage_wrapper_read_between_unlink_batches_keeps_what_script_writes() {
+    let mut js = Js::new();
+    let html = connected_root(&mut js);
+    let div = element(&mut js, "div");
+    js.run(html.get(), "appendChild", &[div.get()]);
+    // empty the candidates, so that the wrapper is unlinked last
+    js.collect();
+    // two garbage pairs of plain objects, the second of which holds the
+    // div's wrapper; the div is in the document. Unlinking the first pair
+    // frees only that pair, so between batches the wrapper is still held
+    // and is still the div's
+    let pairs: Vec<V> = (0..4).map(|_| js.object()).collect();
+    for k in [0, 2] {
+        js.set(pairs[k].get(), "next", pairs[k + 1].get());
+        js.set(pairs[k + 1].get(), "next", pairs[k].get());
+    }
+    js.set(pairs[3].get(), "w", div.get());
+    for v in pairs {
+        js.drop(v);
+    }
+    js.drop(div);
+    while !js.e.unlinking() {
+        assert_eq!(js.h.collect(&mut js.e, Deadline::Work(1)), madcawl_js::Step::More);
+    }
+    // script reads the div again and gives it an expando
+    let again = js.get(html.get(), "firstChild");
+    let tag = js.object();
+    js.set(again.get(), "expando", tag.get());
+    let stats = js.collect();
+    assert!(js.is(again.get(), "expando", tag.get()), "the expando outlives the collection");
+    assert_eq!(stats.survivors, 0);
+    for v in [tag, again, html] {
+        js.drop(v);
+    }
+    js.audit();
+}
+
+#[test]
+fn a_parent_left_in_a_cycle_by_moving_a_child_out_is_freed() {
+    let mut js = Js::new();
+    let html = connected_root(&mut js);
+    let base = js.h.dom.node_count();
+    let p = element(&mut js, "div");
+    let a = element(&mut js, "a");
+    let b = element(&mut js, "b");
+    js.run(p.get(), "appendChild", &[a.get()]);
+    js.run(p.get(), "appendChild", &[b.get()]);
+    js.drop(b);
+    js.drop(p);
+    // a, which script holds, holds its parent: nothing is garbage yet
+    assert_eq!(js.collect().garbage, 0);
+    // moving a out leaves p and b holding only each other
+    js.run(html.get(), "appendChild", &[a.get()]);
+    js.collect();
+    assert_eq!(js.h.dom.node_count(), base + 1, "only a is left");
+    js.drop(a);
+    js.drop(html);
+    js.audit();
+}
+
+#[test]
+fn a_template_whose_contents_have_children_is_freed_with_them() {
+    let mut js = Js::new();
+    let base = js.h.dom.node_count();
+    let t = element(&mut js, "template");
+    let contents = js.h.dom.contents(js.node(t.get())).unwrap();
+    let i = js.h.dom.new_element(b"i").unwrap();
+    js.h.dom.insert_node(contents, i, None);
+    js.h.settle(&mut js.e);
+    // the template, its contents, their owner document and the child
+    assert_eq!(js.h.dom.node_count(), base + 4);
+    js.drop(t);
+    let stats = js.collect();
+    assert_eq!(stats.survivors, 0);
+    assert_eq!(js.h.dom.node_count(), base + 1, "the inert document stays");
+    js.audit();
+}
+
+#[test]
+fn a_dead_wrapper_read_before_its_notice_is_replaced() {
+    let mut js = Js::new();
+    let html = connected_root(&mut js);
+    let div = element(&mut js, "div");
+    js.run(html.get(), "appendChild", &[div.get()]);
+    let n = js.node(div.get());
+    let old = js.h.dom.wrapper(n);
+    // the count reaches 0 and the notice waits for the host
+    js.e.release(div);
+    assert_eq!(js.h.dom.wrapper(n), old);
+    let again = js.get(html.get(), "firstChild");
+    let new = Stub::wrapper_word(again.get());
+    assert_ne!(new, old, "a new wrapper, not the dead one");
+    js.h.settle(&mut js.e);
+    assert_eq!(js.h.dom.wrapper(n), new, "the old wrapper's end clears nothing");
+    js.audit();
+    js.drop(again);
+    assert_eq!(js.h.dom.wrapper(n), 0);
+    js.drop(html);
+    js.audit();
+}

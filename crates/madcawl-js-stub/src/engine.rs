@@ -5,16 +5,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use madcawl_js::{
-    ClassDef, Control, Deadline, Engine, ErrorKind, Host, HostFn, HostRef, Interrupt, Key, Owned,
+    Bound, ClassDef, Control, Deadline, Engine, ErrorKind, Host, HostFn, HostRef, Interrupt, Key, Owned,
     ScriptOrigin, Step, ValueKind,
 };
 use madcawl_str::DomString;
 
 use crate::cell::{Body, Cell, ErasedClass};
 use crate::collect::{StubTracer, StubUnlinker, Vertex};
-use crate::isolate::{Realm, Stub, string_at};
+use crate::isolate::{Realm, Stub};
 use crate::props::{class_as, detach};
-use crate::value::{FALSE, NULL, THROWN, TRUE, UNDEFINED, Value};
+use crate::value::{ABSENT, FALSE, NULL, THROWN, TRUE, UNDEFINED, Value};
 
 const NO_SCRIPT: &str = "the stub engine runs no script";
 
@@ -25,6 +25,22 @@ impl Engine for Stub {
     type Tracer = StubTracer;
     type Unlinker = StubUnlinker;
     type ModulePayload = ();
+
+    fn to_bits(v: Value) -> u64 {
+        v.0
+    }
+
+    fn from_bits(bits: u64) -> Value {
+        Value(bits)
+    }
+
+    unsafe fn values<'a>(argv: *const u64, argc: usize) -> &'a [Value] {
+        if argc == 0 {
+            return &[];
+        }
+        // SAFETY: the caller's; `Value` is a transparent word
+        unsafe { std::slice::from_raw_parts(argv.cast(), argc) }
+    }
 
     fn undefined() -> Value {
         UNDEFINED
@@ -50,13 +66,17 @@ impl Engine for Stub {
         v == THROWN
     }
 
+    fn absent() -> Value {
+        ABSENT
+    }
+
     fn kind(&self, v: Value) -> ValueKind {
         match v {
             UNDEFINED => ValueKind::Undefined,
             NULL => ValueKind::Null,
             TRUE | FALSE => ValueKind::Boolean,
             _ if v.as_number().is_some() => ValueKind::Number,
-            _ if v.is_string() => ValueKind::String,
+            _ if v.is_string() || self.is_view(v) => ValueKind::String,
             _ if self.is_callable(v) => ValueKind::Function,
             _ => ValueKind::Object,
         }
@@ -70,11 +90,8 @@ impl Engine for Stub {
         v.as_number()
     }
 
-    fn as_string(&self, v: Value) -> Option<DomString> {
-        // SAFETY: borrowed for the clone; the value keeps its count
-        v.is_string()
-            .then(|| std::mem::ManuallyDrop::new(unsafe { string_at(v) }).clone())
-            .map(std::mem::ManuallyDrop::into_inner)
+    fn as_string(&mut self, v: Value) -> Option<DomString> {
+        self.flat_string(v)
     }
 
     fn retain(&mut self, v: Value) -> Owned<Value> {
@@ -126,7 +143,7 @@ impl Engine for Stub {
             ValueKind::Undefined | ValueKind::Null => false,
             ValueKind::Boolean => v == TRUE,
             ValueKind::Number => v.as_number().is_some_and(|n| n != 0.0 && !n.is_nan()),
-            ValueKind::String => self.as_string(v).is_some_and(|s| !s.is_empty()),
+            ValueKind::String => self.string_len(v).is_some_and(|n| n != 0),
             _ => true,
         }
     }
@@ -136,8 +153,20 @@ impl Engine for Stub {
     }
 
     fn global(&mut self, realm: Realm) -> Owned<Value> {
-        let g = self.realm_data(realm.0).global;
+        let g = self.live_global(realm.0);
         self.retain(g)
+    }
+
+    fn new_window_proxy(&mut self, realm: Realm) -> Owned<Value> {
+        self.window_proxy(realm)
+    }
+
+    fn set_window_proxy_target(&mut self, proxy: Value, realm: Realm) {
+        self.retarget(proxy, realm);
+    }
+
+    fn window_proxy_target(&self, proxy: Value) -> Option<Realm> {
+        self.proxy_realm(proxy)
     }
 
     fn detach_realm(&mut self, realm: Realm) {
@@ -149,14 +178,17 @@ impl Engine for Stub {
     }
 
     fn get<H: Host<Stub>>(&mut self, host: &mut H, obj: Value, key: Key<'_>) -> Owned<Value> {
+        self.outermost();
         self.get_prop(host, obj, key)
     }
 
     fn set<H: Host<Stub>>(&mut self, host: &mut H, obj: Value, key: Key<'_>, v: Value) -> bool {
+        self.outermost();
         self.set_prop(host, obj, key, v)
     }
 
     fn delete<H: Host<Stub>>(&mut self, _host: &mut H, obj: Value, key: Key<'_>) -> bool {
+        self.outermost();
         self.delete_prop(obj, key)
     }
 
@@ -166,14 +198,20 @@ impl Engine for Stub {
     }
 
     fn call<H: Host<Stub>>(&mut self, host: &mut H, f: Value, this: Value, args: &[Value]) -> Owned<Value> {
+        self.outermost();
         self.call_value(host, f, this, args)
     }
 
-    fn new_function<H: Host<Stub>>(&mut self, realm: Realm, name: &'static str, length: u8, f: HostFn<Stub, H>) -> Owned<Value> {
-        self.function(realm.0, name, length, f)
+    fn new_function<H: Host<Stub>>(&mut self, realm: Realm, name: &'static str, length: u8, f: Bound<HostFn, Stub, H>) -> Owned<Value> {
+        self.function::<H>(realm.0, name, length, f)
     }
 
     fn throw(&mut self, exception: Owned<Value>) -> Owned<Value> {
+        // script being ended registers nothing
+        if self.terminating {
+            self.release(exception);
+            return Stub::thrown();
+        }
         if let Some(old) = self.exception.replace(exception.into_raw()) {
             self.release_value(old);
         }
@@ -195,12 +233,29 @@ impl Engine for Stub {
             host: TypeId::of::<H>(),
             id: class.id,
         };
-        let body = Body::Wrapper { class, obj, preserved: false, dead: false, noticed: false };
+        let body = Body::Wrapper { class, obj, preserved: false, dead: false, condemned: false, orphan: false };
         Stub::owned(self.alloc(realm.0, body))
     }
 
     fn wrapper_word(wrapper: Value) -> u64 {
         wrapper.0
+    }
+
+    fn wrapper_upgrade(&mut self, word: u64) -> Option<Owned<Value>> {
+        let v = Value(word);
+        // SAFETY: a wrapper the host holds the word of is not freed before
+        // its notice is delivered or it is refused here
+        let c = unsafe { Cell::at(v) };
+        self.own(c);
+        let Body::Wrapper { dead, condemned, orphan, .. } = &mut c.body else {
+            panic!("a wrapper word names a wrapper")
+        };
+        assert!(!*orphan, "a refused wrapper's word was cleared");
+        if *dead || *condemned {
+            *orphan = true;
+            return None;
+        }
+        Some(self.retain(v))
     }
 
     fn wrapper_value(word: u64) -> Value {
@@ -225,15 +280,12 @@ impl Engine for Stub {
         while let Some(v) = self.notices.pop() {
             // SAFETY: a noticed cell is not freed before its notice
             let c = unsafe { Cell::at(v) };
-            let Body::Wrapper { class, obj, dead, noticed, .. } = &mut c.body else { unreachable!() };
-            *noticed = false;
-            if !*dead {
-                continue;
+            let Body::Wrapper { class, obj, orphan, .. } = c.body else { unreachable!() };
+            if !orphan {
+                (class_as::<H>(&class).host_ops().wrapper_died)(host, obj);
+                n += 1;
             }
-            let (class, obj) = (*class, *obj);
-            (class_as::<H>(&class).host_ops().wrapper_died)(host, obj);
             self.free_cell(v);
-            n += 1;
         }
         n
     }
@@ -285,12 +337,15 @@ impl Engine for Stub {
     }
 
     fn run_microtasks<H: Host<Stub>>(&mut self, host: &mut H) {
+        self.outermost();
         if std::mem::replace(&mut self.in_checkpoint, true) {
             return;
         }
-        while let Some((job, arg)) = self.microtasks.pop_front() {
+        while !self.terminating
+            && let Some((job, arg)) = self.microtasks.pop_front()
+        {
             let r = self.call_value(host, job, UNDEFINED, &[arg]).into_raw();
-            if r == THROWN {
+            if r == THROWN && !self.terminating {
                 let e = self.take_exception().expect("a thrown exception");
                 host.report_exception(self, e);
             }
@@ -301,7 +356,16 @@ impl Engine for Stub {
         self.in_checkpoint = false;
     }
 
+    fn script_depth(&self) -> u32 {
+        self.depth
+    }
+
+    fn is_terminating(&self) -> bool {
+        self.terminating
+    }
+
     fn evaluate<H: Host<Stub>>(&mut self, _host: &mut H, _realm: Realm, _source: &DomString, _origin: &ScriptOrigin<'_>) -> Owned<Value> {
+        self.outermost();
         self.throw_error(ErrorKind::Syntax, NO_SCRIPT)
     }
 
@@ -314,6 +378,7 @@ impl Engine for Stub {
         _scopes: &[Value],
         _origin: &ScriptOrigin<'_>,
     ) -> Owned<Value> {
+        self.outermost();
         self.throw_error(ErrorKind::Syntax, NO_SCRIPT)
     }
 

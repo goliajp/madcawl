@@ -52,12 +52,22 @@ impl<E: Engine> DomHost<E> {
         HostRef::new(self.dom.address(n)).expect("a node address is never 0")
     }
 
-    /// The wrapper of `n`, made if it has none, with a count for the
-    /// caller.
+    /// The wrapper of `n`, made if it has none or the one it has is
+    /// dead, with a count for the caller.
     pub fn wrap(&mut self, e: &mut E, n: NodeId) -> Owned<E::Value> {
         let w = self.dom.wrapper(n);
         if w != 0 {
-            return e.retain(E::wrapper_value(w & !1));
+            if let Some(v) = e.wrapper_upgrade(w & !1) {
+                return v;
+            }
+            // the engine sends no notice for a wrapper it refused: let go
+            // of it here as `wrapper_died` would
+            if w & 1 != 0 {
+                self.dom.set_wrapper_preserved(n, false);
+                // SAFETY: the count the preserved edge held
+                e.release(unsafe { Owned::from_raw(E::wrapper_value(w & !1)) });
+            }
+            self.dom.clear_wrapper(n);
         }
         let obj = self.host_ref(n);
         let v = e.new_wrapper(self.realm, self.class_of(obj), obj);
@@ -101,7 +111,9 @@ impl<E: Engine> DomHost<E> {
     }
 
     /// Call the listeners of type `ty` on `target`, each held by a root
-    /// handle for the call, with a microtask checkpoint after each.
+    /// handle for the call, with a microtask checkpoint after each when
+    /// no script is on the stack (a dispatch the user started, not one
+    /// script started). The dispatch stops when script is being ended.
     /// The stand-in for event dispatch until events are bound: the
     /// listener gets the type as its argument.
     pub fn fire(&mut self, e: &mut E, target: NodeId, ty: Atom) -> usize {
@@ -115,18 +127,28 @@ impl<E: Engine> DomHost<E> {
             .collect();
         let this = self.wrap(e, target);
         let arg = e.string(ty.to_dom_string());
-        let called = roots.len();
+        let checkpoints = e.script_depth() == 0;
+        let (mut called, mut ended) = (0, false);
         for r in roots {
-            let res = e.call(self, r.get(), this.get(), &[arg.get()]);
-            if E::is_thrown(res.get()) {
-                let _sentinel = res.into_raw();
-                let ex = e.take_exception().expect("a thrown exception");
-                self.report_exception(e, ex);
-            } else {
-                e.release(res);
+            if !ended {
+                called += 1;
+                let res = e.call(self, r.get(), this.get(), &[arg.get()]);
+                if !E::is_thrown(res.get()) {
+                    e.release(res);
+                } else {
+                    let _sentinel = res.into_raw();
+                    ended = e.is_terminating();
+                    if !ended {
+                        let ex = e.take_exception().expect("a thrown exception");
+                        self.report_exception(e, ex);
+                    }
+                }
+                // a checkpoint would start afresh after a termination
+                if checkpoints && !ended {
+                    e.run_microtasks(self);
+                }
             }
             r.release(e);
-            e.run_microtasks(self);
         }
         e.release(this);
         e.release(arg);

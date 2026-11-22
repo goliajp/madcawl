@@ -15,20 +15,35 @@
 //!   `can_skip`, `wrapper_needs_preserve`, `wrapper_died`).
 //! - Host functions borrow their arguments and transfer their result.
 //!   On error they register the exception in the context and return the
-//!   sentinel [`Engine::thrown`].
+//!   sentinel [`Engine::thrown`]. In the tables they are C-ABI functions
+//!   of words ([`HostFn`]), given the isolate and the host in a [`Ctx`].
 //! - The host holds script values through member handles (reported by
 //!   `traverse`), root handles (never reported) and weak handles.
 //! - A node has at most one wrapper, made lazily; its pointer is the
 //!   node's wrapper word, weak until the engine asks for it to be
-//!   preserved, after which the edge is counted and reported.
-//! - Strings are `DomString`s, passed by pointer; property names are
-//!   atoms.
+//!   preserved, after which the edge is counted and reported. The host
+//!   reads it with [`Engine::wrapper_upgrade`], which refuses a wrapper
+//!   that died or was found to be garbage.
+//! - Strings are `DomString`s, passed by pointer; an engine string that
+//!   is not a flat block is flattened by [`Engine::as_string`]. Property
+//!   names are atoms.
 //! - The host drives collection by deadline, in batches
-//!   ([`Engine::collect_cycles`]), and decides microtask checkpoints.
+//!   ([`Engine::collect_cycles`]), and decides microtask checkpoints by
+//!   [`Engine::script_depth`].
+//! - A browsing context's window is a WindowProxy whose target realm
+//!   changes on navigation. An isolate is an agent cluster; several may
+//!   share a thread.
 //!
 //! The binding code is generic over [`Engine`] and compiled once per
 //! engine: dispatch is static, and a value is an 8-byte, bit-copyable
 //! opaque word.
+//!
+//! How the final engine is joined to madcawl is not decided: as a Rust
+//! crate implementing [`Engine`], or behind a C ABI with a thin crate
+//! here implementing [`Engine`] over it. Nothing in this interface
+//! assumes either: what compiled code calls directly (the class tables'
+//! host functions, [`HostFn`]) is C-ABI and passes words, and the rest
+//! is a trait an adapter can implement over foreign calls.
 //!
 //! [`trial`] is the trial deletion over a side graph that the stub
 //! engine's collector runs, and that an adapter for a tracing engine
@@ -42,8 +57,8 @@ mod value;
 pub mod trial;
 
 pub use class::{
-    Attribute, ClassDef, ClassId, Constant, Getter, HostFn, HostOps, IndexGetter, Interceptors,
-    Length, Operation, Setter,
+    Attribute, Bound, ClassDef, ClassId, Constant, Ctx, Getter, HostFn, HostOps, IndexGetter,
+    Interceptors, Length, Operation, Setter,
 };
 pub use engine::{
     Control, Deadline, Engine, Host, Interrupt, ModuleRequest, ScriptOrigin, Step, Tracer,

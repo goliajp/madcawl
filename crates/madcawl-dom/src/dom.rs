@@ -68,8 +68,8 @@ pub struct Dom {
     pub(crate) stopped: bool,
     /// Nodes whose count reached 0, for `free_dead`.
     pub(crate) zero: Vec<u32>,
-    /// Nodes left outside every document still counted, for
-    /// `take_suspects`.
+    /// Nodes whose count dropped and stayed above 0 outside every
+    /// document, each once (`SUSPECTED`), for `take_suspects`.
     pub(crate) suspects: Vec<u32>,
 }
 

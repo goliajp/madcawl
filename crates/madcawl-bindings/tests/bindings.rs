@@ -3,12 +3,13 @@
 
 mod support;
 
+use madcawl_bindings::{DomHost, NodeClass};
 use madcawl_dom::Dom;
 use madcawl_html::{Options, Step, Tokenizer, TreeBuilder};
-use madcawl_js::Engine;
-use madcawl_js_stub::Stub;
-use madcawl_str::atom;
-use support::Js;
+use madcawl_js::{Engine, Key};
+use madcawl_js_stub::{Stub, Value};
+use madcawl_str::{DomString, atom};
+use support::{Js, V};
 
 fn parsed(html: &str) -> Js {
     let mut tok = Tokenizer::new();
@@ -227,4 +228,86 @@ fn a_host_closed_gives_back_what_it_held() {
     assert!(e.live_cells() > 1);
     h.close(&mut e);
     assert_eq!(e.live_cells(), 0, "no cell outlives its host");
+}
+
+#[test]
+fn strings_that_are_views_reach_the_dom_as_flat_blocks() {
+    let mut js = Js::new();
+    let doc = js.doc();
+    let whole = js.str("xdivhello");
+    let name = js.e.substring(whole.get(), 1, 3);
+    let el = js.call(doc.get(), "createElement", &[name.get()]);
+    assert_eq!(js.read(el.get(), "tagName"), "DIV");
+    let text = js.e.substring(whole.get(), 4, 5);
+    js.set(el.get(), "textContent", text.get());
+    assert_eq!(js.read(el.get(), "textContent"), "hello");
+    js.audit();
+    for v in [text, el, name, whole, doc] {
+        js.drop(v);
+    }
+}
+
+fn key(name: &str) -> DomString {
+    DomString::from_wtf8(name.as_bytes())
+}
+
+fn number(e: &mut Stub, h: &mut DomHost<Stub>, obj: Value, name: &str) -> f64 {
+    let v = e.get(h, obj, Key::Str(&key(name)));
+    let n = e.as_number(v.get()).unwrap_or(0.0);
+    e.release(v);
+    n
+}
+
+/// A listener that adds the log's `mt` to its `seen`.
+fn note(e: &mut Stub, h: &mut DomHost<Stub>, caps: &[Value], _: Value, _: &[Value]) -> V {
+    let seen = number(e, h, caps[0], "seen") + number(e, h, caps[0], "mt");
+    assert!(e.set(h, caps[0], Key::Str(&key("seen")), Stub::number(seen)));
+    support::undefined()
+}
+
+/// A microtask that sets the log's `mt`.
+fn mark(e: &mut Stub, h: &mut DomHost<Stub>, caps: &[Value], _: Value, _: &[Value]) -> V {
+    assert!(e.set(h, caps[0], Key::Str(&key("mt")), Stub::number(1.0)));
+    support::undefined()
+}
+
+/// A listener that queues a microtask and dispatches to another node,
+/// as `other.click()` in script does.
+fn dispatch(e: &mut Stub, h: &mut DomHost<Stub>, caps: &[Value], _: Value, _: &[Value]) -> V {
+    let job = e.retain(caps[2]);
+    e.enqueue_microtask(job, support::undefined());
+    let other = e.host_of(caps[1], &NodeClass::<Stub>::DEF).expect("a node");
+    let other = h.node(other);
+    assert_eq!(h.fire(e, other, atom!("click")), 2);
+    support::undefined()
+}
+
+#[test]
+fn a_dispatch_script_started_runs_no_checkpoint_between_its_listeners() {
+    let mut js = Js::new();
+    let doc = js.doc();
+    let name = js.str("div");
+    let a = js.call(doc.get(), "createElement", &[name.get()]);
+    let b = js.call(doc.get(), "createElement", &[name.get()]);
+    let log = js.object();
+    let click = js.str("click");
+    for _ in 0..2 {
+        let l = js.retain(log.get());
+        let f = js.e.new_closure::<DomHost<Stub>>(js.h.realm, note, vec![l]);
+        js.run(b.get(), "addEventListener", &[click.get(), f.get()]);
+        js.drop(f);
+    }
+    let l = js.retain(log.get());
+    let job = js.e.new_closure::<DomHost<Stub>>(js.h.realm, mark, vec![l]);
+    let caps = vec![js.retain(log.get()), js.retain(b.get()), job];
+    let f = js.e.new_closure::<DomHost<Stub>>(js.h.realm, dispatch, caps);
+    js.run(a.get(), "addEventListener", &[click.get(), f.get()]);
+    let n = js.node(a.get());
+    assert_eq!(js.h.fire(&mut js.e, n, atom!("click")), 1);
+    assert_eq!(js.read(log.get(), "seen"), "0", "the microtask waited for the outer listener");
+    assert_eq!(js.read(log.get(), "mt"), "1", "and ran at the checkpoint after it");
+    assert_eq!(js.e.script_depth(), 0);
+    for v in [f, click, log, b, a, name, doc] {
+        js.drop(v);
+    }
 }

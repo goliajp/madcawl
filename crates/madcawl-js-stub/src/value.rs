@@ -6,6 +6,7 @@
 //! 0x0000_xxxx_xxxx_xxx0    pointer to a counted block (8-aligned)
 //! 0x02 null, 0x0A undefined, 0x06 false, 0x07 true
 //! 0x00                     never a value: the thrown sentinel
+//! 0x12                     never a value: the absent sentinel
 //! ```
 //!
 //! A pointer is either a `DomString` block (type tag `TAG_STR`) or one
@@ -27,6 +28,8 @@ pub(crate) const UNDEFINED: Value = Value(0x0A);
 pub(crate) const FALSE: Value = Value(0x06);
 pub(crate) const TRUE: Value = Value(0x07);
 pub(crate) const THROWN: Value = Value(0);
+/// An index getter's "no such index"; never a value.
+pub(crate) const ABSENT: Value = Value(0x12);
 
 impl Value {
     pub(crate) fn number(n: f64) -> Value {

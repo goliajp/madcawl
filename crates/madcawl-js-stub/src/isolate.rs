@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU8;
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 use madcawl_js::{Key, Owned};
 use madcawl_str::{Atom, DomString, HeldAtoms};
@@ -27,6 +27,8 @@ pub(crate) struct RealmData {
 /// One isolate. It runs no script: tests do through the engine
 /// interface what script would.
 pub struct Stub {
+    /// This isolate's number among those of the process.
+    pub(crate) id: u32,
     pub(crate) realms: Vec<RealmData>,
     pub(crate) current: u32,
     pub(crate) exception: Option<Value>,
@@ -34,6 +36,10 @@ pub struct Stub {
     pub(crate) names: HeldAtoms,
     pub(crate) microtasks: std::collections::VecDeque<(Value, Value)>,
     pub(crate) in_checkpoint: bool,
+    /// Script and host functions on the stack.
+    pub(crate) depth: u32,
+    /// Ending the running script on a terminate request.
+    pub(crate) terminating: bool,
     /// Dead wrappers whose host has not been told.
     pub(crate) notices: Vec<Value>,
     /// While a batch of unlinks runs, released values wait here.
@@ -53,7 +59,9 @@ pub struct Stub {
 
 impl Stub {
     pub fn new() -> Self {
+        static NEXT: AtomicU32 = AtomicU32::new(1);
         Stub {
+            id: NEXT.fetch_add(1, Ordering::Relaxed),
             realms: Vec::new(),
             current: 0,
             exception: None,
@@ -61,6 +69,8 @@ impl Stub {
             names: HeldAtoms::new(),
             microtasks: Default::default(),
             in_checkpoint: false,
+            depth: 0,
+            terminating: false,
             notices: Vec::new(),
             deferred: None,
             buffer: Vec::new(),
@@ -89,7 +99,12 @@ impl Stub {
 
     pub(crate) fn alloc(&mut self, realm: u32, body: Body) -> Value {
         self.live += 1;
-        Cell::alloc(realm, body)
+        Cell::alloc(self.id, realm, body)
+    }
+
+    /// `c` is this isolate's.
+    pub(crate) fn own(&self, c: &Cell) {
+        assert_eq!(c.isolate, self.id, "a value of another isolate");
     }
 
     pub(crate) fn owned(v: Value) -> Owned<Value> {
@@ -105,11 +120,54 @@ impl Stub {
         } else if v.is_cell() {
             // SAFETY: a live cell
             let c = unsafe { Cell::at(v) };
+            self.own(c);
+            // as in the engine: a count of 0 is freed memory
+            assert_ne!(c.count(), 0, "a count added to a dead object");
             c.set_count(c.count() + 1);
-            if let Body::Wrapper { dead, .. } = &mut c.body {
-                *dead = false;
-            }
         }
+    }
+
+    /// Entering a script or host function; false when script is being
+    /// ended, and the function is not run.
+    pub(crate) fn enter(&mut self) -> bool {
+        if self.interrupt.fetch_and(!1, Ordering::Relaxed) & 1 != 0 {
+            self.terminating = true;
+        }
+        if self.terminating {
+            return false;
+        }
+        self.depth += 1;
+        true
+    }
+
+    /// Leaving the function entered; its result, or thrown when script
+    /// was ended meanwhile, with no exception left registered.
+    pub(crate) fn leave(&mut self, r: Value) -> Value {
+        self.depth -= 1;
+        if self.terminating {
+            self.release_value(r);
+            if let Some(e) = self.exception.take() {
+                self.release_value(e);
+            }
+            return crate::value::THROWN;
+        }
+        r
+    }
+
+    /// The host entering the isolate: at depth 0 that starts afresh
+    /// after a termination.
+    pub(crate) fn outermost(&mut self) {
+        if self.depth == 0 {
+            self.terminating = false;
+        }
+    }
+
+    /// The global of a realm that is not detached: detaching gave up its
+    /// count.
+    pub(crate) fn live_global(&mut self, r: u32) -> Value {
+        let d = self.realm_data(r);
+        assert!(!d.detached, "a detached realm");
+        d.global
     }
 
     /// Give up one count on `v`, and everything that frees.
@@ -132,6 +190,7 @@ impl Stub {
             }
             // SAFETY: a live cell
             let c = unsafe { Cell::at(v) };
+            self.own(c);
             let n = c.count() - 1;
             c.set_count(n);
             if n != 0 {
@@ -141,19 +200,13 @@ impl Stub {
             c.take_held(&mut work);
             self.clear_weak(v);
             match &mut c.body {
-                Body::Wrapper {
-                    dead,
-                    noticed,
-                    preserved,
-                    ..
-                } => {
-                    // the host gave up the preserved edge, in unlink
+                Body::Wrapper { dead, preserved, .. } => {
+                    // kept until the notice is delivered: the host may still
+                    // read the wrapper word, and wrapper_upgrade says it died.
+                    // The host gave up the preserved edge, in unlink
                     *preserved = false;
                     *dead = true;
-                    if !*noticed {
-                        *noticed = true;
-                        self.notices.push(v);
-                    }
+                    self.notices.push(v);
                 }
                 _ => self.free_cell(v),
             }

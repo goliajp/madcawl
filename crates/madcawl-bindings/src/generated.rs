@@ -4,16 +4,18 @@
 
 use std::marker::PhantomData;
 
-use madcawl_js::{Attribute, ClassDef, ClassId, Constant, Engine, Operation, Owned};
+use madcawl_js::{Attribute, Bound, ClassDef, ClassId, Constant, Ctx, Engine, Operation, Owned};
 
 use crate::convert as cv;
 use crate::gc::NodeOps;
 use crate::host::DomHost;
 use crate::impls;
+use crate::shell;
 
 pub struct EventTargetClass<E>(PhantomData<E>);
 
 impl<E: Engine> EventTargetClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "EventTarget",
         id: ClassId(1),
@@ -21,8 +23,8 @@ impl<E: Engine> EventTargetClass<E> {
         parent: None,
         attributes: &[],
         operations: &[
-            Operation { name: "addEventListener", length: 2, call: event_target_add_event_listener::<E> },
-            Operation { name: "removeEventListener", length: 2, call: event_target_remove_event_listener::<E> },
+            Operation { name: "addEventListener", length: 2, call: unsafe { Bound::host_fn(event_target_add_event_listener_abi::<E>) } },
+            Operation { name: "removeEventListener", length: 2, call: unsafe { Bound::host_fn(event_target_remove_event_listener_abi::<E>) } },
         ],
         constants: &[],
         interceptors: None,
@@ -41,6 +43,9 @@ fn event_target_add_event_listener<E: Engine>(e: &mut E, h: &mut DomHost<E>, thi
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_target_add_event_listener_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, event_target_add_event_listener::<E>) } }
+
 fn event_target_remove_event_listener<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &EventTargetClass::<E>::DEF)?;
@@ -52,33 +57,37 @@ fn event_target_remove_event_listener<E: Engine>(e: &mut E, h: &mut DomHost<E>, 
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_target_remove_event_listener_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, event_target_remove_event_listener::<E>) } }
+
 pub struct NodeClass<E>(PhantomData<E>);
 
 impl<E: Engine> NodeClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Node",
         id: ClassId(2),
         last: ClassId(4),
         parent: Some(&EventTargetClass::<E>::DEF),
         attributes: &[
-            Attribute { name: "nodeType", get: node_get_node_type::<E>, set: None },
-            Attribute { name: "nodeName", get: node_get_node_name::<E>, set: None },
-            Attribute { name: "isConnected", get: node_get_is_connected::<E>, set: None },
-            Attribute { name: "ownerDocument", get: node_get_owner_document::<E>, set: None },
-            Attribute { name: "parentNode", get: node_get_parent_node::<E>, set: None },
-            Attribute { name: "parentElement", get: node_get_parent_element::<E>, set: None },
-            Attribute { name: "firstChild", get: node_get_first_child::<E>, set: None },
-            Attribute { name: "lastChild", get: node_get_last_child::<E>, set: None },
-            Attribute { name: "previousSibling", get: node_get_previous_sibling::<E>, set: None },
-            Attribute { name: "nextSibling", get: node_get_next_sibling::<E>, set: None },
-            Attribute { name: "textContent", get: node_get_text_content::<E>, set: Some(node_set_text_content::<E>) },
+            Attribute { name: "nodeType", get: unsafe { Bound::host_fn(node_get_node_type_abi::<E>) }, set: None },
+            Attribute { name: "nodeName", get: unsafe { Bound::host_fn(node_get_node_name_abi::<E>) }, set: None },
+            Attribute { name: "isConnected", get: unsafe { Bound::host_fn(node_get_is_connected_abi::<E>) }, set: None },
+            Attribute { name: "ownerDocument", get: unsafe { Bound::host_fn(node_get_owner_document_abi::<E>) }, set: None },
+            Attribute { name: "parentNode", get: unsafe { Bound::host_fn(node_get_parent_node_abi::<E>) }, set: None },
+            Attribute { name: "parentElement", get: unsafe { Bound::host_fn(node_get_parent_element_abi::<E>) }, set: None },
+            Attribute { name: "firstChild", get: unsafe { Bound::host_fn(node_get_first_child_abi::<E>) }, set: None },
+            Attribute { name: "lastChild", get: unsafe { Bound::host_fn(node_get_last_child_abi::<E>) }, set: None },
+            Attribute { name: "previousSibling", get: unsafe { Bound::host_fn(node_get_previous_sibling_abi::<E>) }, set: None },
+            Attribute { name: "nextSibling", get: unsafe { Bound::host_fn(node_get_next_sibling_abi::<E>) }, set: None },
+            Attribute { name: "textContent", get: unsafe { Bound::host_fn(node_get_text_content_abi::<E>) }, set: Some(unsafe { Bound::host_fn(node_set_text_content_abi::<E>) }) },
         ],
         operations: &[
-            Operation { name: "hasChildNodes", length: 0, call: node_has_child_nodes::<E> },
-            Operation { name: "contains", length: 1, call: node_contains::<E> },
-            Operation { name: "insertBefore", length: 2, call: node_insert_before::<E> },
-            Operation { name: "appendChild", length: 1, call: node_append_child::<E> },
-            Operation { name: "removeChild", length: 1, call: node_remove_child::<E> },
+            Operation { name: "hasChildNodes", length: 0, call: unsafe { Bound::host_fn(node_has_child_nodes_abi::<E>) } },
+            Operation { name: "contains", length: 1, call: unsafe { Bound::host_fn(node_contains_abi::<E>) } },
+            Operation { name: "insertBefore", length: 2, call: unsafe { Bound::host_fn(node_insert_before_abi::<E>) } },
+            Operation { name: "appendChild", length: 1, call: unsafe { Bound::host_fn(node_append_child_abi::<E>) } },
+            Operation { name: "removeChild", length: 1, call: unsafe { Bound::host_fn(node_remove_child_abi::<E>) } },
         ],
         constants: &[
             Constant { name: "ELEMENT_NODE", value: 1.0 },
@@ -101,12 +110,18 @@ fn node_get_node_type<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) 
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_get_node_type_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, node_get_node_type::<E>) } }
+
 fn node_get_node_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &NodeClass::<E>::DEF)?;
         impls::node::node_name(e, h, this)
     })
 }
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_get_node_name_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, node_get_node_name::<E>) } }
 
 fn node_get_is_connected<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -115,12 +130,18 @@ fn node_get_is_connected<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Valu
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_get_is_connected_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, node_get_is_connected::<E>) } }
+
 fn node_get_owner_document<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &NodeClass::<E>::DEF)?;
         impls::node::owner_document(e, h, this)
     })
 }
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_get_owner_document_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, node_get_owner_document::<E>) } }
 
 fn node_get_parent_node<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -129,12 +150,18 @@ fn node_get_parent_node<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_get_parent_node_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, node_get_parent_node::<E>) } }
+
 fn node_get_parent_element<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &NodeClass::<E>::DEF)?;
         impls::node::parent_element(e, h, this)
     })
 }
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_get_parent_element_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, node_get_parent_element::<E>) } }
 
 fn node_get_first_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -143,12 +170,18 @@ fn node_get_first_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_get_first_child_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, node_get_first_child::<E>) } }
+
 fn node_get_last_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &NodeClass::<E>::DEF)?;
         impls::node::last_child(e, h, this)
     })
 }
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_get_last_child_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, node_get_last_child::<E>) } }
 
 fn node_get_previous_sibling<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -157,6 +190,9 @@ fn node_get_previous_sibling<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_get_previous_sibling_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, node_get_previous_sibling::<E>) } }
+
 fn node_get_next_sibling<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &NodeClass::<E>::DEF)?;
@@ -164,12 +200,18 @@ fn node_get_next_sibling<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Valu
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_get_next_sibling_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, node_get_next_sibling::<E>) } }
+
 fn node_get_text_content<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &NodeClass::<E>::DEF)?;
         impls::node::text_content(e, h, this)
     })
 }
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_get_text_content_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, node_get_text_content::<E>) } }
 
 fn node_set_text_content<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -179,12 +221,18 @@ fn node_set_text_content<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Valu
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_set_text_content_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, node_set_text_content::<E>) } }
+
 fn node_has_child_nodes<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &NodeClass::<E>::DEF)?;
         impls::node::has_child_nodes(e, h, this)
     })
 }
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_has_child_nodes_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, node_has_child_nodes::<E>) } }
 
 fn node_contains<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -194,6 +242,9 @@ fn node_contains<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args:
         impls::node::contains(e, h, this, a0)
     })
 }
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_contains_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, node_contains::<E>) } }
 
 fn node_insert_before<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -205,6 +256,9 @@ fn node_insert_before<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, 
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_insert_before_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, node_insert_before::<E>) } }
+
 fn node_append_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &NodeClass::<E>::DEF)?;
@@ -213,6 +267,9 @@ fn node_append_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, a
         impls::node::append_child(e, h, this, a0)
     })
 }
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_append_child_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, node_append_child::<E>) } }
 
 fn node_remove_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -223,23 +280,27 @@ fn node_remove_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, a
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_remove_child_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, node_remove_child::<E>) } }
+
 pub struct ElementClass<E>(PhantomData<E>);
 
 impl<E: Engine> ElementClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Element",
         id: ClassId(3),
         last: ClassId(3),
         parent: Some(&NodeClass::<E>::DEF),
         attributes: &[
-            Attribute { name: "localName", get: element_get_local_name::<E>, set: None },
-            Attribute { name: "tagName", get: element_get_tag_name::<E>, set: None },
-            Attribute { name: "id", get: element_get_id::<E>, set: None },
-            Attribute { name: "className", get: element_get_class_name::<E>, set: None },
+            Attribute { name: "localName", get: unsafe { Bound::host_fn(element_get_local_name_abi::<E>) }, set: None },
+            Attribute { name: "tagName", get: unsafe { Bound::host_fn(element_get_tag_name_abi::<E>) }, set: None },
+            Attribute { name: "id", get: unsafe { Bound::host_fn(element_get_id_abi::<E>) }, set: None },
+            Attribute { name: "className", get: unsafe { Bound::host_fn(element_get_class_name_abi::<E>) }, set: None },
         ],
         operations: &[
-            Operation { name: "getAttribute", length: 1, call: element_get_attribute::<E> },
-            Operation { name: "hasAttribute", length: 1, call: element_has_attribute::<E> },
+            Operation { name: "getAttribute", length: 1, call: unsafe { Bound::host_fn(element_get_attribute_abi::<E>) } },
+            Operation { name: "hasAttribute", length: 1, call: unsafe { Bound::host_fn(element_has_attribute_abi::<E>) } },
         ],
         constants: &[],
         interceptors: None,
@@ -254,12 +315,18 @@ fn element_get_local_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Val
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_get_local_name_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, element_get_local_name::<E>) } }
+
 fn element_get_tag_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
         impls::element::tag_name(e, h, this)
     })
 }
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_get_tag_name_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, element_get_tag_name::<E>) } }
 
 fn element_get_id<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -268,12 +335,18 @@ fn element_get_id<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> O
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_get_id_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, element_get_id::<E>) } }
+
 fn element_get_class_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
         impls::element::class_name(e, h, this)
     })
 }
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_get_class_name_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, element_get_class_name::<E>) } }
 
 fn element_get_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -284,6 +357,9 @@ fn element_get_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Valu
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_get_attribute_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_get_attribute::<E>) } }
+
 fn element_has_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
@@ -293,22 +369,26 @@ fn element_has_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Valu
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_has_attribute_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_has_attribute::<E>) } }
+
 pub struct DocumentClass<E>(PhantomData<E>);
 
 impl<E: Engine> DocumentClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Document",
         id: ClassId(4),
         last: ClassId(4),
         parent: Some(&NodeClass::<E>::DEF),
         attributes: &[
-            Attribute { name: "documentElement", get: document_get_document_element::<E>, set: None },
+            Attribute { name: "documentElement", get: unsafe { Bound::host_fn(document_get_document_element_abi::<E>) }, set: None },
         ],
         operations: &[
-            Operation { name: "createElement", length: 1, call: document_create_element::<E> },
-            Operation { name: "createTextNode", length: 1, call: document_create_text_node::<E> },
-            Operation { name: "createComment", length: 1, call: document_create_comment::<E> },
-            Operation { name: "getElementById", length: 1, call: document_get_element_by_id::<E> },
+            Operation { name: "createElement", length: 1, call: unsafe { Bound::host_fn(document_create_element_abi::<E>) } },
+            Operation { name: "createTextNode", length: 1, call: unsafe { Bound::host_fn(document_create_text_node_abi::<E>) } },
+            Operation { name: "createComment", length: 1, call: unsafe { Bound::host_fn(document_create_comment_abi::<E>) } },
+            Operation { name: "getElementById", length: 1, call: unsafe { Bound::host_fn(document_get_element_by_id_abi::<E>) } },
         ],
         constants: &[],
         interceptors: None,
@@ -323,6 +403,9 @@ fn document_get_document_element<E: Engine>(e: &mut E, h: &mut DomHost<E>, this:
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_get_document_element_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, document_get_document_element::<E>) } }
+
 fn document_create_element<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
@@ -331,6 +414,9 @@ fn document_create_element<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Va
         impls::document::create_element(e, h, this, a0)
     })
 }
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_create_element_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, document_create_element::<E>) } }
 
 fn document_create_text_node<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -341,6 +427,9 @@ fn document_create_text_node<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_create_text_node_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, document_create_text_node::<E>) } }
+
 fn document_create_comment<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
@@ -350,6 +439,9 @@ fn document_create_comment<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Va
     })
 }
 
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_create_comment_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, document_create_comment::<E>) } }
+
 fn document_get_element_by_id<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
@@ -358,3 +450,6 @@ fn document_get_element_by_id<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E:
         impls::document::get_element_by_id(e, h, this, a0)
     })
 }
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_get_element_by_id_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, document_get_element_by_id::<E>) } }

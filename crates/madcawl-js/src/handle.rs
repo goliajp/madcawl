@@ -7,7 +7,8 @@
 //!   lives while it is held: a timer's callback, a fetch in flight, an
 //!   event being dispatched.
 //! - Weak: [`crate::Engine::weak`]; a node's wrapper word is the weak
-//!   handle the engine itself clears through `wrapper_died`.
+//!   handle the engine itself clears through `wrapper_died`, and the
+//!   host reads through [`crate::Engine::wrapper_upgrade`].
 //!
 //! None of them gives its count back on drop, since that needs the
 //! engine: each has a method that takes it.

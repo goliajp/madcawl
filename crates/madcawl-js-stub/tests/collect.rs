@@ -4,8 +4,8 @@
 
 use madcawl_abi as abi;
 use madcawl_js::{
-    ClassDef, ClassId, Deadline, Engine, Host, HostOps, HostRef, Key, Member, Root, Step, Tracer,
-    Unlinker,
+    Bound, ClassDef, ClassId, Ctx, Deadline, Engine, Host, HostOps, HostRef, Key, Member, Root, Step,
+    Tracer, Unlinker,
 };
 use madcawl_js_stub::{Realm, Stub, Value};
 use madcawl_str::DomString;
@@ -132,7 +132,15 @@ impl Objs {
     fn wrap(&mut self, e: &mut Stub, realm: Realm, h: HostRef) -> madcawl_js::Owned<Value> {
         let o = obj(h);
         if o.wrapper != 0 {
-            return e.retain(Stub::wrapper_value(o.wrapper & !1));
+            if let Some(w) = e.wrapper_upgrade(o.wrapper & !1) {
+                return w;
+            }
+            if o.wrapper & 1 != 0 {
+                // SAFETY: the preserved edge's count, given up
+                e.release(unsafe { madcawl_js::Owned::from_raw(Stub::wrapper_value(o.wrapper & !1)) });
+            }
+            o.wrapper = 0;
+            dec(h.addr());
         }
         let w = e.new_wrapper(realm, &CLASS, h);
         o.wrapper = Stub::wrapper_word(w.get());
@@ -284,15 +292,39 @@ fn a_wrapper_without_state_is_dropped_and_made_again() {
     let a = host.new_obj();
     inc(a.addr());
     let w = host.wrap(&mut e, realm, a);
+    let old = obj(a).wrapper;
     e.release(w);
-    assert_ne!(obj(a).wrapper, 0, "the notice waits for the host");
-    // read again before the host was told: the same cell comes back
+    assert_eq!(obj(a).wrapper, old, "the notice waits for the host");
+    // read again before the host was told: the dead wrapper is refused,
+    // and the host makes a new one
+    assert!(e.wrapper_upgrade(old).is_none());
+    obj(a).wrapper = 0;
+    dec(a.addr());
     let back = host.wrap(&mut e, realm, a);
+    let new = obj(a).wrapper;
+    assert_ne!(new, old);
+    host.settle(&mut e);
+    assert_eq!(obj(a).wrapper, new, "no notice for the refused wrapper");
+    assert_eq!(abi::refcount(obj(a).header), 2, "the host's count and the new wrapper's");
+    assert_eq!(e.live_cells(), 2, "the global and the new wrapper");
     e.release(back);
     host.settle(&mut e);
     assert_eq!(obj(a).wrapper, 0);
     assert_eq!(abi::refcount(obj(a).header), 1);
     assert_eq!(e.live_cells(), 1);
+}
+
+#[test]
+#[should_panic(expected = "a count added to a dead object")]
+fn a_count_added_to_a_dead_wrapper_is_caught() {
+    let (mut e, mut host) = (Stub::new(), Objs::default());
+    let realm = e.new_realm();
+    let a = host.new_obj();
+    let w = host.wrap(&mut e, realm, a);
+    let word = obj(a).wrapper;
+    e.release(w);
+    // what the old protocol did: retain the wrapper the word names
+    let _ = e.retain(Stub::wrapper_value(word));
 }
 
 #[test]
@@ -353,12 +385,23 @@ fn more_edges_than_counts_keep_the_object_alive() {
     assert_eq!(e.last_collection().garbage, 0);
 }
 
+/// A host function through the C calling convention: its first
+/// argument back, with a count.
+unsafe extern "C" fn identity(ctx: *mut Ctx, _this: u64, argv: *const u64, argc: usize) -> u64 {
+    // SAFETY: the engine calls it with a context for Objs and its
+    // arguments
+    let ((e, _host), args) = unsafe { (Ctx::parts::<Stub, Objs>(ctx), Stub::values(argv, argc)) };
+    assert_eq!(e.script_depth(), 1, "inside a host function");
+    Stub::to_bits(e.retain(args[0]).into_raw())
+}
+
 #[test]
 fn values_borrowed_into_a_call_and_returned_with_a_count() {
     let (mut e, mut host) = (Stub::new(), Objs::default());
     let realm = e.new_realm();
     let arg = e.new_object(realm);
-    let f = e.new_function::<Objs>(realm, "id", 1, |e, _, _, args| e.retain(args[0]));
+    // SAFETY: identity reads its context as Stub and Objs
+    let f = e.new_function::<Objs>(realm, "id", 1, unsafe { Bound::host_fn(identity) });
     let before = e.count_of(arg.get());
     let r = e.call(&mut host, f.get(), Stub::undefined(), &[arg.get()]);
     assert_eq!(r.get(), arg.get());

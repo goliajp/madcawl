@@ -1,6 +1,7 @@
 //! The cycle collector: trial deletion over a side graph, built in
 //! batches by deadline, checked again in one step, then unlinked in
-//! batches.
+//! batches. The step that decides also marks the garbage wrappers dead,
+//! so that `wrapper_upgrade` refuses them while the unlinking goes on.
 //!
 //! Candidates are cells whose count dropped and stayed above zero, and
 //! host objects the host suspects. The graph's vertices are cells and
@@ -157,6 +158,11 @@ impl Stub {
         self.collector.last
     }
 
+    /// Whether a collection stopped between two batches of unlinks.
+    pub fn unlinking(&self) -> bool {
+        matches!(self.collector.phase, Phase::Unlink { .. })
+    }
+
     /// The counted edges out of `v`, as they are now.
     fn edges<H: Host<Stub>>(&self, host: &H, v: Vertex, out: &mut StubTracer) {
         match v {
@@ -168,7 +174,7 @@ impl Stub {
                 for h in held {
                     out.value(h);
                 }
-                if let Body::Wrapper { obj, .. } = cell.body {
+                if let Body::Wrapper { obj, orphan: false, .. } = cell.body {
                     out.host(obj);
                 }
             }
@@ -294,9 +300,16 @@ impl Stub {
             }
         }
         let garbage = g.garbage().unwrap_or_else(|e| panic!("{e:?}"));
+        // in the same step as the verdict: between the unlink batches to
+        // come, a node's wrapper word must not hand script a wrapper whose
+        // properties a later batch takes
         for &v in &garbage {
             if let Vertex::Cell(c) = v {
                 self.clear_weak(c);
+                // SAFETY: a live cell
+                if let Body::Wrapper { condemned, .. } = &mut unsafe { Cell::at(c) }.body {
+                    *condemned = true;
+                }
             }
         }
         garbage
