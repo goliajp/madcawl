@@ -2,6 +2,7 @@
 name = "madcawl-abi"
 description = "Byte layout of heap blocks shared with the script engine"
 version.workspace = true
+publish = false
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

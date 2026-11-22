@@ -2,6 +2,7 @@
 name = "madcawl-js-stub"
 description = "A script engine that runs no script: the engine interface and its cycle collector, for testing bindings"
 version.workspace = true
+publish = false
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

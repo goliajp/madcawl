@@ -2,6 +2,7 @@
 name = "madcawl-js"
 description = "The script engine interface the DOM bindings are written against"
 version.workspace = true
+publish = false
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

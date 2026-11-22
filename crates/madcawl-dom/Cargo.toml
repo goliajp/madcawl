@@ -2,6 +2,7 @@
 name = "madcawl-dom"
 description = "The DOM: a node arena of 64-byte nodes, attributes, tree operations and reference counts"
 version.workspace = true
+publish = false
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

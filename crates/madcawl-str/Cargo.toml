@@ -2,6 +2,7 @@
 name = "madcawl-str"
 description = "Reference-counted Latin-1 / UTF-16 strings shared by the DOM and the script engine"
 version.workspace = true
+publish = false
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

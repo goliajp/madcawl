@@ -2,6 +2,7 @@
 name = "madcawl-bindings"
 description = "DOM bindings over the script engine interface, generated from Web IDL"
 version.workspace = true
+publish = false
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
