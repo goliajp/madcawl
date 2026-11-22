@@ -1,23 +1,6 @@
 # files of css-parsing-tests this crate does not run, one per line: the
 # file, then why. every case in a listed file counts as skipped
 #
-# the color files test the <color> value grammar of CSS Color 3, 4 and 5
-# and the serialization of computed colors: property values, which the
-# cascade and computed values parse, not the syntax this crate covers
-color_function_4.json values: <color>
-color_functions_5.json values: <color>
-color_hexadecimal_3.json values: <color>
-color_hexadecimal_4.json values: <color>
-color_hsl_3.json values: <color>
-color_hsl_4.json values: <color>
-color_hwb_4.json values: <color>
-color_keywords_3.json values: <color>
-color_keywords_4.json values: <color>
-color_lab_4.json values: <color>
-color_lch_4.json values: <color>
-color_oklab_4.json values: <color>
-color_oklch_4.json values: <color>
-#
 # cases of stylesheet_bytes.json (numbered from 1) whose bytes are in
 # ISO-8859-2 or ISO-8859-5: the encoding is determined right, but the
 # decoder madcawl-html has decodes every non-ASCII byte of a legacy

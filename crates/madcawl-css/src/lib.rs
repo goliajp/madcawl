@@ -22,6 +22,7 @@ pub mod steps;
 
 mod anb;
 mod bytes;
+pub mod color;
 mod escape;
 mod names;
 mod parser;

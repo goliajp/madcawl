@@ -11,6 +11,7 @@ mod support;
 
 use std::path::Path;
 
+use madcawl_css::color::{ColorValue, Syntax, light_dark_arguments, parse_color};
 use madcawl_css::{
     Encoding, Span, decode_stylesheet, parse_anb, parse_block_contents, parse_component_value,
     parse_declaration, parse_declaration_list, parse_rule, parse_rule_list,
@@ -40,6 +41,39 @@ fn stylesheet_bytes(input: &Json) -> Json {
         rules,
         Json::Str(encoding.name().to_ascii_lowercase().into_bytes()),
     ])
+}
+
+fn color_json(v: Option<ColorValue>, syntax: Syntax) -> Json {
+    let one = |c: &madcawl_css::color::Color| {
+        let mut out = String::new();
+        c.write(syntax, &mut out);
+        Json::Str(out.into_bytes())
+    };
+    match v {
+        None => Json::Null,
+        Some(ColorValue::Color(c)) => one(&c),
+        Some(ColorValue::LightDark(pair)) => Json::Arr(vec![one(&pair.0), one(&pair.1)]),
+    }
+}
+
+/// The color files: level 3 and 4 write sRGB as `rgb()`, level 5 as
+/// `color(srgb ...)` and a `light-dark()` as its two colors, each null
+/// when it is not one.
+fn color(file: &str, src: &str) -> Json {
+    let syntax = if file.ends_with("_5.json") {
+        Syntax::ColorFunction
+    } else {
+        Syntax::Legacy
+    };
+    if syntax == Syntax::ColorFunction
+        && let Some((a, b)) = light_dark_arguments(src, whole(src))
+    {
+        return Json::Arr(vec![
+            color_json(parse_color(src, a), syntax),
+            color_json(parse_color(src, b), syntax),
+        ]);
+    }
+    color_json(parse_color(src, whole(src)), syntax)
 }
 
 fn run(file: &str, input: &Json) -> Json {
@@ -74,6 +108,7 @@ fn run(file: &str, input: &Json) -> Json {
             Some((a, b)) => Json::Arr(vec![Json::Num(a as f64), Json::Num(b as f64)]),
             None => Json::Null,
         },
+        f if f.starts_with("color_") => color(f, src),
         _ => panic!("no runner for {file}"),
     }
 }
