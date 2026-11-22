@@ -2,7 +2,9 @@
 //! (`decode_stylesheet`: BOM, `@charset`, UTF-8) and returns what came
 //! out flattened to bytes, and the tokenizer's work.
 //!
-//! The tokenizer: fed whole, every token of the input; fed in chunks,
+//! The tokenizer: fed whole, every token of the input, and the input
+//! parsed as a `Stylesheet` with every declaration block asked for (no
+//! panic, work bounded); fed in chunks,
 //! the input is cut at a seeded choice of the boundaries the rule
 //! parser reports (preludes, blocks, declaration values, down to
 //! `MAX_DEPTH` nested blocks) and each piece tokenized on its own. The
@@ -16,7 +18,8 @@
 
 use madcawl_css::selector::{Context, parse_selector_list};
 use madcawl_css::{
-    BlockItem, Kind, Names, ParsedRule, Parser, Span, Token, Tokenizer, decode_stylesheet, steps,
+    BlockItem, Kind, Names, ParsedRule, Parser, Rule, Span, Stylesheet, Token, Tokenizer,
+    decode_stylesheet, steps,
 };
 
 use crate::targets::Out;
@@ -108,6 +111,24 @@ fn walk(src: &str, rules: &mut Vec<Span>, cuts: &mut Vec<u32>) {
     }
 }
 
+/// Ask for every declaration block of the sheet.
+fn force(sheet: &Stylesheet, rules: &[Rule]) {
+    for r in rules {
+        match r {
+            Rule::Style(s) => {
+                sheet.declarations(&s.body);
+                force(sheet, &s.rules);
+            }
+            Rule::FontFace(b) | Rule::Page { body: b, .. } => {
+                sheet.declarations(b);
+            }
+            Rule::Media { rules, .. } | Rule::Supports { rules, .. } => force(sheet, rules),
+            Rule::Layer { rules: Some(r), .. } => force(sheet, r),
+            _ => {}
+        }
+    }
+}
+
 pub fn tokenizer(input: &[u8], feed: Feed) -> Out {
     let src = &text(input);
     steps::take();
@@ -129,7 +150,13 @@ pub fn tokenizer(input: &[u8], feed: Feed) -> Out {
             }
             tokens(src, Span::new(from, src.len()), &mut flat);
         }
-        _ => tokens(src, Span::new(0, src.len()), &mut flat),
+        _ => {
+            tokens(src, Span::new(0, src.len()), &mut flat);
+            let sheet = Stylesheet::parse(src.clone());
+            force(&sheet, sheet.rules());
+            let (all, parsed) = sheet.bodies();
+            assert_eq!(all, parsed, "a declaration block left unparsed");
+        }
     }
     Out {
         flat,

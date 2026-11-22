@@ -1,12 +1,13 @@
-//! CSS: the tokenizer and parser of CSS Syntax Level 3 and the selectors
-//! of Selectors Level 4.
+//! CSS: the tokenizer and parser of CSS Syntax Level 3, the selectors of
+//! Selectors Level 4, and the stylesheet model.
 //!
 //! Everything works on spans of the stylesheet's one copy of its source.
-//! The tokenizer is pulled a token at a time and allocates nothing; the
-//! parser finds rules and declarations as spans, skipping blocks, so a
-//! block is parsed again from its span only when something wants it.
-//! The names selectors use are interned in a table of their own, and
-//! turned into atoms on the main thread in one pass.
+//! The tokenizer is pulled a token at a time and allocates nothing. A
+//! stylesheet keeps each style rule's declaration block as a span until
+//! something asks for its declarations; selectors are parsed at once.
+//! Parsing touches no global state, so it runs on a worker thread
+//! (`Worker`); the names selectors use are interned in the stylesheet's
+//! own table, and turned into atoms on the main thread in one pass.
 
 /// Count `n` units of work for the `steps` feature; nothing without it.
 macro_rules! step {
@@ -25,8 +26,10 @@ mod escape;
 mod names;
 mod parser;
 pub mod selector;
+mod sheet;
 mod tokenizer;
 mod tree;
+mod worker;
 
 pub use anb::parse_anb;
 pub use bytes::decode_stylesheet;
@@ -37,8 +40,10 @@ pub use parser::{
     BlockItem, Declaration, ParsedRule, Parser, SyntaxError, parse_block_contents,
     parse_declaration, parse_declaration_list, parse_rule, parse_rule_list,
 };
+pub use sheet::{Body, MAX_NESTING, Rule, StyleRule, Stylesheet};
 pub use tokenizer::{AT_EOF, ESCAPED, INTEGER, Kind, Token, Tokenizer};
 pub use tree::{ComponentValue, parse_component_value, parse_component_value_list};
+pub use worker::{Parsed, Source, Worker};
 
 /// A byte range of a stylesheet's source.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
