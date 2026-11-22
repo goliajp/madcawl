@@ -4,6 +4,8 @@
 //! seed. Each input is checked three ways: the parser does not panic;
 //! fed in random chunks it gives what it gives fed whole; its work
 //! (`madcawl_html::steps`) stays under a fixed multiple of its length.
+//! The tree target also audits the counts and links of both DOMs it
+//! built (`madcawl_dom::Dom::audit`).
 //!
 //!   madcawl-fuzz <tokenizer|tree> --seconds N [--seed S] [--out DIR] [--steps-per-byte K]
 //!
@@ -85,13 +87,16 @@ struct Counts {
     crashes: u64,
     mismatches: u64,
     slow: u64,
+    audited: u64,
+    audit_failures: u64,
+    audit_mismatches: u64,
     max_steps_per_byte: f64,
     max_len: usize,
 }
 
 fn main() {
     let a = args();
-    let run: fn(&[u8], Feed) -> (Vec<u8>, u64) = match a.target.as_str() {
+    let run: fn(&[u8], Feed) -> targets::Out = match a.target.as_str() {
         "tokenizer" => targets::tokenizer,
         "tree" => targets::tree,
         t => panic!("no target {t:?}: tokenizer or tree"),
@@ -114,7 +119,7 @@ fn main() {
         let got = catch_unwind(AssertUnwindSafe(|| {
             (run(&input, Feed::Whole), run(&input, chunks))
         }));
-        let ((whole, steps_whole), (chunked, steps_chunked)) = match got {
+        let (whole, chunked) = match got {
             Ok(r) => r,
             Err(e) => {
                 c.crashes += 1;
@@ -127,11 +132,19 @@ fn main() {
                 continue;
             }
         };
-        if whole != chunked {
+        if whole.flat != chunked.flat {
             c.mismatches += 1;
             keep(&a, "mismatch", c.mismatches, &input, &format!("{chunks:?}"));
         }
-        let steps = steps_whole.max(steps_chunked);
+        for audit in [whole.audit, chunked.audit].into_iter().flatten() {
+            c.audited += 1;
+            if audit.mismatches() != 0 {
+                c.audit_failures += 1;
+                c.audit_mismatches += audit.mismatches();
+                keep(&a, "audit", c.audit_failures, &input, &format!("{audit:?}"));
+            }
+        }
+        let steps = whole.steps.max(chunked.steps);
         let len = input.len() as u64;
         c.max_steps_per_byte = c.max_steps_per_byte.max(steps as f64 / (len + 1) as f64);
         if steps > STEPS_BASE + a.steps_per_byte * len {
@@ -147,7 +160,8 @@ fn main() {
     }
     println!(
         "{{\"target\":\"{}\",\"seed\":{},\"seconds\":{},\"execs\":{},\"crashes\":{},\"mismatches\":{},\
-         \"slow\":{},\"maxStepsPerByte\":{:.1},\"stepsPerByteLimit\":{},\"corpus\":{},\"maxLen\":{}}}",
+         \"slow\":{},\"audited\":{},\"auditFailures\":{},\"auditMismatches\":{},\"maxStepsPerByte\":{:.1},\
+         \"stepsPerByteLimit\":{},\"corpus\":{},\"maxLen\":{}}}",
         a.target,
         a.seed,
         started.elapsed().as_secs(),
@@ -155,6 +169,9 @@ fn main() {
         c.crashes,
         c.mismatches,
         c.slow,
+        c.audited,
+        c.audit_failures,
+        c.audit_mismatches,
         c.max_steps_per_byte,
         a.steps_per_byte,
         seeds.len(),

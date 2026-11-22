@@ -1,12 +1,13 @@
 //! The two targets: each parses one input fed one way and returns what
-//! came out, flattened to bytes, and the work it took.
+//! came out, flattened to bytes, the work it took and, for a target that
+//! builds a DOM, the count audit of it.
 
 use madcawl_html::{
     Decoder, Encoding, Flow, Options, ParseError, Sink, Token, Tokenizer, TreeBuilder, steps,
 };
 
-use madcawl_dom::Dom;
 use crate::wpt::{Feed, feed_all};
+use madcawl_dom::{Audit, Dom};
 
 /// Every token and error in order, text runs merged, so the stream does
 /// not depend on where the input was cut.
@@ -87,16 +88,26 @@ fn utf8(input: &[u8]) -> Vec<u8> {
     out
 }
 
-pub fn tokenizer(input: &[u8], feed: Feed) -> (Vec<u8>, u64) {
+pub struct Out {
+    pub flat: Vec<u8>,
+    pub steps: u64,
+    pub audit: Option<Audit>,
+}
+
+pub fn tokenizer(input: &[u8], feed: Feed) -> Out {
     let input = &utf8(input);
     steps::take();
     let mut tok = Tokenizer::new();
     let mut sink = Flat::default();
     feed_all(&mut tok, &mut sink, input, feed);
-    (sink.out, steps::take())
+    Out {
+        flat: sink.out,
+        steps: steps::take(),
+        audit: None,
+    }
 }
 
-pub fn tree(input: &[u8], feed: Feed) -> (Vec<u8>, u64) {
+pub fn tree(input: &[u8], feed: Feed) -> Out {
     let input = &utf8(input);
     steps::take();
     let mut tok = Tokenizer::new();
@@ -106,5 +117,9 @@ pub fn tree(input: &[u8], feed: Feed) -> (Vec<u8>, u64) {
     let dom = b.into_sink();
     let mut out = Vec::new();
     dom.write_dat(dom.document(), &mut out);
-    (out, n)
+    Out {
+        flat: out,
+        steps: n,
+        audit: Some(dom.audit()),
+    }
 }
