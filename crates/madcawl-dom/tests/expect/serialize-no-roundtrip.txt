@@ -1,0 +1,117 @@
+# Cases where parsing, serializing by the HTML fragment serialization
+# algorithm (HTML 13.3) and parsing again does not give the same tree,
+# because of the algorithm itself, one per line as
+# <file>:<line of its #data or #description> <class>. A listed case that
+# round trips, or an unlisted one that does not, fails the test.
+#
+# doctype-ids      a DOCTYPE is written as `<!DOCTYPE name>`: its public
+#                  and system identifiers are not written, so they are
+#                  lost, and with them the quirks mode they chose (which
+#                  in quirks01.dat also moves a table out of a p)
+# plaintext        nothing ends a plaintext element once it starts: its
+#                  end tag, the end tags after it and any element the
+#                  parser put inside it come back as its text
+# script-escape    the script text ends inside `<!--<script`, the double
+#                  escaped state, where `</script>` does not end the
+#                  script, so the end tags written after it become
+#                  script text
+# leading-newline  the parser drops a newline right after `<pre>`,
+#                  `<textarea>` or `<listing>`; the algorithm does not
+#                  write an extra one (the note at the end of 13.3), so a
+#                  text starting with a newline loses it
+# carriage-return  a U+000D in text (from `&#x000D;`) is written as it
+#                  is, and the parser turns it into U+000A
+# nesting          a tree markup cannot express: an a inside an a, a
+#                  nobr inside a nobr (foster parenting and the adoption
+#                  agency), a p inside a p, a form inside a form; the
+#                  reparse closes the outer element or ignores the inner
+#                  start tag (the examples in 13.3)
+
+adoption02.dat:58 nesting
+doctype01.dat:168 doctype-ids
+doctype01.dat:179 doctype-ids
+doctype01.dat:190 doctype-ids
+doctype01.dat:285 doctype-ids
+doctype01.dat:296 doctype-ids
+doctype01.dat:310 doctype-ids
+doctype01.dat:321 doctype-ids
+doctype01.dat:335 doctype-ids
+doctype01.dat:358 doctype-ids
+doctype01.dat:369 doctype-ids
+doctype01.dat:396 doctype-ids
+doctype01.dat:408 doctype-ids
+doctype01.dat:420 doctype-ids
+doctype01.dat:433 doctype-ids
+doctype01.dat:446 doctype-ids
+doctype01.dat:461 doctype-ids
+foreign-fragment.dat:481 plaintext
+plain-text-unsafe.dat:1 carriage-return
+plain-text-unsafe.dat:131 plaintext
+plain-text-unsafe.dat:436 leading-newline
+plain-text-unsafe.dat:450 leading-newline
+quirks01.dat:1 doctype-ids
+quirks01.dat:15 doctype-ids
+quirks01.dat:28 doctype-ids
+quirks01.dat:41 doctype-ids
+template.dat:1692 nesting
+tests1.dat:373 nesting
+tests1.dat:1141 nesting
+tests1.dat:1379 nesting
+tests1.dat:1551 nesting
+tests16.dat:403 script-escape
+tests16.dat:418 script-escape
+tests16.dat:433 script-escape
+tests16.dat:448 script-escape
+tests16.dat:463 script-escape
+tests16.dat:478 script-escape
+tests16.dat:493 script-escape
+tests16.dat:654 script-escape
+tests16.dat:669 script-escape
+tests16.dat:684 script-escape
+tests16.dat:699 script-escape
+tests16.dat:714 script-escape
+tests16.dat:729 script-escape
+tests16.dat:1705 script-escape
+tests16.dat:1720 script-escape
+tests16.dat:1735 script-escape
+tests16.dat:1750 script-escape
+tests16.dat:1765 script-escape
+tests16.dat:1780 script-escape
+tests16.dat:1795 script-escape
+tests16.dat:1956 script-escape
+tests16.dat:1971 script-escape
+tests16.dat:1986 script-escape
+tests16.dat:2001 script-escape
+tests16.dat:2587 nesting
+tests18.dat:1 plaintext
+tests18.dat:13 plaintext
+tests18.dat:25 plaintext
+tests18.dat:37 plaintext
+tests18.dat:49 plaintext
+tests18.dat:64 plaintext
+tests18.dat:76 plaintext
+tests18.dat:88 plaintext
+tests18.dat:114 plaintext
+tests18.dat:141 plaintext
+tests18.dat:169 plaintext
+tests18.dat:186 plaintext
+tests18.dat:200 plaintext
+tests18.dat:227 plaintext
+tests18.dat:240 plaintext
+tests18.dat:267 plaintext
+tests18.dat:281 plaintext
+tests18.dat:317 plaintext
+tests18.dat:355 plaintext
+tests19.dat:60 plaintext
+tests19.dat:1423 plaintext
+tests2.dat:159 plaintext
+tests2.dat:177 plaintext
+tests20.dat:444 plaintext
+tests20.dat:536 nesting
+tests26.dat:71 nesting
+tests3.dat:75 leading-newline
+tests3.dat:147 leading-newline
+tests3.dat:227 leading-newline
+tests6.dat:603 doctype-ids
+webkit02.dat:320 plaintext
+webkit02.dat:350 plaintext

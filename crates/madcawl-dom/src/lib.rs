@@ -28,6 +28,7 @@ mod node;
 mod reclaim;
 mod select;
 mod select_cache;
+mod serialize;
 mod sink;
 mod sys;
 mod text;
