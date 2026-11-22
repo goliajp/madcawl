@@ -7,9 +7,19 @@ name = "madcawl-abi"
 version = "0.0.1"
 
 [[package]]
+name = "madcawl-dom"
+version = "0.0.1"
+dependencies = [
+ "madcawl-abi",
+ "madcawl-html",
+ "madcawl-str",
+]
+
+[[package]]
 name = "madcawl-html"
 version = "0.0.1"
 dependencies = [
+ "madcawl-dom",
  "madcawl-str",
 ]
 

@@ -29,6 +29,13 @@ impl Atom {
         self.0
     }
 
+    /// The atom with index `index`, as an index read back from where it
+    /// was stored. It names what it named for as long as a holder keeps
+    /// that atom.
+    pub const fn from_index(index: u32) -> Atom {
+        Atom(index)
+    }
+
     pub const fn is_static(self) -> bool {
         (self.0 as usize) < STATIC_ATOMS
     }

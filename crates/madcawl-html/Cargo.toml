@@ -16,3 +16,7 @@ madcawl-str = { path = "../madcawl-str" }
 [features]
 # count the parser's work, for the fuzz driver (src/steps.rs)
 steps = []
+
+# the tests build into the real DOM and print it in the test format
+[dev-dependencies]
+madcawl-dom = { path = "../madcawl-dom" }

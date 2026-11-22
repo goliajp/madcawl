@@ -7,12 +7,8 @@
 
 use std::time::{Duration, Instant};
 
-use madcawl_html::{Options, Step, Tokenizer, TreeBuilder, TreeSink};
-
-#[path = "support/dom.rs"]
-mod dom;
-
-use dom::Dom;
+use madcawl_dom::Dom;
+use madcawl_html::{Options, Step, Tokenizer, TreeBuilder};
 
 fn parse(input: &[u8]) -> Dom {
     let mut tok = Tokenizer::new();
@@ -54,7 +50,7 @@ fn deep_nesting() {
 #[test]
 fn deep_nesting_stops_at_the_depth_limit() {
     let dom = parse(&b"<div>".repeat(2000));
-    let depth = |mut n: usize| {
+    let depth = |mut n| {
         let mut d = 0;
         while let Some(p) = dom.parent(n) {
             n = p;
@@ -62,12 +58,12 @@ fn deep_nesting_stops_at_the_depth_limit() {
         }
         d
     };
-    let deepest = (0..dom.nodes.len()).map(depth).max().unwrap();
+    let deepest = dom.descendants(dom.document()).map(depth).max().unwrap();
     // as Blink: nesting stops once 513 elements are open (html and 512
     // more), so the deepest element is 514 below the document
     assert_eq!(deepest, 514, "levels below the document");
     let mut out = Vec::new();
-    dom::print(&dom, 0, 0, &mut out);
+    dom.write_dat(dom.document(), &mut out);
     assert!(out.len() > 2000 * 5, "every div is still in the tree");
 }
 
@@ -107,4 +103,49 @@ fn many_tag_names() {
             .collect()
     });
     assert!(r < LIMIT, "many tag names: 4N/N = {r:.2}");
+}
+
+#[test]
+fn text_between_stray_end_tags() {
+    // each run of text merges into the same text node
+    let r = ratio("text between stray end tags", 20_000, |n| {
+        b"ab</x>".repeat(n)
+    });
+    assert!(r < LIMIT, "text between stray end tags: 4N/N = {r:.2}");
+}
+
+#[test]
+fn text_fostered_out_of_a_table() {
+    // each run of table text is moved in front of the table, into the
+    // text node already there
+    let r = ratio("text fostered out of a table", 10_000, |n| {
+        let mut s = b"<table>".to_vec();
+        s.extend_from_slice(&b"ab<tr>".repeat(n));
+        s
+    });
+    assert!(r < LIMIT, "text fostered out of a table: 4N/N = {r:.2}");
+}
+
+#[test]
+fn many_selected_options() {
+    // each selected option that finishes looks for the select's
+    // selectedcontent; there is none, and finding that must not scan
+    let r = ratio("many selected options", 1_000, |n| {
+        let mut s = b"<select>".to_vec();
+        s.extend_from_slice(&b"<option selected>x".repeat(n));
+        s
+    });
+    assert!(r < LIMIT, "many selected options: 4N/N = {r:.2}");
+}
+
+#[test]
+fn many_options_after_many_elements() {
+    // whether an option is the first one must be known without a scan
+    let r = ratio("many options after many elements", 1_000, |n| {
+        let mut s = b"<select>".to_vec();
+        s.extend_from_slice(&b"<div></div>".repeat(n));
+        s.extend_from_slice(&b"<option></option>".repeat(n));
+        s
+    });
+    assert!(r < LIMIT, "many options after many elements: 4N/N = {r:.2}");
 }

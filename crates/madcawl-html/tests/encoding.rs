@@ -2,12 +2,9 @@
 //! the whole input at once, fed one byte at a time and fed in random
 //! chunks; then the decoders and the start-over a late `meta` causes.
 
-#[path = "support/dom.rs"]
-mod dom;
-
 use std::path::Path;
 
-use dom::{Dom, print};
+use madcawl_dom::Dom;
 use madcawl_html::encoding::prescan;
 use madcawl_html::{Confidence, Decoder, DocumentParser, Encoding, Options, Source, Step};
 
@@ -190,7 +187,7 @@ fn utf16_decodes_pairs_and_lone_halves() {
 
 fn tree(dom: &Dom) -> String {
     let mut out = Vec::new();
-    print(dom, 0, 0, &mut out);
+    dom.write_dat(dom.document(), &mut out);
     String::from_utf8(out).unwrap()
 }
 

@@ -168,4 +168,11 @@ pub trait TreeSink {
     /// there; it has left the stack of open elements.
     fn children_finished(&mut self, _element: Self::Handle) {}
     fn parse_error(&mut self, _error: ParseError) {}
+    /// The document holds all the nodes or bytes it may take. The
+    /// parser checks before each token and, once it is full, reports
+    /// `DocumentTooLarge` and stops. A sink that says so still has room
+    /// for the nodes one token creates.
+    fn is_full(&self) -> bool {
+        false
+    }
 }

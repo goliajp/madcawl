@@ -1,0 +1,16 @@
+[package]
+name = "madcawl-dom"
+description = "The DOM: a node arena of 64-byte nodes, attributes, tree operations and reference counts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+madcawl-abi = { path = "../madcawl-abi" }
+madcawl-str = { path = "../madcawl-str" }
+madcawl-html = { path = "../madcawl-html" }

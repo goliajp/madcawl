@@ -55,6 +55,11 @@ pub const fn refcount(header: u64) -> u32 {
     header as u32
 }
 
+/// `header` with its count replaced by `count`.
+pub const fn with_refcount(header: u64, count: u32) -> u64 {
+    header & !0xFFFF_FFFF | count as u64
+}
+
 pub const fn tag(header: u64) -> u16 {
     (header >> 32) as u16
 }

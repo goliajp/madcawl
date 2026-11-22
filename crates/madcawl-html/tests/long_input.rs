@@ -5,16 +5,13 @@
 //! buffer forward (it does so once more than 4 KiB and more than half of
 //! it has been read).
 
+use madcawl_dom::Dom;
 use madcawl_html::{Options, Tokenizer, TreeBuilder};
 
-#[allow(dead_code)]
-#[path = "support/dom.rs"]
-mod dom;
 #[allow(dead_code)]
 #[path = "support/wpt.rs"]
 mod wpt;
 
-use dom::{Dom, print};
 use wpt::{Feed, feed_all, parse_tests};
 
 const TARGET: usize = 1 << 20;
@@ -58,8 +55,9 @@ fn tree(doc: &[u8], feed: Feed) -> Vec<u8> {
     let mut b = TreeBuilder::new(Dom::new(), Options::default());
     feed_all(&mut tok, &mut b, doc, feed);
     let dom = b.into_sink();
+    assert_eq!(dom.audit().mismatches(), 0, "{feed:?}");
     let mut out = Vec::new();
-    print(&dom, 0, 0, &mut out);
+    dom.write_dat(dom.document(), &mut out);
     out
 }
 

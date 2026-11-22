@@ -1,12 +1,11 @@
 //! The html5lib tree construction format, and the three ways the
 //! tests feed an input to the tokenizer.
 
+use madcawl_dom::{Audit, Dom};
 use madcawl_html::{
     Attrs, FragmentContext, HeldAtoms, Namespace, Options, QuirksMode, Sink, Step, Tokenizer,
     TreeBuilder, TreeSink, atom,
 };
-
-use crate::dom::{Dom, print};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Feed {
@@ -132,14 +131,15 @@ pub fn parse_tests(text: &[u8]) -> Vec<Test> {
     tests
 }
 
-pub fn run(test: &Test, scripting: bool, feed: Feed) -> Vec<u8> {
+/// The tree the parser builds for `test`, in the test format, and the
+/// count audit of the DOM it built.
+pub fn run(test: &Test, scripting: bool, feed: Feed) -> (Vec<u8>, Audit) {
     let opts = Options {
         scripting,
         ..Options::default()
     };
     let mut dom = Dom::new();
     let mut tok = Tokenizer::new();
-    let mut root = 0;
     let names = HeldAtoms::new();
     let mut builder = match &test.fragment {
         None => TreeBuilder::new(dom, opts),
@@ -152,7 +152,6 @@ pub fn run(test: &Test, scripting: bool, feed: Feed) -> Vec<u8> {
             };
             let form = (ns == Namespace::Html && local == b"form")
                 .then(|| dom.create_element(Namespace::Html, atom!("form"), Attrs::empty()));
-            root = dom.nodes.len();
             let b = TreeBuilder::new_fragment(
                 dom,
                 opts,
@@ -170,8 +169,16 @@ pub fn run(test: &Test, scripting: bool, feed: Feed) -> Vec<u8> {
     };
     feed_all(&mut tok, &mut builder, &test.data, feed);
     let dom = builder.into_sink();
+    // a fragment's nodes are the children of the root element the
+    // builder put into the document
+    let root = match test.fragment {
+        None => dom.document(),
+        Some(_) => dom
+            .first_child(dom.document())
+            .expect("the fragment's root"),
+    };
     let mut out = Vec::new();
-    print(&dom, root, 0, &mut out);
+    dom.write_dat(root, &mut out);
     out.pop();
-    out
+    (out, dom.audit())
 }

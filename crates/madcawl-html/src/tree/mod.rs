@@ -275,6 +275,11 @@ impl<S: TreeSink> Sink for TreeBuilder<S> {
         if self.stopped {
             return Flow::Continue;
         }
+        if self.sink.is_full() {
+            self.sink.parse_error(ParseError::DocumentTooLarge);
+            self.stop();
+            return Flow::Continue;
+        }
         if let Token::Chars(s) = token {
             self.chars(s);
         } else {

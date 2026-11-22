@@ -28,6 +28,9 @@ pub use static_str::StaticStr;
 use block::{Block, View};
 use wtf8::Wtf8Chars;
 
+/// `repr(transparent)`: a `DomString` is the bits of its block pointer,
+/// so a word that holds such a pointer can be read as one.
+#[repr(transparent)]
 pub struct DomString {
     block: NonNull<u8>,
     /// Neither `Send` nor `Sync`: the count is not atomic.
@@ -48,6 +51,21 @@ static EMPTY: StaticEmpty = StaticEmpty([
 impl DomString {
     pub fn empty() -> Self {
         Self::from_block(NonNull::from(&EMPTY).cast::<u8>())
+    }
+
+    /// The block, with the count this string owned now owned by the
+    /// caller.
+    pub fn into_raw(self) -> NonNull<u8> {
+        let block = self.block;
+        std::mem::forget(self);
+        block
+    }
+
+    /// # Safety
+    /// `block` came from `into_raw`, and the count it carried is given
+    /// to the new string.
+    pub unsafe fn from_raw(block: NonNull<u8>) -> Self {
+        Self::from_block(block)
     }
 
     fn from_block(block: NonNull<u8>) -> Self {

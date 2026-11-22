@@ -1,9 +1,8 @@
 //! The WPT tree construction tests (html5lib format), every one of
 //! them, run with the whole input at once, fed one byte at a time, and
-//! fed in chunks of random size.
+//! fed in chunks of random size. The tree is built in the real DOM,
+//! whose counts are audited after every run.
 
-#[path = "support/dom.rs"]
-mod dom;
 #[path = "support/wpt.rs"]
 mod wpt;
 
@@ -31,6 +30,8 @@ fn wpt_tree_construction_tests() {
     let (mut tests_total, mut skipped) = (0, 0);
     let mut passed = [0usize; 3];
     let mut failures = Vec::new();
+    let mut audit = madcawl_dom::Audit::default();
+    let mut audited_runs = 0usize;
     for path in &files {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
         let (mut f_total, mut f_skip) = (0, 0);
@@ -64,7 +65,9 @@ fn wpt_tree_construction_tests() {
             for (i, feed) in feeds.into_iter().enumerate() {
                 let mut ok = true;
                 for &scripting in modes {
-                    let got = run(&test, scripting, feed);
+                    let (got, a) = run(&test, scripting, feed);
+                    audit.add(a);
+                    audited_runs += 1;
                     if got != test.document {
                         ok = false;
                         failures.push(format!(
@@ -105,5 +108,15 @@ fn wpt_tree_construction_tests() {
          {}/{tests_total} in random chunks, {skipped} skipped as listed",
         passed[0], passed[1], passed[2]
     );
+    eprintln!(
+        "dom-audit: {} nodes in {audited_runs} documents, {} mismatches \
+         ({} counts, {} links, {} flags)",
+        audit.nodes,
+        audit.mismatches(),
+        audit.counts,
+        audit.links,
+        audit.flags
+    );
     assert!(failures.is_empty(), "{} runs failed", failures.len());
+    assert_eq!(audit.mismatches(), 0, "the count audit found mismatches");
 }

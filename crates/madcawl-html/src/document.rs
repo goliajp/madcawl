@@ -314,6 +314,9 @@ impl<D: TreeSink> TreeSink for Watch<D> {
     fn parse_error(&mut self, error: ParseError) {
         self.inner.parse_error(error)
     }
+    fn is_full(&self) -> bool {
+        self.inner.is_full()
+    }
 }
 
 /// The tree builder as the tokenizer's sink, pausing the tokenizer as

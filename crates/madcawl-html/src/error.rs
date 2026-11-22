@@ -30,6 +30,8 @@ errors! {
     ControlCharacterInInputStream => "control-character-in-input-stream",
     ControlCharacterReference => "control-character-reference",
     DisallowedProcessingInstructionTarget => "disallowed-processing-instruction-target",
+    // not one of the standard's: the document holds all the nodes or bytes it may, and the parser stopped
+    DocumentTooLarge => "document-too-large",
     DuplicateAttribute => "duplicate-attribute",
     EndTagWithAttributes => "end-tag-with-attributes",
     EndTagWithTrailingSolidus => "end-tag-with-trailing-solidus",

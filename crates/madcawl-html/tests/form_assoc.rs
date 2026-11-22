@@ -1,28 +1,32 @@
 //! When the tree builder asks the sink to associate an element with the
 //! form element pointer (HTML Living Standard 13.2.6.1, "create an
 //! element for a token"), and when it does not. Which elements are
-//! form-associated and which of those are listed: 4.10.2.
+//! form-associated and which of those are listed: 4.10.2. The DOM
+//! records the association as the element's form owner.
 
+use madcawl_dom::Dom;
 use madcawl_html::{
     Attrs, FragmentContext, HeldAtoms, Namespace, Options, QuirksMode, Step, Tokenizer,
     TreeBuilder, TreeSink, atom,
 };
 
-#[allow(dead_code)]
-#[path = "support/dom.rs"]
-mod dom;
-
-use dom::Dom;
-
+/// The elements with a form owner, in tree order (template contents
+/// after the rest).
 fn names(dom: &Dom) -> Vec<String> {
-    dom.forms
-        .iter()
-        .map(|&(el, form, same)| {
-            assert_eq!(dom.name(form), b"form");
-            assert!(same, "the parser only builds one tree");
-            String::from_utf8_lossy(dom.name(el)).into_owned()
-        })
-        .collect()
+    let mut roots = vec![dom.document()];
+    let mut out = Vec::new();
+    while let Some(root) = roots.pop() {
+        for n in dom.descendants(root) {
+            if let Some(form) = dom.form_owner(n) {
+                assert_eq!(dom.local_name(form), Some(atom!("form")));
+                let mut name = Vec::new();
+                dom.local_name(n).unwrap().write_wtf8(&mut name);
+                out.push(String::from_utf8(name).unwrap());
+            }
+            roots.extend(dom.contents(n));
+        }
+    }
+    out
 }
 
 fn document(html: &str) -> Vec<String> {
