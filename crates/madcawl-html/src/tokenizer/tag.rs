@@ -71,7 +71,9 @@ impl Tokenizer {
 
     pub(super) fn tag_name<S: Sink>(&mut self, sink: &mut S) -> Go {
         let (a, b) = self.input.run(&NAME_STOPS);
-        self.tag.name.extend_from_slice(self.input.bytes(a, b));
+        let run = self.input.bytes(a, b);
+        self.tag.name.extend_from_slice(run);
+        self.tag_hash.feed(run);
         let c = getc!(self, sink);
         match c {
             _ if is_space(c) => self.switch(State::BeforeAttributeName),
@@ -82,7 +84,7 @@ impl Tokenizer {
             }
             NUL => {
                 sink.error(ParseError::UnexpectedNullCharacter);
-                push_char(&mut self.tag.name, REPLACEMENT);
+                self.tag_name_push(REPLACEMENT);
                 Go::On
             }
             EOF => {
@@ -90,7 +92,7 @@ impl Tokenizer {
                 self.emit_eof(sink)
             }
             _ => {
-                push_char(&mut self.tag.name, lower(c));
+                self.tag_name_push(lower(c));
                 Go::On
             }
         }
@@ -104,12 +106,7 @@ impl Tokenizer {
             0x3D => {
                 sink.error(ParseError::UnexpectedEqualsSignBeforeAttributeName);
                 self.new_attribute();
-                self.tag
-                    .attrs
-                    .last_mut()
-                    .expect("just added")
-                    .name
-                    .push(b'=');
+                self.attr_name_push(u32::from(b'='));
                 self.switch(State::AttributeName)
             }
             _ => {
@@ -129,6 +126,7 @@ impl Tokenizer {
                 .expect("an attribute is being read")
                 .name
                 .extend_from_slice(bytes);
+            self.attr_hash.feed(bytes);
         }
         let c = getc!(self, sink);
         match c {
@@ -152,15 +150,7 @@ impl Tokenizer {
                     }
                     _ => lower(c),
                 };
-                push_char(
-                    &mut self
-                        .tag
-                        .attrs
-                        .last_mut()
-                        .expect("an attribute is being read")
-                        .name,
-                    c,
-                );
+                self.attr_name_push(c);
                 Go::On
             }
         }

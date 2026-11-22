@@ -1,7 +1,7 @@
-//! Tag names the tree builder treats specially, as integers, and the
-//! rest interned so that names compare as integers too.
+//! Tag names the tree builder treats specially, as integers. Every
+//! name is an atom; `Tag` is what the builder branches on.
 
-use std::collections::HashMap;
+use madcawl_str::{Atom, HeldAtoms, STATIC_ATOMS};
 
 macro_rules! tags {
     ($($v:ident => $s:literal,)*) => {
@@ -12,206 +12,202 @@ macro_rules! tags {
             Other,
         }
 
-        impl Tag {
-            pub(crate) fn from_bytes(s: &[u8]) -> Tag {
-                match s {
-                    $($s => Tag::$v,)*
-                    _ => Tag::Other,
-                }
-            }
+        /// The atom of each tag but `Other`, in declaration order.
+        static ATOMS: [Atom; Tag::Other as usize] = [$(madcawl_str::atom!($s),)*];
 
-            /// The name as a token spells it. `Other` has none.
-            pub(crate) fn as_bytes(self) -> &'static [u8] {
-                match self {
-                    $(Tag::$v => $s,)*
-                    Tag::Other => b"",
-                }
+        /// The tag of each static atom.
+        static TAGS_OF: [Tag; STATIC_ATOMS] = {
+            let tags = [$(Tag::$v,)*];
+            let mut out = [Tag::Other; STATIC_ATOMS];
+            let mut i = 0;
+            while i < tags.len() {
+                out[ATOMS[i].index() as usize] = tags[i];
+                i += 1;
             }
-        }
+            out
+        };
     };
 }
 
-tags! {
-    A => b"a",
-    Address => b"address",
-    AnnotationXml => b"annotation-xml",
-    Applet => b"applet",
-    Area => b"area",
-    Article => b"article",
-    Aside => b"aside",
-    B => b"b",
-    Base => b"base",
-    Basefont => b"basefont",
-    Bgsound => b"bgsound",
-    Big => b"big",
-    Blockquote => b"blockquote",
-    Body => b"body",
-    Br => b"br",
-    Button => b"button",
-    Caption => b"caption",
-    Center => b"center",
-    Code => b"code",
-    Col => b"col",
-    Colgroup => b"colgroup",
-    Dd => b"dd",
-    Desc => b"desc",
-    Details => b"details",
-    Dialog => b"dialog",
-    Dir => b"dir",
-    Div => b"div",
-    Dl => b"dl",
-    Dt => b"dt",
-    Em => b"em",
-    Embed => b"embed",
-    Fieldset => b"fieldset",
-    Figcaption => b"figcaption",
-    Figure => b"figure",
-    Font => b"font",
-    Footer => b"footer",
-    ForeignObject => b"foreignobject",
-    Form => b"form",
-    Frame => b"frame",
-    Frameset => b"frameset",
-    H1 => b"h1",
-    H2 => b"h2",
-    H3 => b"h3",
-    H4 => b"h4",
-    H5 => b"h5",
-    H6 => b"h6",
-    Head => b"head",
-    Header => b"header",
-    Hgroup => b"hgroup",
-    Hr => b"hr",
-    Html => b"html",
-    I => b"i",
-    Iframe => b"iframe",
-    Image => b"image",
-    Img => b"img",
-    Input => b"input",
-    Keygen => b"keygen",
-    Label => b"label",
-    Li => b"li",
-    Link => b"link",
-    Listing => b"listing",
-    Main => b"main",
-    Malignmark => b"malignmark",
-    Marquee => b"marquee",
-    Math => b"math",
-    Menu => b"menu",
-    Meta => b"meta",
-    Mglyph => b"mglyph",
-    Mi => b"mi",
-    Mn => b"mn",
-    Mo => b"mo",
-    Ms => b"ms",
-    Mtext => b"mtext",
-    Nav => b"nav",
-    Nobr => b"nobr",
-    Noembed => b"noembed",
-    Noframes => b"noframes",
-    Noscript => b"noscript",
-    Object => b"object",
-    Ol => b"ol",
-    Optgroup => b"optgroup",
-    Option => b"option",
-    Output => b"output",
-    P => b"p",
-    Param => b"param",
-    Plaintext => b"plaintext",
-    Pre => b"pre",
-    Rb => b"rb",
-    Rp => b"rp",
-    Rt => b"rt",
-    Rtc => b"rtc",
-    Ruby => b"ruby",
-    S => b"s",
-    Script => b"script",
-    Search => b"search",
-    Section => b"section",
-    Select => b"select",
-    Small => b"small",
-    Source => b"source",
-    Span => b"span",
-    Strike => b"strike",
-    Strong => b"strong",
-    Style => b"style",
-    Sub => b"sub",
-    Summary => b"summary",
-    Sup => b"sup",
-    Svg => b"svg",
-    Table => b"table",
-    Tbody => b"tbody",
-    Td => b"td",
-    Template => b"template",
-    Textarea => b"textarea",
-    Tfoot => b"tfoot",
-    Th => b"th",
-    Thead => b"thead",
-    Title => b"title",
-    Tr => b"tr",
-    Track => b"track",
-    Tt => b"tt",
-    U => b"u",
-    Ul => b"ul",
-    Var => b"var",
-    Wbr => b"wbr",
-    Xmp => b"xmp",
+impl Tag {
+    pub(crate) fn of(atom: Atom) -> Tag {
+        TAGS_OF
+            .get(atom.index() as usize)
+            .copied()
+            .unwrap_or(Tag::Other)
+    }
+
+    /// The atom of a known tag; `Other` has none.
+    pub(crate) fn atom(self) -> Atom {
+        ATOMS[self as usize]
+    }
 }
 
-/// A local name: a known tag, or an interned other one.
+tags! {
+    A => "a",
+    Address => "address",
+    AnnotationXml => "annotation-xml",
+    Applet => "applet",
+    Area => "area",
+    Article => "article",
+    Aside => "aside",
+    B => "b",
+    Base => "base",
+    Basefont => "basefont",
+    Bgsound => "bgsound",
+    Big => "big",
+    Blockquote => "blockquote",
+    Body => "body",
+    Br => "br",
+    Button => "button",
+    Caption => "caption",
+    Center => "center",
+    Code => "code",
+    Col => "col",
+    Colgroup => "colgroup",
+    Dd => "dd",
+    Desc => "desc",
+    Details => "details",
+    Dialog => "dialog",
+    Dir => "dir",
+    Div => "div",
+    Dl => "dl",
+    Dt => "dt",
+    Em => "em",
+    Embed => "embed",
+    Fieldset => "fieldset",
+    Figcaption => "figcaption",
+    Figure => "figure",
+    Font => "font",
+    Footer => "footer",
+    ForeignObject => "foreignobject",
+    Form => "form",
+    Frame => "frame",
+    Frameset => "frameset",
+    H1 => "h1",
+    H2 => "h2",
+    H3 => "h3",
+    H4 => "h4",
+    H5 => "h5",
+    H6 => "h6",
+    Head => "head",
+    Header => "header",
+    Hgroup => "hgroup",
+    Hr => "hr",
+    Html => "html",
+    I => "i",
+    Iframe => "iframe",
+    Image => "image",
+    Img => "img",
+    Input => "input",
+    Keygen => "keygen",
+    Label => "label",
+    Li => "li",
+    Link => "link",
+    Listing => "listing",
+    Main => "main",
+    Malignmark => "malignmark",
+    Marquee => "marquee",
+    Math => "math",
+    Menu => "menu",
+    Meta => "meta",
+    Mglyph => "mglyph",
+    Mi => "mi",
+    Mn => "mn",
+    Mo => "mo",
+    Ms => "ms",
+    Mtext => "mtext",
+    Nav => "nav",
+    Nobr => "nobr",
+    Noembed => "noembed",
+    Noframes => "noframes",
+    Noscript => "noscript",
+    Object => "object",
+    Ol => "ol",
+    Optgroup => "optgroup",
+    Option => "option",
+    Output => "output",
+    P => "p",
+    Param => "param",
+    Plaintext => "plaintext",
+    Pre => "pre",
+    Rb => "rb",
+    Rp => "rp",
+    Rt => "rt",
+    Rtc => "rtc",
+    Ruby => "ruby",
+    S => "s",
+    Script => "script",
+    Search => "search",
+    Section => "section",
+    Select => "select",
+    Small => "small",
+    Source => "source",
+    Span => "span",
+    Strike => "strike",
+    Strong => "strong",
+    Style => "style",
+    Sub => "sub",
+    Summary => "summary",
+    Sup => "sup",
+    Svg => "svg",
+    Table => "table",
+    Tbody => "tbody",
+    Td => "td",
+    Template => "template",
+    Textarea => "textarea",
+    Tfoot => "tfoot",
+    Th => "th",
+    Thead => "thead",
+    Title => "title",
+    Tr => "tr",
+    Track => "track",
+    Tt => "tt",
+    U => "u",
+    Ul => "ul",
+    Var => "var",
+    Wbr => "wbr",
+    Xmp => "xmp",
+}
+
+/// A local name: its atom, and the tag the builder knows it as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Name {
     pub(crate) tag: Tag,
-    pub(crate) atom: u32,
+    pub(crate) atom: Atom,
 }
 
-/// The atom of a name never interned, which matches no element.
-const NO_ATOM: u32 = u32::MAX;
-
 impl Name {
-    pub(crate) const fn known(tag: Tag) -> Name {
-        Name { tag, atom: 0 }
+    pub(crate) fn known(tag: Tag) -> Name {
+        Name {
+            tag,
+            atom: tag.atom(),
+        }
+    }
+
+    pub(crate) fn of(atom: Atom) -> Name {
+        Name {
+            tag: Tag::of(atom),
+            atom,
+        }
+    }
+
+    /// The name of a tag token, held in `names` if it is not static.
+    pub(crate) fn of_tag(t: &crate::token::Tag, names: &HeldAtoms) -> Name {
+        Name::of(t.atom.unwrap_or_else(|| names.hold(&t.name)))
+    }
+
+    /// The name a tag token for an element named `atom` would have.
+    pub(crate) fn lowercase(atom: Atom, names: &HeldAtoms) -> Name {
+        let mut lower = Vec::new();
+        atom.write_wtf8(&mut lower);
+        lower.make_ascii_lowercase();
+        Name::of(names.hold(&lower))
     }
 }
 
 impl From<Tag> for Name {
     fn from(tag: Tag) -> Name {
         Name::known(tag)
-    }
-}
-
-/// Names of elements that are not known tags. It grows with the
-/// number of distinct names in one document, which the input bounds.
-/// The names are the page's, so the hash is keyed per table
-/// (`RandomState`): with a fixed one a page can pick names that all
-/// collide.
-#[derive(Default)]
-pub(crate) struct Atoms {
-    map: HashMap<Box<[u8]>, u32>,
-}
-
-impl Atoms {
-    /// The name of a start tag, interning it if it is new.
-    pub(crate) fn intern(&mut self, s: &[u8]) -> Name {
-        let tag = Tag::from_bytes(s);
-        if tag != Tag::Other {
-            return Name::known(tag);
-        }
-        if let Some(&atom) = self.map.get(s) {
-            return Name { tag, atom };
-        }
-        let atom = self.map.len() as u32 + 1;
-        self.map.insert(s.into(), atom);
-        Name { tag, atom }
-    }
-
-    /// The name of an end tag: one never interned closes nothing.
-    pub(crate) fn lookup(&self, s: &[u8]) -> Name {
-        let tag = Tag::from_bytes(s);
-        if tag != Tag::Other {
-            return Name::known(tag);
-        }
-        let atom = self.map.get(s).copied().unwrap_or(NO_ATOM);
-        Name { tag, atom }
     }
 }

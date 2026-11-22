@@ -109,3 +109,42 @@ fn a_count_at_its_limit_aborts_instead_of_wrapping() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[test]
+fn latin1_bytes_become_a_latin1_string() {
+    let s = DomString::from_latin1(&[b'c', b'a', b'f', 0xE9]);
+    assert!(s.is_latin1() && !s.is_ascii());
+    assert!(s.eq_str("café"));
+    assert_eq!(s, DomString::from_wtf8("café".as_bytes()));
+    let a = DomString::from_latin1(b"plain");
+    assert!(a.is_ascii());
+    assert_eq!(a.as_ascii_str(), Some("plain"));
+    assert!(DomString::from_latin1(b"").is_empty());
+}
+
+#[test]
+fn utf16_units_are_narrowed_when_they_fit_latin1() {
+    let narrow: Vec<u16> = "café".encode_utf16().collect();
+    let s = DomString::from_utf16(&narrow);
+    assert!(s.is_latin1());
+    assert_eq!(s, DomString::from_wtf8("café".as_bytes()));
+    let wide: Vec<u16> = "漢字😀".encode_utf16().collect();
+    let w = DomString::from_utf16(&wide);
+    assert!(!w.is_latin1());
+    assert_eq!(w.units().collect::<Vec<_>>(), wide);
+    let lone = DomString::from_utf16(&[0x61, 0xDC00]);
+    assert_eq!(lone.units().collect::<Vec<_>>(), vec![0x61, 0xDC00]);
+    assert!(DomString::from_utf16(&[]).is_empty());
+}
+
+#[test]
+fn the_word_after_the_length_is_zero() {
+    for s in [
+        DomString::from_wtf8(b"x"),
+        DomString::from_wtf8("漢".as_bytes()),
+    ] {
+        // SAFETY: the word at offset 12 follows the length
+        let pool = unsafe { s.block.as_ptr().add(abi::STR_POOL_OFF).cast::<u32>().read() };
+        assert_eq!(pool, 0);
+    }
+}

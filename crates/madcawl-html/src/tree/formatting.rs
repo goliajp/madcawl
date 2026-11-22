@@ -18,6 +18,7 @@ fn copy_attrs(to: &mut Vec<Attribute>, from: &[Attribute]) {
     let n = to.len();
     for (d, s) in to.iter_mut().zip(from) {
         d.name.clone_from(&s.name);
+        d.atom = s.atom;
         d.value.clone_from(&s.value);
     }
     to.extend_from_slice(&from[n..]);
@@ -131,7 +132,6 @@ impl<S: TreeSink> TreeBuilder<S> {
         let attrs = std::mem::take(attrs);
         let s = Start {
             name: Name::known(tag),
-            raw: tag.as_bytes(),
             attrs: &attrs,
             self_closing: false,
         };

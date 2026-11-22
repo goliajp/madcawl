@@ -1,172 +1,213 @@
 //! Name fixups for foreign content: SVG's mixed-case names, which the
 //! tokenizer has lowercased, and namespaced attributes.
 
+use madcawl_str::{Atom, STATIC_ATOMS, atom};
+
 use super::sink::{Adjust, AttrNamespace, AttrRef};
 use crate::token::Attribute;
 
-/// The SVG element name for a lowercased tag name, if it differs.
-pub(crate) fn svg_tag(name: &[u8]) -> Option<&'static [u8]> {
-    Some(match name {
-        b"altglyph" => b"altGlyph",
-        b"altglyphdef" => b"altGlyphDef",
-        b"altglyphitem" => b"altGlyphItem",
-        b"animatecolor" => b"animateColor",
-        b"animatemotion" => b"animateMotion",
-        b"animatetransform" => b"animateTransform",
-        b"clippath" => b"clipPath",
-        b"feblend" => b"feBlend",
-        b"fecolormatrix" => b"feColorMatrix",
-        b"fecomponenttransfer" => b"feComponentTransfer",
-        b"fecomposite" => b"feComposite",
-        b"feconvolvematrix" => b"feConvolveMatrix",
-        b"fediffuselighting" => b"feDiffuseLighting",
-        b"fedisplacementmap" => b"feDisplacementMap",
-        b"fedistantlight" => b"feDistantLight",
-        b"fedropshadow" => b"feDropShadow",
-        b"feflood" => b"feFlood",
-        b"fefunca" => b"feFuncA",
-        b"fefuncb" => b"feFuncB",
-        b"fefuncg" => b"feFuncG",
-        b"fefuncr" => b"feFuncR",
-        b"fegaussianblur" => b"feGaussianBlur",
-        b"feimage" => b"feImage",
-        b"femerge" => b"feMerge",
-        b"femergenode" => b"feMergeNode",
-        b"femorphology" => b"feMorphology",
-        b"feoffset" => b"feOffset",
-        b"fepointlight" => b"fePointLight",
-        b"fespecularlighting" => b"feSpecularLighting",
-        b"fespotlight" => b"feSpotLight",
-        b"fetile" => b"feTile",
-        b"feturbulence" => b"feTurbulence",
-        b"foreignobject" => b"foreignObject",
-        b"glyphref" => b"glyphRef",
-        b"lineargradient" => b"linearGradient",
-        b"radialgradient" => b"radialGradient",
-        b"textpath" => b"textPath",
-        _ => return None,
-    })
+/// For each static atom, the name it is changed to, by pairs of
+/// lowercased and mixed-case spellings.
+const fn case_table(pairs: &[(&str, &str)]) -> [Option<Atom>; STATIC_ATOMS] {
+    let mut out = [None; STATIC_ATOMS];
+    let mut i = 0;
+    while i < pairs.len() {
+        let (Some(from), Some(to)) = (
+            Atom::lookup_static(pairs[i].0.as_bytes()),
+            Atom::lookup_static(pairs[i].1.as_bytes()),
+        ) else {
+            panic!("a case fixup between names that are not static atoms");
+        };
+        out[from.index() as usize] = Some(to);
+        i += 1;
+    }
+    out
 }
 
-fn svg_attr(name: &[u8]) -> Option<&'static [u8]> {
-    Some(match name {
-        b"attributename" => b"attributeName",
-        b"attributetype" => b"attributeType",
-        b"basefrequency" => b"baseFrequency",
-        b"baseprofile" => b"baseProfile",
-        b"calcmode" => b"calcMode",
-        b"clippathunits" => b"clipPathUnits",
-        b"diffuseconstant" => b"diffuseConstant",
-        b"edgemode" => b"edgeMode",
-        b"filterunits" => b"filterUnits",
-        b"glyphref" => b"glyphRef",
-        b"gradienttransform" => b"gradientTransform",
-        b"gradientunits" => b"gradientUnits",
-        b"kernelmatrix" => b"kernelMatrix",
-        b"kernelunitlength" => b"kernelUnitLength",
-        b"keypoints" => b"keyPoints",
-        b"keysplines" => b"keySplines",
-        b"keytimes" => b"keyTimes",
-        b"lengthadjust" => b"lengthAdjust",
-        b"limitingconeangle" => b"limitingConeAngle",
-        b"markerheight" => b"markerHeight",
-        b"markerunits" => b"markerUnits",
-        b"markerwidth" => b"markerWidth",
-        b"maskcontentunits" => b"maskContentUnits",
-        b"maskunits" => b"maskUnits",
-        b"numoctaves" => b"numOctaves",
-        b"pathlength" => b"pathLength",
-        b"patterncontentunits" => b"patternContentUnits",
-        b"patterntransform" => b"patternTransform",
-        b"patternunits" => b"patternUnits",
-        b"pointsatx" => b"pointsAtX",
-        b"pointsaty" => b"pointsAtY",
-        b"pointsatz" => b"pointsAtZ",
-        b"preservealpha" => b"preserveAlpha",
-        b"preserveaspectratio" => b"preserveAspectRatio",
-        b"primitiveunits" => b"primitiveUnits",
-        b"refx" => b"refX",
-        b"refy" => b"refY",
-        b"repeatcount" => b"repeatCount",
-        b"repeatdur" => b"repeatDur",
-        b"requiredextensions" => b"requiredExtensions",
-        b"requiredfeatures" => b"requiredFeatures",
-        b"specularconstant" => b"specularConstant",
-        b"specularexponent" => b"specularExponent",
-        b"spreadmethod" => b"spreadMethod",
-        b"startoffset" => b"startOffset",
-        b"stddeviation" => b"stdDeviation",
-        b"stitchtiles" => b"stitchTiles",
-        b"surfacescale" => b"surfaceScale",
-        b"systemlanguage" => b"systemLanguage",
-        b"tablevalues" => b"tableValues",
-        b"targetx" => b"targetX",
-        b"targety" => b"targetY",
-        b"textlength" => b"textLength",
-        b"viewbox" => b"viewBox",
-        b"viewtarget" => b"viewTarget",
-        b"xchannelselector" => b"xChannelSelector",
-        b"ychannelselector" => b"yChannelSelector",
-        b"zoomandpan" => b"zoomAndPan",
-        _ => return None,
-    })
+fn fixup(table: &[Option<Atom>; STATIC_ATOMS], name: Atom) -> Option<Atom> {
+    table.get(name.index() as usize).copied().flatten()
+}
+
+static SVG_TAGS: [Option<Atom>; STATIC_ATOMS] = case_table(&[
+    ("altglyph", "altGlyph"),
+    ("altglyphdef", "altGlyphDef"),
+    ("altglyphitem", "altGlyphItem"),
+    ("animatecolor", "animateColor"),
+    ("animatemotion", "animateMotion"),
+    ("animatetransform", "animateTransform"),
+    ("clippath", "clipPath"),
+    ("feblend", "feBlend"),
+    ("fecolormatrix", "feColorMatrix"),
+    ("fecomponenttransfer", "feComponentTransfer"),
+    ("fecomposite", "feComposite"),
+    ("feconvolvematrix", "feConvolveMatrix"),
+    ("fediffuselighting", "feDiffuseLighting"),
+    ("fedisplacementmap", "feDisplacementMap"),
+    ("fedistantlight", "feDistantLight"),
+    ("fedropshadow", "feDropShadow"),
+    ("feflood", "feFlood"),
+    ("fefunca", "feFuncA"),
+    ("fefuncb", "feFuncB"),
+    ("fefuncg", "feFuncG"),
+    ("fefuncr", "feFuncR"),
+    ("fegaussianblur", "feGaussianBlur"),
+    ("feimage", "feImage"),
+    ("femerge", "feMerge"),
+    ("femergenode", "feMergeNode"),
+    ("femorphology", "feMorphology"),
+    ("feoffset", "feOffset"),
+    ("fepointlight", "fePointLight"),
+    ("fespecularlighting", "feSpecularLighting"),
+    ("fespotlight", "feSpotLight"),
+    ("fetile", "feTile"),
+    ("feturbulence", "feTurbulence"),
+    ("foreignobject", "foreignObject"),
+    ("glyphref", "glyphRef"),
+    ("lineargradient", "linearGradient"),
+    ("radialgradient", "radialGradient"),
+    ("textpath", "textPath"),
+]);
+
+static SVG_ATTRS: [Option<Atom>; STATIC_ATOMS] = case_table(&[
+    ("attributename", "attributeName"),
+    ("attributetype", "attributeType"),
+    ("basefrequency", "baseFrequency"),
+    ("baseprofile", "baseProfile"),
+    ("calcmode", "calcMode"),
+    ("clippathunits", "clipPathUnits"),
+    ("diffuseconstant", "diffuseConstant"),
+    ("edgemode", "edgeMode"),
+    ("filterunits", "filterUnits"),
+    ("glyphref", "glyphRef"),
+    ("gradienttransform", "gradientTransform"),
+    ("gradientunits", "gradientUnits"),
+    ("kernelmatrix", "kernelMatrix"),
+    ("kernelunitlength", "kernelUnitLength"),
+    ("keypoints", "keyPoints"),
+    ("keysplines", "keySplines"),
+    ("keytimes", "keyTimes"),
+    ("lengthadjust", "lengthAdjust"),
+    ("limitingconeangle", "limitingConeAngle"),
+    ("markerheight", "markerHeight"),
+    ("markerunits", "markerUnits"),
+    ("markerwidth", "markerWidth"),
+    ("maskcontentunits", "maskContentUnits"),
+    ("maskunits", "maskUnits"),
+    ("numoctaves", "numOctaves"),
+    ("pathlength", "pathLength"),
+    ("patterncontentunits", "patternContentUnits"),
+    ("patterntransform", "patternTransform"),
+    ("patternunits", "patternUnits"),
+    ("pointsatx", "pointsAtX"),
+    ("pointsaty", "pointsAtY"),
+    ("pointsatz", "pointsAtZ"),
+    ("preservealpha", "preserveAlpha"),
+    ("preserveaspectratio", "preserveAspectRatio"),
+    ("primitiveunits", "primitiveUnits"),
+    ("refx", "refX"),
+    ("refy", "refY"),
+    ("repeatcount", "repeatCount"),
+    ("repeatdur", "repeatDur"),
+    ("requiredextensions", "requiredExtensions"),
+    ("requiredfeatures", "requiredFeatures"),
+    ("specularconstant", "specularConstant"),
+    ("specularexponent", "specularExponent"),
+    ("spreadmethod", "spreadMethod"),
+    ("startoffset", "startOffset"),
+    ("stddeviation", "stdDeviation"),
+    ("stitchtiles", "stitchTiles"),
+    ("surfacescale", "surfaceScale"),
+    ("systemlanguage", "systemLanguage"),
+    ("tablevalues", "tableValues"),
+    ("targetx", "targetX"),
+    ("targety", "targetY"),
+    ("textlength", "textLength"),
+    ("viewbox", "viewBox"),
+    ("viewtarget", "viewTarget"),
+    ("xchannelselector", "xChannelSelector"),
+    ("ychannelselector", "yChannelSelector"),
+    ("zoomandpan", "zoomAndPan"),
+]);
+
+/// The SVG element name for a lowercased tag name, if it differs.
+pub(crate) fn svg_tag(name: Atom) -> Option<Atom> {
+    fixup(&SVG_TAGS, name)
 }
 
 /// Namespace, prefix and local name of a namespaced attribute.
-type Foreign = (AttrNamespace, Option<&'static [u8]>, &'static [u8]);
+type Foreign = (AttrNamespace, Option<Atom>, Atom);
 
-fn foreign_attr(name: &[u8]) -> Option<Foreign> {
+static FOREIGN_ATTRS: [(Atom, Foreign); 11] = {
     use AttrNamespace::{XLink, Xml, Xmlns};
-    Some(match name {
-        b"xlink:actuate" => (XLink, Some(b"xlink"), b"actuate"),
-        b"xlink:arcrole" => (XLink, Some(b"xlink"), b"arcrole"),
-        b"xlink:href" => (XLink, Some(b"xlink"), b"href"),
-        b"xlink:role" => (XLink, Some(b"xlink"), b"role"),
-        b"xlink:show" => (XLink, Some(b"xlink"), b"show"),
-        b"xlink:title" => (XLink, Some(b"xlink"), b"title"),
-        b"xlink:type" => (XLink, Some(b"xlink"), b"type"),
-        b"xml:lang" => (Xml, Some(b"xml"), b"lang"),
-        b"xml:space" => (Xml, Some(b"xml"), b"space"),
-        b"xmlns" => (Xmlns, None, b"xmlns"),
-        b"xmlns:xlink" => (Xmlns, Some(b"xmlns"), b"xlink"),
-        _ => return None,
-    })
-}
+    [
+        (
+            atom!("xlink:actuate"),
+            (XLink, Some(atom!("xlink")), atom!("actuate")),
+        ),
+        (
+            atom!("xlink:arcrole"),
+            (XLink, Some(atom!("xlink")), atom!("arcrole")),
+        ),
+        (
+            atom!("xlink:href"),
+            (XLink, Some(atom!("xlink")), atom!("href")),
+        ),
+        (
+            atom!("xlink:role"),
+            (XLink, Some(atom!("xlink")), atom!("role")),
+        ),
+        (
+            atom!("xlink:show"),
+            (XLink, Some(atom!("xlink")), atom!("show")),
+        ),
+        (
+            atom!("xlink:title"),
+            (XLink, Some(atom!("xlink")), atom!("title")),
+        ),
+        (
+            atom!("xlink:type"),
+            (XLink, Some(atom!("xlink")), atom!("type")),
+        ),
+        (atom!("xml:lang"), (Xml, Some(atom!("xml")), atom!("lang"))),
+        (
+            atom!("xml:space"),
+            (Xml, Some(atom!("xml")), atom!("space")),
+        ),
+        (atom!("xmlns"), (Xmlns, None, atom!("xmlns"))),
+        (
+            atom!("xmlns:xlink"),
+            (Xmlns, Some(atom!("xmlns")), atom!("xlink")),
+        ),
+    ]
+};
 
-pub(crate) fn adjust_attr(a: &Attribute, adjust: Adjust) -> AttrRef<'_> {
-    let plain = |local: &'static [u8]| AttrRef {
+pub(crate) fn adjust_attr(a: &Attribute, name: Atom, adjust: Adjust) -> AttrRef<'_> {
+    let plain = |local: Atom| AttrRef {
         ns: AttrNamespace::None,
         prefix: None,
         local,
         value: &a.value,
     };
     match adjust {
-        Adjust::Html => {}
+        Adjust::Html => return plain(name),
         Adjust::Svg => {
-            if let Some(local) = svg_attr(&a.name) {
+            if let Some(local) = fixup(&SVG_ATTRS, name) {
                 return plain(local);
             }
         }
         Adjust::MathMl => {
-            if a.name == b"definitionurl" {
-                return plain(b"definitionURL");
+            if name == atom!("definitionurl") {
+                return plain(atom!("definitionURL"));
             }
         }
     }
-    if adjust != Adjust::Html
-        && let Some((ns, prefix, local)) = foreign_attr(&a.name)
-    {
-        return AttrRef {
+    match FOREIGN_ATTRS.iter().find(|(n, _)| *n == name) {
+        Some(&(_, (ns, prefix, local))) => AttrRef {
             ns,
             prefix,
             local,
             value: &a.value,
-        };
-    }
-    AttrRef {
-        ns: AttrNamespace::None,
-        prefix: None,
-        local: &a.name,
-        value: &a.value,
+        },
+        None => plain(name),
     }
 }

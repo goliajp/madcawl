@@ -16,11 +16,13 @@ mod table;
 mod tag;
 mod types;
 
+use madcawl_str::{Atom, HeldAtoms};
+
 use crate::error::ParseError;
 use crate::token::{Attribute, Token};
 use crate::tokenizer::{Flow, Sink, State};
 pub use sink::{AttrNamespace, AttrRef, Attrs, Namespace, QuirksMode, TreeSink};
-use tag::{Atoms, Name, Tag};
+use tag::{Name, Tag};
 pub(crate) use types::{Active, Class, Mode, Open, Start, Step, Tok};
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -34,7 +36,7 @@ pub struct Options {
 /// The element a fragment is parsed for, as `innerHTML` does.
 pub struct FragmentContext<'a, H> {
     pub ns: Namespace,
-    pub local: &'a [u8],
+    pub local: Atom,
     pub attrs: &'a [Attribute],
     /// The nearest form element at or above the context element.
     pub form: Option<H>,
@@ -57,7 +59,9 @@ pub struct TreeBuilder<S: TreeSink> {
     form: Option<S::Handle>,
     /// The fragment context element; its node is the root, never used.
     context: Option<Open<S::Handle>>,
-    atoms: Atoms,
+    /// The names that are not static atoms, held for the whole parse so
+    /// that a name on the stack stays the same atom.
+    names: HeldAtoms,
     frameset_ok: bool,
     foster: bool,
     quirks: QuirksMode,
@@ -88,7 +92,7 @@ impl<S: TreeSink> TreeBuilder<S> {
             head: None,
             form: None,
             context: None,
-            atoms: Atoms::default(),
+            names: HeldAtoms::new(),
             frameset_ok: true,
             foster: false,
             quirks: QuirksMode::NoQuirks,
@@ -109,11 +113,9 @@ impl<S: TreeSink> TreeBuilder<S> {
         let mut b = Self::new(sink, opts);
         b.quirks = ctx.quirks;
         b.sink.set_quirks_mode(ctx.quirks);
-        let root = b.sink.create_element(
-            Namespace::Html,
-            b"html",
-            Attrs::new(&[], sink::Adjust::Html),
-        );
+        let root = b
+            .sink
+            .create_element(Namespace::Html, Tag::Html.atom(), Attrs::empty());
         b.sink.append(b.doc, root);
         b.open.push(Open {
             node: root,
@@ -121,11 +123,9 @@ impl<S: TreeSink> TreeBuilder<S> {
             name: Name::known(Tag::Html),
             html_ip: false,
         });
-        let lower = ctx.local.to_ascii_lowercase();
-        let name = b.atoms.intern(&lower);
+        let name = Name::lowercase(ctx.local, &b.names);
         let start = Start {
             name,
-            raw: &lower,
             attrs: ctx.attrs,
             self_closing: false,
         };
@@ -281,16 +281,12 @@ impl<S: TreeSink> Sink for TreeBuilder<S> {
             self.flush_text();
             self.skip_lf = false;
             let tok = match token {
-                Token::StartTag(t) => {
-                    let name = self.atoms.intern(&t.name);
-                    Tok::Start(Start {
-                        name,
-                        raw: &t.name,
-                        attrs: &t.attrs,
-                        self_closing: t.self_closing,
-                    })
-                }
-                Token::EndTag(t) => Tok::End(self.atoms.lookup(&t.name)),
+                Token::StartTag(t) => Tok::Start(Start {
+                    name: Name::of_tag(t, &self.names),
+                    attrs: &t.attrs,
+                    self_closing: t.self_closing,
+                }),
+                Token::EndTag(t) => Tok::End(Name::of_tag(t, &self.names)),
                 Token::Comment(s) => Tok::Comment(s),
                 Token::ProcessingInstruction { target, data } => Tok::Pi(target, data),
                 Token::Doctype(d) => Tok::Doctype(d),

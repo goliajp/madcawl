@@ -3,11 +3,15 @@
 //! Text is WTF-8: UTF-8 that may also carry lone surrogates, which a
 //! script can put into a document and a decoder never does.
 
+use madcawl_str::Atom;
+
 /// A start or end tag. Names are ASCII-lowercased as the standard
 /// says; anything else in them is kept as written.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Tag {
     pub name: Vec<u8>,
+    /// The static atom of `name`, when it is one.
+    pub atom: Option<Atom>,
     pub attrs: Vec<Attribute>,
     pub self_closing: bool,
 }
@@ -15,6 +19,8 @@ pub struct Tag {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Attribute {
     pub name: Vec<u8>,
+    /// The static atom of `name`, when it is one.
+    pub atom: Option<Atom>,
     pub value: Vec<u8>,
 }
 

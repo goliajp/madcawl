@@ -68,7 +68,6 @@ pub(crate) enum Class {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Start<'a> {
     pub(crate) name: Name,
-    pub(crate) raw: &'a [u8],
     pub(crate) attrs: &'a [Attribute],
     pub(crate) self_closing: bool,
 }
@@ -78,7 +77,6 @@ impl Start<'static> {
     pub(crate) fn fake(tag: Tag) -> Self {
         Start {
             name: Name::known(tag),
-            raw: tag.as_bytes(),
             attrs: &[],
             self_closing: false,
         }

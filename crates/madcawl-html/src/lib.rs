@@ -19,6 +19,7 @@ mod tokenizer;
 mod tree;
 
 pub use error::ParseError;
+pub use madcawl_str::{Atom, HeldAtoms, atom};
 pub use token::{Attribute, Doctype, Tag, Token};
 pub use tokenizer::{Flow, Sink, State, Step, Tokenizer};
 pub use tree::{

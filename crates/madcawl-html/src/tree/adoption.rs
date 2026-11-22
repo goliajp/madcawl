@@ -2,7 +2,7 @@
 //! elements.
 
 use super::stack::{Scope, is_special};
-use super::tag::{Name, Tag};
+use super::tag::Tag;
 use super::{Active, Open, TreeBuilder, TreeSink};
 
 impl<S: TreeSink> TreeBuilder<S> {
@@ -100,7 +100,7 @@ impl<S: TreeSink> TreeBuilder<S> {
             Open {
                 node: new,
                 ns: fe.ns,
-                name: Name::known(fe.name.tag),
+                name: fe.name,
                 html_ip: false,
             },
         );

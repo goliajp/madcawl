@@ -10,6 +10,9 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[dependencies]
+madcawl-str = { path = "../madcawl-str" }
+
 [features]
 # count the parser's work, for the fuzz driver (src/steps.rs)
 steps = []

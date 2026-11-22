@@ -1,6 +1,8 @@
 //! What the tree builder builds through: a document implements
 //! `TreeSink`, and the builder calls it with nodes it has decided on.
 
+use madcawl_str::{Atom, HeldAtoms};
+
 use crate::error::ParseError;
 use crate::token::Attribute;
 
@@ -50,12 +52,13 @@ pub enum QuirksMode {
 }
 
 /// One attribute as it goes on the element: name case and namespace
-/// already adjusted for foreign content.
+/// already adjusted for foreign content. The atoms stay valid for as
+/// long as the parser runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AttrRef<'a> {
     pub ns: AttrNamespace,
-    pub prefix: Option<&'static [u8]>,
-    pub local: &'a [u8],
+    pub prefix: Option<Atom>,
+    pub local: Atom,
     pub value: &'a [u8],
 }
 
@@ -71,17 +74,24 @@ pub(crate) enum Adjust {
 pub struct Attrs<'a> {
     list: &'a [Attribute],
     adjust: Adjust,
+    /// Where the names that are not static atoms are held.
+    names: Option<&'a HeldAtoms>,
 }
 
 impl<'a> Attrs<'a> {
-    pub(crate) fn new(list: &'a [Attribute], adjust: Adjust) -> Self {
-        Self { list, adjust }
+    pub(crate) fn new(list: &'a [Attribute], adjust: Adjust, names: &'a HeldAtoms) -> Self {
+        Self {
+            list,
+            adjust,
+            names: Some(names),
+        }
     }
 
     pub fn empty() -> Attrs<'static> {
         Attrs {
             list: &[],
             adjust: Adjust::Html,
+            names: None,
         }
     }
 
@@ -94,10 +104,15 @@ impl<'a> Attrs<'a> {
     }
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = AttrRef<'a>> + 'a {
-        let adjust = self.adjust;
-        self.list
-            .iter()
-            .map(move |a| super::names::adjust_attr(a, adjust))
+        let (adjust, names) = (self.adjust, self.names);
+        self.list.iter().map(move |a| {
+            let name = a.atom.unwrap_or_else(|| {
+                names
+                    .expect("only an empty list has no holder")
+                    .hold(&a.name)
+            });
+            super::names::adjust_attr(a, name, adjust)
+        })
     }
 }
 
@@ -111,7 +126,10 @@ pub trait TreeSink {
 
     fn document(&self) -> Self::Handle;
 
-    fn create_element(&mut self, ns: Namespace, local: &[u8], attrs: Attrs<'_>) -> Self::Handle;
+    /// `local`, and the attribute names in `attrs`, stay valid for as
+    /// long as the parser runs; a sink that keeps one longer holds it
+    /// itself (`HeldAtoms::keep`).
+    fn create_element(&mut self, ns: Namespace, local: Atom, attrs: Attrs<'_>) -> Self::Handle;
     fn create_comment(&mut self, data: &[u8]) -> Self::Handle;
     fn create_processing_instruction(&mut self, target: &[u8], data: &[u8]) -> Self::Handle;
     /// Create a DOCTYPE and append it to the document. Missing parts

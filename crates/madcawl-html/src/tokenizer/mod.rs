@@ -4,6 +4,7 @@
 mod charref;
 mod comment;
 mod doctype;
+mod names;
 mod pi;
 mod script;
 mod state;
@@ -13,6 +14,7 @@ mod text;
 use crate::error::ParseError;
 use crate::input::{Input, encode_char};
 use crate::token::{Attribute, Doctype, Tag, Token};
+use madcawl_str::NameHash;
 
 /// Up to this many attributes on a tag, a new one is compared with each
 /// of the others; past it, they go in a hash set.
@@ -80,6 +82,10 @@ pub struct Tokenizer {
     state: State,
     return_state: State,
     tag: Tag,
+    /// The hashes of the tag name and of the attribute name being
+    /// read, fed as the lowercased bytes are appended.
+    tag_hash: NameHash,
+    attr_hash: NameHash,
     is_end_tag: bool,
     /// Attributes of earlier tags, kept for their allocations.
     spare_attrs: Vec<Attribute>,
@@ -112,6 +118,8 @@ impl Tokenizer {
             state: State::Data,
             return_state: State::Data,
             tag: Tag::default(),
+            tag_hash: NameHash::new(),
+            attr_hash: NameHash::new(),
             is_end_tag: false,
             spare_attrs: Vec::new(),
             attr_is_duplicate: false,
@@ -307,6 +315,7 @@ impl Tokenizer {
     /// move the tokenizer elsewhere.
     fn emit_tag<S: Sink>(&mut self, sink: &mut S) -> Go {
         self.end_attribute();
+        self.tag.atom = self.tag_hash.finish(&self.tag.name);
         let flow = if self.is_end_tag {
             if !self.tag.attrs.is_empty() {
                 sink.error(ParseError::EndTagWithAttributes);
@@ -328,67 +337,6 @@ impl Tokenizer {
             }
             Flow::Pause => Go::Stop(Step::Paused),
         }
-    }
-
-    fn new_tag(&mut self, end: bool) {
-        self.is_end_tag = end;
-        self.tag.name.clear();
-        self.tag.self_closing = false;
-        self.attr_is_duplicate = false;
-        self.attr_names.clear();
-        self.spare_attrs.append(&mut self.tag.attrs);
-    }
-
-    fn new_attribute(&mut self) {
-        self.end_attribute();
-        let mut a = self.spare_attrs.pop().unwrap_or_default();
-        a.name.clear();
-        a.value.clear();
-        self.tag.attrs.push(a);
-    }
-
-    /// The name of the attribute being read is complete.
-    fn attribute_name_done<S: Sink>(&mut self, sink: &mut S) {
-        let Some((last, earlier)) = self.tag.attrs.split_last() else {
-            return;
-        };
-        let repeat = if earlier.len() < LINEAR_ATTRS {
-            step!(earlier.len());
-            earlier.iter().any(|a| a.name == last.name)
-        } else {
-            if self.attr_names.is_empty() {
-                self.attr_names
-                    .extend(earlier.iter().map(|a| a.name.clone()));
-            }
-            !self.attr_names.insert(last.name.clone())
-        };
-        if repeat {
-            sink.error(ParseError::DuplicateAttribute);
-            self.attr_is_duplicate = true;
-        }
-    }
-
-    fn end_attribute(&mut self) {
-        if self.attr_is_duplicate {
-            self.attr_is_duplicate = false;
-            if let Some(a) = self.tag.attrs.pop() {
-                self.spare_attrs.push(a);
-            }
-        }
-    }
-
-    fn attr_value(&mut self) -> &mut Vec<u8> {
-        &mut self
-            .tag
-            .attrs
-            .last_mut()
-            .expect("an attribute is being read")
-            .value
-    }
-
-    /// The end tag being read closes the element whose text this is.
-    fn appropriate_end_tag(&self) -> bool {
-        !self.last_start_tag.is_empty() && self.tag.name == self.last_start_tag
     }
 
     fn switch(&mut self, state: State) -> Go {

@@ -1,4 +1,5 @@
-//! Strings the DOM and the script engine share without copying.
+//! Strings the DOM and the script engine share without copying, and
+//! the atoms names are interned as.
 //!
 //! A string is one heap block in the engine's layout (`madcawl-abi`):
 //! a counted header, the length in UTF-16 code units, and the payload
@@ -7,13 +8,25 @@
 //! cost one byte a character and pass to script as they are.
 //!
 //! The count is not atomic: a `DomString` stays on the thread that
-//! made it, as every engine object does.
+//! made it, as every engine object does. A `StaticStr` is a block that
+//! is never counted and never freed, which any thread may read.
 
-use std::alloc::{Layout, alloc, dealloc};
+use std::alloc::{alloc, dealloc};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
 use madcawl_abi as abi;
+
+mod atom;
+mod block;
+mod static_str;
+mod wtf8;
+
+pub use atom::{Atom, HeldAtoms, NameHash, STATIC_ATOMS};
+pub use static_str::StaticStr;
+
+use block::{Block, View};
+use wtf8::Wtf8Chars;
 
 pub struct DomString {
     block: NonNull<u8>,
@@ -34,7 +47,10 @@ static EMPTY: StaticEmpty = StaticEmpty([
 
 impl DomString {
     pub fn empty() -> Self {
-        let block = NonNull::from(&EMPTY).cast::<u8>();
+        Self::from_block(NonNull::from(&EMPTY).cast::<u8>())
+    }
+
+    fn from_block(block: NonNull<u8>) -> Self {
         Self {
             block,
             _local: PhantomData,
@@ -83,6 +99,42 @@ impl DomString {
         out
     }
 
+    /// A string of Latin-1 code units, one byte each.
+    pub fn from_latin1(bytes: &[u8]) -> Self {
+        if bytes.is_empty() {
+            return Self::empty();
+        }
+        Self::latin1(bytes, bytes.is_ascii())
+    }
+
+    /// A string of UTF-16 code units, which need not be well formed.
+    /// It is stored as Latin-1 when every unit fits.
+    pub fn from_utf16(units: &[u16]) -> Self {
+        if units.is_empty() {
+            return Self::empty();
+        }
+        if units.iter().all(|&u| u < 0x100) {
+            let ascii = units.iter().all(|&u| u < 0x80);
+            let flags = abi::STR_FLAG_IS_LATIN1 | if ascii { abi::STR_FLAG_IS_ASCII } else { 0 };
+            let mut out = Self::alloc(units.len(), flags);
+            for (d, &u) in out.payload_mut().iter_mut().zip(units) {
+                *d = u as u8;
+            }
+            return out;
+        }
+        let mut out = Self::alloc(units.len(), 0);
+        for (d, &u) in out
+            .payload_mut()
+            .as_chunks_mut::<2>()
+            .0
+            .iter_mut()
+            .zip(units)
+        {
+            *d = u.to_ne_bytes();
+        }
+        out
+    }
+
     fn latin1(bytes: &[u8], ascii: bool) -> Self {
         let flags = abi::STR_FLAG_IS_LATIN1 | if ascii { abi::STR_FLAG_IS_ASCII } else { 0 };
         let mut out = Self::alloc(bytes.len(), flags);
@@ -90,16 +142,31 @@ impl DomString {
         out
     }
 
+    /// A new block with the same content, for a string that is read
+    /// on another thread than the one that counts it.
+    pub(crate) fn copy(&self) -> Self {
+        let v = self.view();
+        let mut out = Self::alloc(
+            v.len(),
+            self.flags() & (abi::STR_FLAG_IS_LATIN1 | abi::STR_FLAG_IS_ASCII),
+        );
+        out.payload_mut().copy_from_slice(v.payload);
+        out
+    }
+
     /// A fresh block for `units` code units; the payload is filled by
     /// the caller.
     fn alloc(units: usize, flags: u16) -> Self {
-        let units32 = u32::try_from(units).expect("a string longer than 4G code units");
+        assert!(
+            units <= abi::STR_MAX_LEN,
+            "a string longer than 2^31 - 1 code units"
+        );
         let bytes = if flags & abi::STR_FLAG_IS_LATIN1 != 0 {
             units
         } else {
             units * 2
         };
-        let layout = Self::layout(bytes);
+        let layout = block::layout(bytes);
         // SAFETY: the layout has a nonzero size (the 16-byte prefix)
         let p = unsafe { alloc(layout) };
         let Some(block) = NonNull::new(p) else {
@@ -107,45 +174,31 @@ impl DomString {
         };
         // SAFETY: the block is at least 16 bytes and 8-aligned
         unsafe {
-            block
-                .as_ptr()
-                .cast::<u64>()
-                .write(abi::header(abi::TAG_STR, flags));
-            block
-                .as_ptr()
-                .add(abi::STR_LEN_OFF)
-                .cast::<u64>()
-                .write(u64::from(units32));
+            let p = block.as_ptr();
+            p.cast::<u64>().write(abi::header(abi::TAG_STR, flags));
+            p.add(abi::STR_LEN_OFF).cast::<u32>().write(units as u32);
+            p.add(abi::STR_POOL_OFF).cast::<u32>().write(0);
         }
-        Self {
-            block,
-            _local: PhantomData,
-        }
-    }
-
-    fn layout(payload: usize) -> Layout {
-        Layout::from_size_align(abi::STR_DATA_OFF + payload, 8).expect("string size")
+        Self::from_block(block)
     }
 
     fn header(&self) -> u64 {
-        // SAFETY: every block starts with an initialised header word
-        unsafe { self.block.as_ptr().cast::<u64>().read() }
+        Block(self.block).header()
     }
 
     fn flags(&self) -> u16 {
         abi::flags(self.header())
     }
 
+    fn view(&self) -> View<'_> {
+        // SAFETY: this owner keeps the block alive while it is borrowed,
+        // and nobody writes a block that has been handed out
+        unsafe { Block(self.block).view() }
+    }
+
     /// Length in UTF-16 code units, as script sees it.
     pub fn len(&self) -> usize {
-        // SAFETY: the length word follows the header
-        unsafe {
-            self.block
-                .as_ptr()
-                .add(abi::STR_LEN_OFF)
-                .cast::<u32>()
-                .read() as usize
-        }
+        self.view().len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -161,82 +214,50 @@ impl DomString {
     }
 
     fn payload_len(&self) -> usize {
-        if self.is_latin1() {
-            self.len()
-        } else {
-            self.len() * 2
-        }
-    }
-
-    fn payload(&self) -> &[u8] {
-        // SAFETY: the payload of `payload_len` bytes follows the prefix
-        unsafe {
-            std::slice::from_raw_parts(
-                self.block.as_ptr().add(abi::STR_DATA_OFF),
-                self.payload_len(),
-            )
-        }
+        self.view().payload.len()
     }
 
     fn payload_mut(&mut self) -> &mut [u8] {
         let n = self.payload_len();
-        // SAFETY: as `payload`; only called on a block just allocated
+        // SAFETY: the payload of `n` bytes follows the prefix; only
+        // called on a block just allocated
         unsafe { std::slice::from_raw_parts_mut(self.block.as_ptr().add(abi::STR_DATA_OFF), n) }
     }
 
     /// The code units, one byte each, when the string is Latin-1.
     pub fn as_latin1(&self) -> Option<&[u8]> {
-        self.is_latin1().then(|| self.payload())
+        self.view().as_latin1()
     }
 
     /// The text as UTF-8, without copying, when it is ASCII.
     pub fn as_ascii_str(&self) -> Option<&str> {
-        // SAFETY: an ASCII payload is valid UTF-8
-        self.is_ascii()
-            .then(|| unsafe { std::str::from_utf8_unchecked(self.payload()) })
+        self.view().as_ascii_str()
     }
 
     /// Code unit `i`.
     pub fn unit(&self, i: usize) -> u16 {
-        let p = self.payload();
-        if self.is_latin1() {
-            u16::from(p[i])
-        } else {
-            u16::from_ne_bytes([p[2 * i], p[2 * i + 1]])
-        }
+        self.view().unit(i)
     }
 
-    pub fn units(&self) -> impl Iterator<Item = u16> + '_ {
-        (0..self.len()).map(|i| self.unit(i))
+    pub fn units(&self) -> impl ExactSizeIterator<Item = u16> + '_ {
+        self.view().units()
     }
 
     /// Append the text as WTF-8.
     pub fn write_wtf8(&self, out: &mut Vec<u8>) {
-        if let Some(s) = self.as_ascii_str() {
-            out.extend_from_slice(s.as_bytes());
-            return;
-        }
-        let mut units = self.units().peekable();
-        while let Some(u) = units.next() {
-            let mut c = u32::from(u);
-            if (0xD800..0xDC00).contains(&u)
-                && let Some(&lo) = units.peek()
-                && (0xDC00..0xE000).contains(&lo)
-            {
-                units.next();
-                c = 0x1_0000 + ((c - 0xD800) << 10) + (u32::from(lo) - 0xDC00);
-            }
-            push_wtf8(out, c);
-        }
+        self.view().write_wtf8(out);
     }
 
     /// Equal to `s` code unit for code unit.
     pub fn eq_str(&self, s: &str) -> bool {
-        if let Some(a) = self.as_ascii_str() {
-            return a == s;
-        }
-        let mut theirs = s.encode_utf16();
-        self.units().all(|u| theirs.next() == Some(u)) && theirs.next().is_none()
+        self.view().eq_str(s)
+    }
+}
+
+impl From<StaticStr> for DomString {
+    /// The same block: a static one is never counted.
+    fn from(s: StaticStr) -> Self {
+        Self::from_block(s.block().0)
     }
 }
 
@@ -255,10 +276,7 @@ impl Clone for DomString {
                 rc.write(n + 1);
             }
         }
-        Self {
-            block: self.block,
-            _local: PhantomData,
-        }
+        Self::from_block(self.block)
     }
 }
 
@@ -273,7 +291,7 @@ impl Drop for DomString {
             let rc = self.block.as_ptr().cast::<u32>();
             let n = rc.read() - 1;
             if n == 0 {
-                dealloc(self.block.as_ptr(), Self::layout(self.payload_len()));
+                dealloc(self.block.as_ptr(), block::layout(self.payload_len()));
             } else {
                 rc.write(n);
             }
@@ -283,16 +301,7 @@ impl Drop for DomString {
 
 impl PartialEq for DomString {
     fn eq(&self, other: &Self) -> bool {
-        if self.block == other.block {
-            return true;
-        }
-        if self.len() != other.len() {
-            return false;
-        }
-        match (self.as_latin1(), other.as_latin1()) {
-            (Some(a), Some(b)) => a == b,
-            _ => self.units().eq(other.units()),
-        }
+        self.block == other.block || self.view().eq(other.view())
     }
 }
 
@@ -300,11 +309,7 @@ impl Eq for DomString {}
 
 impl std::hash::Hash for DomString {
     fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
-        // by code unit, so the two storages of one text hash alike
-        h.write_usize(self.len());
-        for u in self.units() {
-            h.write_u16(u);
-        }
+        self.view().hash(h);
     }
 }
 
@@ -313,47 +318,6 @@ impl std::fmt::Debug for DomString {
         let mut v = Vec::new();
         self.write_wtf8(&mut v);
         write!(f, "{:?}", String::from_utf8_lossy(&v))
-    }
-}
-
-/// Code points of WTF-8 bytes. The input comes from the tokenizer and
-/// is well formed.
-struct Wtf8Chars<'a>(&'a [u8]);
-
-impl Iterator for Wtf8Chars<'_> {
-    type Item = u32;
-    fn next(&mut self) -> Option<u32> {
-        let s = self.0;
-        let &b = s.first()?;
-        let (n, init) = match b {
-            0..=0x7F => (1, u32::from(b)),
-            0xC0..=0xDF => (2, u32::from(b & 0x1F)),
-            0xE0..=0xEF => (3, u32::from(b & 0x0F)),
-            _ => (4, u32::from(b & 0x07)),
-        };
-        let c = s[1..n]
-            .iter()
-            .fold(init, |c, &t| (c << 6) | u32::from(t & 0x3F));
-        self.0 = &s[n..];
-        Some(c)
-    }
-}
-
-fn push_wtf8(out: &mut Vec<u8>, c: u32) {
-    match c {
-        0..=0x7F => out.push(c as u8),
-        0x80..=0x7FF => out.extend_from_slice(&[0xC0 | (c >> 6) as u8, 0x80 | (c & 0x3F) as u8]),
-        0x800..=0xFFFF => out.extend_from_slice(&[
-            0xE0 | (c >> 12) as u8,
-            0x80 | ((c >> 6) & 0x3F) as u8,
-            0x80 | (c & 0x3F) as u8,
-        ]),
-        _ => out.extend_from_slice(&[
-            0xF0 | (c >> 18) as u8,
-            0x80 | ((c >> 12) & 0x3F) as u8,
-            0x80 | ((c >> 6) & 0x3F) as u8,
-            0x80 | (c & 0x3F) as u8,
-        ]),
     }
 }
 

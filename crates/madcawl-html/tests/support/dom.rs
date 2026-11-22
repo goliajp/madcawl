@@ -1,7 +1,7 @@
 //! A DOM just big enough to print what the tree builder built, in
 //! the html5lib test format.
 
-use madcawl_html::{AttrNamespace, Attrs, Namespace, QuirksMode, TreeSink};
+use madcawl_html::{Atom, AttrNamespace, Attrs, Namespace, QuirksMode, TreeSink, atom};
 
 pub enum Kind {
     Document,
@@ -90,14 +90,15 @@ impl Dom {
     }
 }
 
-fn attr_name(ns: AttrNamespace, local: &[u8]) -> Vec<u8> {
-    let prefix: &[u8] = match ns {
-        AttrNamespace::None => return local.to_vec(),
-        AttrNamespace::XLink => b"xlink ",
-        AttrNamespace::Xml => b"xml ",
-        AttrNamespace::Xmlns => b"xmlns ",
+fn attr_name(ns: AttrNamespace, local: Atom) -> Vec<u8> {
+    let mut name = match ns {
+        AttrNamespace::None => Vec::new(),
+        AttrNamespace::XLink => b"xlink ".to_vec(),
+        AttrNamespace::Xml => b"xml ".to_vec(),
+        AttrNamespace::Xmlns => b"xmlns ".to_vec(),
     };
-    [prefix, local].concat()
+    local.write_wtf8(&mut name);
+    name
 }
 
 impl TreeSink for Dom {
@@ -107,16 +108,16 @@ impl TreeSink for Dom {
         0
     }
 
-    fn create_element(&mut self, ns: Namespace, local: &[u8], attrs: Attrs<'_>) -> usize {
+    fn create_element(&mut self, ns: Namespace, local: Atom, attrs: Attrs<'_>) -> usize {
         let contents =
-            (ns == Namespace::Html && local == b"template").then(|| self.add(Kind::Fragment));
+            (ns == Namespace::Html && local == atom!("template")).then(|| self.add(Kind::Fragment));
         let attrs = attrs
             .iter()
             .map(|a| (attr_name(a.ns, a.local), a.value.to_vec()))
             .collect();
         self.add(Kind::Element {
             ns,
-            name: local.to_vec(),
+            name: attr_name(AttrNamespace::None, local),
             attrs,
             contents,
         })

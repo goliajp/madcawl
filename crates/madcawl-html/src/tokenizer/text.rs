@@ -154,7 +154,7 @@ impl Tokenizer {
             return self.emit_tag(sink);
         }
         if is_alpha(c) {
-            self.tag.name.push(lower(c) as u8);
+            self.tag_name_push(lower(c));
             self.temp.push(c as u8);
             return Go::On;
         }

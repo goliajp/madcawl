@@ -2,8 +2,8 @@
 //! tests feed an input to the tokenizer.
 
 use madcawl_html::{
-    Attrs, FragmentContext, Namespace, Options, QuirksMode, Sink, Step, Tokenizer, TreeBuilder,
-    TreeSink,
+    Attrs, FragmentContext, HeldAtoms, Namespace, Options, QuirksMode, Sink, Step, Tokenizer,
+    TreeBuilder, TreeSink, atom,
 };
 
 use crate::dom::{Dom, print};
@@ -140,6 +140,7 @@ pub fn run(test: &Test, scripting: bool, feed: Feed) -> Vec<u8> {
     let mut dom = Dom::new();
     let mut tok = Tokenizer::new();
     let mut root = 0;
+    let names = HeldAtoms::new();
     let mut builder = match &test.fragment {
         None => TreeBuilder::new(dom, opts),
         Some(ctx) => {
@@ -150,14 +151,14 @@ pub fn run(test: &Test, scripting: bool, feed: Feed) -> Vec<u8> {
                 _ => panic!("bad fragment context"),
             };
             let form = (ns == Namespace::Html && local == b"form")
-                .then(|| dom.create_element(Namespace::Html, b"form", Attrs::empty()));
+                .then(|| dom.create_element(Namespace::Html, atom!("form"), Attrs::empty()));
             root = dom.nodes.len();
             let b = TreeBuilder::new_fragment(
                 dom,
                 opts,
                 FragmentContext {
                     ns,
-                    local,
+                    local: names.hold(local),
                     attrs: &[],
                     form,
                     quirks: QuirksMode::NoQuirks,

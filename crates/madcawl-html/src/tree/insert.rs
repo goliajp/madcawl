@@ -89,14 +89,15 @@ impl<S: TreeSink> TreeBuilder<S> {
         ns: Namespace,
         intended_parent: S::Handle,
     ) -> S::Handle {
+        let name = s.name.atom;
         let (local, adjust) = match ns {
-            Namespace::Html => (s.raw, Adjust::Html),
-            Namespace::Svg => (svg_tag(s.raw).unwrap_or(s.raw), Adjust::Svg),
-            Namespace::MathMl => (s.raw, Adjust::MathMl),
+            Namespace::Html => (name, Adjust::Html),
+            Namespace::Svg => (svg_tag(name).unwrap_or(name), Adjust::Svg),
+            Namespace::MathMl => (name, Adjust::MathMl),
         };
         let el = self
             .sink
-            .create_element(ns, local, Attrs::new(s.attrs, adjust));
+            .create_element(ns, local, Attrs::new(s.attrs, adjust, &self.names));
         if ns == Namespace::Html
             && let Some(form) = self.form
             && self.context.is_none()

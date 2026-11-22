@@ -6,6 +6,10 @@
 
 #![no_std]
 
+// the header word and the length are read and written as native
+// integers, and the layout is the little-endian one
+const _: () = assert!(cfg!(target_endian = "little"));
+
 /// Every block starts with this: a 32-bit reference count, a 16-bit
 /// type tag and 16 bits of flags.
 pub const HEADER_SIZE: usize = 8;
@@ -20,10 +24,18 @@ pub const TAG_STR: u16 = 0;
 /// freed.
 pub const FLAG_STATIC: u16 = 1 << 2;
 
-/// String block: header, then the length in code units, then 4
-/// reserved bytes, then the payload.
+/// String block: header, then the length in code units (`u32`), then
+/// the `u32` at `STR_POOL_OFF`, then the payload.
 pub const STR_LEN_OFF: usize = 8;
+/// The engine defines this word: the pool class the block was taken
+/// from, or its real payload capacity when the engine sets its own
+/// capacity flag. madcawl writes 0 there, which means the block came
+/// from no pool class (or is static) and its payload is exactly its
+/// length.
+pub const STR_POOL_OFF: usize = 12;
 pub const STR_DATA_OFF: usize = 16;
+/// The most code units a string block holds, as in the engine.
+pub const STR_MAX_LEN: usize = (1 << 31) - 1;
 /// The payload is Latin-1, one byte per code unit; otherwise UTF-16.
 pub const STR_FLAG_IS_LATIN1: u16 = 0x0002;
 /// Every code unit is ASCII, so the Latin-1 payload is also its UTF-8.

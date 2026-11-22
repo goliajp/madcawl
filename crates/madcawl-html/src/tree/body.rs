@@ -41,7 +41,7 @@ impl<S: TreeSink> TreeBuilder<S> {
                 if !self.has_template() {
                     let html = self.open[0].node;
                     self.sink
-                        .add_attrs_if_missing(html, Attrs::new(s.attrs, Adjust::Html));
+                        .add_attrs_if_missing(html, Attrs::new(s.attrs, Adjust::Html, &self.names));
                 }
             }
             Base | Basefont | Bgsound | Link | Meta | Noframes | Script | Style | Template
@@ -126,7 +126,6 @@ impl<S: TreeSink> TreeBuilder<S> {
             Image => {
                 let img = Start {
                     name: Name::known(Img),
-                    raw: Img.as_bytes(),
                     ..*s
                 };
                 let _ = self.body_start(&img, Tok::Start(img));
@@ -191,7 +190,7 @@ impl<S: TreeSink> TreeBuilder<S> {
         self.frameset_ok = false;
         let body = self.open[1].node;
         self.sink
-            .add_attrs_if_missing(body, Attrs::new(s.attrs, Adjust::Html));
+            .add_attrs_if_missing(body, Attrs::new(s.attrs, Adjust::Html, &self.names));
     }
 
     fn start_frameset(&mut self, s: &Start<'_>) {

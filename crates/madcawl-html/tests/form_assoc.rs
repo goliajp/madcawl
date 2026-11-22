@@ -4,7 +4,8 @@
 //! form-associated and which of those are listed: 4.10.2.
 
 use madcawl_html::{
-    Attrs, FragmentContext, Namespace, Options, QuirksMode, Step, Tokenizer, TreeBuilder, TreeSink,
+    Attrs, FragmentContext, HeldAtoms, Namespace, Options, QuirksMode, Step, Tokenizer,
+    TreeBuilder, TreeSink, atom,
 };
 
 #[allow(dead_code)]
@@ -35,14 +36,15 @@ fn document(html: &str) -> Vec<String> {
 
 fn fragment(context: &[u8], html: &str) -> Vec<String> {
     let mut dom = Dom::new();
-    let form = dom.create_element(Namespace::Html, b"form", Attrs::empty());
+    let form = dom.create_element(Namespace::Html, atom!("form"), Attrs::empty());
+    let held = HeldAtoms::new();
     let mut tok = Tokenizer::new();
     let mut b = TreeBuilder::new_fragment(
         dom,
         Options::default(),
         FragmentContext {
             ns: Namespace::Html,
-            local: context,
+            local: held.hold(context),
             attrs: &[],
             form: Some(form),
             quirks: QuirksMode::NoQuirks,
