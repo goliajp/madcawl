@@ -51,7 +51,12 @@ struct Held {
 impl Held {
     fn recent(&self, h: u32, name: &[u8]) -> Option<Atom> {
         let r = &self.recent.as_ref()?[h as usize % RECENT];
-        (usize::from(r.len) == name.len() && &r.name[..name.len()] == name).then_some(r.atom)
+        // an empty slot's length is u8::MAX, which a 255-byte name would
+        // match: only names short enough to be remembered are looked up
+        (name.len() <= RECENT_LEN
+            && usize::from(r.len) == name.len()
+            && &r.name[..name.len()] == name)
+            .then_some(r.atom)
     }
 
     fn remember(&mut self, h: u32, name: &[u8], atom: Atom) {

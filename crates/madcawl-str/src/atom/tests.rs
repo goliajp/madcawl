@@ -202,3 +202,14 @@ fn keeping_an_atom_outlives_the_holder_it_came_from() {
     drop(document);
     assert_eq!(Atom::lookup(b"x-kept-by-a-document"), None);
 }
+
+#[test]
+fn a_name_as_long_as_an_empty_recent_slot_says_is_held() {
+    let held = HeldAtoms::new();
+    held.hold(b"x-first");
+    for len in [254, 255, 256] {
+        let name = vec![b'y'; len];
+        let x = held.hold(&name);
+        assert_eq!(held.hold(&name), x, "{len}");
+    }
+}
