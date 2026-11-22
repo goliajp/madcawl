@@ -12,6 +12,7 @@ publish = false
 
 [dependencies]
 madcawl-html = { path = "../../crates/madcawl-html", features = ["steps"] }
+madcawl-dom = { path = "../../crates/madcawl-dom" }
 
 [profile.release]
 # a panic is a finding: unwind so the driver can record it and go on

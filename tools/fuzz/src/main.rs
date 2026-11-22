@@ -10,9 +10,6 @@
 //! Prints one JSON line with the counts at the end; every input that
 //! failed a check is written to DIR with what it failed.
 
-#[allow(dead_code)]
-#[path = "../../../crates/madcawl-html/tests/support/dom.rs"]
-mod dom;
 mod mutate;
 mod targets;
 #[allow(dead_code)]

@@ -5,7 +5,7 @@ use madcawl_html::{
     Decoder, Encoding, Flow, Options, ParseError, Sink, Token, Tokenizer, TreeBuilder, steps,
 };
 
-use crate::dom::{Dom, print};
+use madcawl_dom::Dom;
 use crate::wpt::{Feed, feed_all};
 
 /// Every token and error in order, text runs merged, so the stream does
@@ -103,7 +103,8 @@ pub fn tree(input: &[u8], feed: Feed) -> (Vec<u8>, u64) {
     let mut b = TreeBuilder::new(Dom::new(), Options::default());
     feed_all(&mut tok, &mut b, input, feed);
     let n = steps::take();
+    let dom = b.into_sink();
     let mut out = Vec::new();
-    print(&b.into_sink(), 0, 0, &mut out);
+    dom.write_dat(dom.document(), &mut out);
     (out, n)
 }
