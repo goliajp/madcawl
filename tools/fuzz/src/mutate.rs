@@ -1,4 +1,4 @@
-//! Seeded mutations of the corpus: byte edits, pieces of markup the
+//! Seeded mutations of the corpus: byte edits, pieces of syntax the
 //! parser treats specially, splices of two inputs, and repeats that
 //! grow an input so work that is not linear in its length shows.
 
@@ -6,7 +6,7 @@ use crate::wpt::Rng;
 
 const MAX_LEN: usize = 1 << 16;
 
-const PIECES: &[&[u8]] = &[
+pub const HTML: &[&[u8]] = &[
     b"<",
     b">",
     b"</",
@@ -82,6 +82,80 @@ const PIECES: &[&[u8]] = &[
     b"<font color=1>",
 ];
 
+pub const CSS: &[&[u8]] = &[
+    b"{",
+    b"}",
+    b";",
+    b":",
+    b",",
+    b"(",
+    b")",
+    b"[",
+    b"]",
+    b"!important",
+    b"!",
+    b"/*",
+    b"*/",
+    b"\\",
+    b"\\0",
+    b"\\\n",
+    b"\\31 ",
+    b"\\110000",
+    b"\"",
+    b"'",
+    b"url(",
+    b"url( '",
+    b"url(a b)",
+    b"#",
+    b".",
+    b"*",
+    b"&",
+    b"|",
+    b">",
+    b"+",
+    b"~",
+    b"-",
+    b"--",
+    b"-->",
+    b"<!--",
+    b"@media ",
+    b"@import ",
+    b"@namespace svg url(x);",
+    b"@supports ",
+    b"@layer a;",
+    b"@font-face",
+    b"@keyframes k",
+    b"@charset \"",
+    b"u+",
+    b"?",
+    b"1e",
+    b"e-",
+    b"%",
+    b"2n+1",
+    b" of ",
+    b":is(",
+    b":where(",
+    b":not(",
+    b":has(",
+    b":nth-child(",
+    b"::before",
+    b":hover",
+    b"[a=b i]",
+    b"svg|",
+    b"--x:",
+    b"var(--x)",
+    b"\0",
+    b"\r",
+    b"\r\n",
+    b"\x0c",
+    b"\t",
+    b"\xef\xbb\xbf",
+    b"\xef\xbf\xbd",
+    b"\xe2\x82",
+    b"\xf0\x9f",
+    b"\xed\xa0\x80",
+];
+
 fn below(rng: &mut Rng, n: usize) -> usize {
     if n == 0 {
         0
@@ -90,7 +164,7 @@ fn below(rng: &mut Rng, n: usize) -> usize {
     }
 }
 
-pub fn input(corpus: &[Vec<u8>], rng: &mut Rng) -> Vec<u8> {
+pub fn input(corpus: &[Vec<u8>], pieces: &[&[u8]], rng: &mut Rng) -> Vec<u8> {
     let mut v = corpus[below(rng, corpus.len())].clone();
     for _ in 0..1 + below(rng, 8) {
         let at = below(rng, v.len() + 1);
@@ -106,7 +180,7 @@ pub fn input(corpus: &[Vec<u8>], rng: &mut Rng) -> Vec<u8> {
                 v.drain(at..(at + n).min(v.len()));
             }
             3 | 4 => {
-                let p = PIECES[below(rng, PIECES.len())];
+                let p = pieces[below(rng, pieces.len())];
                 v.splice(at..at, p.iter().copied());
             }
             5 => {
@@ -124,7 +198,7 @@ pub fn input(corpus: &[Vec<u8>], rng: &mut Rng) -> Vec<u8> {
                 v.splice(at..at, run);
             }
             _ => {
-                let p = PIECES[below(rng, PIECES.len())];
+                let p = pieces[below(rng, pieces.len())];
                 let run = p.repeat(1 + below(rng, 1024));
                 v.splice(at..at, run);
             }

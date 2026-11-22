@@ -1,6 +1,6 @@
 [package]
 name = "madcawl-fuzz"
-description = "Deterministic mutation fuzzing of the HTML tokenizer and tree builder"
+description = "Deterministic mutation fuzzing of the HTML and CSS parsers"
 version = "0.0.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -13,6 +13,7 @@ publish = false
 [dependencies]
 madcawl-html = { path = "../../crates/madcawl-html", features = ["steps"] }
 madcawl-dom = { path = "../../crates/madcawl-dom" }
+madcawl-css = { path = "../../crates/madcawl-css", features = ["steps"] }
 
 [profile.release]
 # a panic is a finding: unwind so the driver can record it and go on

@@ -1,17 +1,23 @@
-//! Mutation fuzzing of the tokenizer and the tree builder, with no
-//! fuzzing library: inputs are the tree construction tests' inputs,
-//! mutated by a seeded generator, so a run is reproducible from its
-//! seed. Each input is checked three ways: the parser does not panic;
-//! fed in random chunks it gives what it gives fed whole; its work
-//! (`madcawl_html::steps`) stays under a fixed multiple of its length.
-//! The tree target also audits the counts and links of both DOMs it
-//! built (`madcawl_dom::Dom::audit`).
+//! Mutation fuzzing of the HTML tokenizer and tree builder and of the
+//! CSS tokenizer and selector parser, with no fuzzing library: inputs
+//! are the inputs of the parsers' test suites, mutated by a seeded
+//! generator, so a run is reproducible from its seed. Each input is
+//! checked three ways: the parser does not panic; fed the second way it
+//! gives what it gives fed whole (HTML: in random chunks; CSS: see
+//! `css.rs`); its work (`madcawl_html::steps`, `madcawl_css::steps`)
+//! stays under a fixed multiple of its length. The tree target also
+//! audits the counts and links of both DOMs it built
+//! (`madcawl_dom::Dom::audit`).
 //!
-//!   madcawl-fuzz <tokenizer|tree> --seconds N [--seed S] [--out DIR] [--steps-per-byte K]
+//!   madcawl-fuzz <tokenizer|tree|css-tokenizer|css-selectors> --seconds N [--seed S] [--out DIR] [--steps-per-byte K]
 //!
 //! Prints one JSON line with the counts at the end; every input that
 //! failed a check is written to DIR with what it failed.
 
+mod css;
+#[allow(dead_code)]
+#[path = "../../../crates/madcawl-html/tests/support/json.rs"]
+mod json;
 mod mutate;
 mod targets;
 #[allow(dead_code)]
@@ -62,6 +68,47 @@ fn args() -> Args {
     r
 }
 
+/// Selectors the CSS suite has few of, as seeds.
+const SELECTOR_SEEDS: &[&str] = &[
+    "a > b + c ~ d e",
+    "svg|rect, *|a, |b",
+    "#x.y[href^='a' i]:hover::before",
+    "[a|=b][c~=d][e$=f][g*=h s]",
+    ":is(.a, :where(#b, c)):not(:has(> img, + p))",
+    ":nth-child(2n+1 of .a, .b):nth-last-of-type(-n+3)",
+    ":lang(en, \"fr\"):dir(rtl)",
+    "&.a > & .b",
+    "p:first-line, li::marker",
+    ".a\\:b, #\\31 0",
+];
+
+fn css_corpus() -> Vec<Vec<u8>> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/madcawl-css/tests/data/css-parsing-tests");
+    let mut files: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|e| e == "json"))
+        .collect();
+    files.sort();
+    let mut out: Vec<Vec<u8>> = SELECTOR_SEEDS
+        .iter()
+        .map(|s| s.as_bytes().to_vec())
+        .collect();
+    for p in files {
+        let cases = json::parse(&std::fs::read_to_string(&p).unwrap());
+        for input in cases.arr().iter().step_by(2) {
+            let bytes = input.get("css_bytes").unwrap_or(input);
+            if let Some(s) = bytes.str() {
+                out.push(s.to_vec());
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 fn corpus() -> Vec<Vec<u8>> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../crates/madcawl-html/tests/data/wpt-tree-construction");
@@ -99,17 +146,21 @@ fn main() {
     let run: fn(&[u8], Feed) -> targets::Out = match a.target.as_str() {
         "tokenizer" => targets::tokenizer,
         "tree" => targets::tree,
-        t => panic!("no target {t:?}: tokenizer or tree"),
+        "css-tokenizer" => css::tokenizer,
+        "css-selectors" => css::selectors,
+        t => panic!("no target {t:?}: tokenizer, tree, css-tokenizer or css-selectors"),
     };
+    let is_css = a.target.starts_with("css-");
+    let pieces = if is_css { mutate::CSS } else { mutate::HTML };
     std::fs::create_dir_all(&a.out).unwrap();
     std::panic::set_hook(Box::new(|_| {}));
-    let seeds = corpus();
+    let seeds = if is_css { css_corpus() } else { corpus() };
     let mut rng = Rng(a.seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
     let mut c = Counts::default();
     let end = Instant::now() + Duration::from_secs(a.seconds);
     let started = Instant::now();
     while Instant::now() < end {
-        let input = mutate::input(&seeds, &mut rng);
+        let input = mutate::input(&seeds, pieces, &mut rng);
         let chunks = Feed::Chunks {
             seed: rng.next(),
             max: 1 + (rng.next() % 64) as usize,
