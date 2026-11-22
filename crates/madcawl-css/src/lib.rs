@@ -1,9 +1,12 @@
-//! CSS: the tokenizer and parser of CSS Syntax Level 3.
+//! CSS: the tokenizer and parser of CSS Syntax Level 3 and the selectors
+//! of Selectors Level 4.
 //!
 //! Everything works on spans of the stylesheet's one copy of its source.
 //! The tokenizer is pulled a token at a time and allocates nothing; the
 //! parser finds rules and declarations as spans, skipping blocks, so a
 //! block is parsed again from its span only when something wants it.
+//! The names selectors use are interned in a table of their own, and
+//! turned into atoms on the main thread in one pass.
 
 /// Count `n` units of work for the `steps` feature; nothing without it.
 macro_rules! step {
@@ -19,7 +22,9 @@ pub mod steps;
 mod anb;
 mod bytes;
 mod escape;
+mod names;
 mod parser;
+pub mod selector;
 mod tokenizer;
 mod tree;
 
@@ -27,6 +32,7 @@ pub use anb::parse_anb;
 pub use bytes::decode_stylesheet;
 pub use escape::Unescape;
 pub use madcawl_html::Encoding;
+pub use names::{Name, Names};
 pub use parser::{
     BlockItem, Declaration, ParsedRule, Parser, SyntaxError, parse_block_contents,
     parse_declaration, parse_declaration_list, parse_rule, parse_rule_list,
