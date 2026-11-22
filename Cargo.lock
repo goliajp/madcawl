@@ -7,6 +7,17 @@ name = "madcawl-abi"
 version = "0.0.1"
 
 [[package]]
+name = "madcawl-bindings"
+version = "0.0.1"
+dependencies = [
+ "madcawl-dom",
+ "madcawl-html",
+ "madcawl-js",
+ "madcawl-js-stub",
+ "madcawl-str",
+]
+
+[[package]]
 name = "madcawl-dom"
 version = "0.0.1"
 dependencies = [

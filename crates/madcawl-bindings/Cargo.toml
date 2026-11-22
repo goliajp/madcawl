@@ -1,0 +1,21 @@
+[package]
+name = "madcawl-bindings"
+description = "DOM bindings over the script engine interface, generated from Web IDL"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+madcawl-dom = { path = "../madcawl-dom" }
+madcawl-js = { path = "../madcawl-js" }
+madcawl-str = { path = "../madcawl-str" }
+
+# the binding tests run on the stub engine
+[dev-dependencies]
+madcawl-html = { path = "../madcawl-html" }
+madcawl-js-stub = { path = "../madcawl-js-stub" }
