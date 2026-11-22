@@ -59,7 +59,7 @@ impl Dom {
                     want[held as usize] += 1;
                 }
             }
-            if n.wrapper & 1 != 0 {
+            if n.wrapper != 0 {
                 want[i] += 1;
             }
         }

@@ -29,7 +29,9 @@ pub(crate) struct Node {
     pub attrs: u32,
     /// The computed style, once there is a style system.
     pub style: u32,
-    /// The script wrapper: weak, the low bit set when it is kept alive.
+    /// The script wrapper's pointer, which holds the node (an edge
+    /// counted here); the low bit set when the wrapper is preserved, an
+    /// edge counted on the wrapper.
     pub wrapper: u64,
     /// The rare data entry.
     pub rare: u32,

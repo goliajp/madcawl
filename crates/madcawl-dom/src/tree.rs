@@ -21,6 +21,9 @@ impl Dom {
     pub(crate) fn dec(&mut self, i: u32) {
         let n = self.m(i);
         n.set_count(n.count() - 1);
+        if n.count() == 0 {
+            self.zero.push(i);
+        }
     }
 
     pub(crate) fn notify(&mut self, change: Change) {
@@ -107,8 +110,14 @@ impl Dom {
 
     /// Take `c` out of its parent, if it has one.
     pub(crate) fn detach(&mut self, c: u32) {
-        if self.unlink(c) != 0 && self.n(c).flags & IN_DOCUMENT != 0 {
+        if self.unlink(c) == 0 {
+            return;
+        }
+        if self.n(c).flags & IN_DOCUMENT != 0 {
             self.set_in_document(c, false);
+        }
+        if self.n(c).count() != 0 {
+            self.suspects.push(c);
         }
     }
 

@@ -173,7 +173,7 @@ impl Dom {
 
 /// # Safety
 /// `bits` is a block pointer that owns one count, not used again.
-unsafe fn drop_string(bits: u64) {
+pub(crate) unsafe fn drop_string(bits: u64) {
     // SAFETY: the caller's
     drop(unsafe { DomString::from_raw(NonNull::new_unchecked(bits as *mut u8)) });
 }

@@ -10,8 +10,8 @@ use crate::node::NodeKind;
 
 impl Dom {
     /// Which slots hold a node that is reachable: in a document's tree,
-    /// in the contents of a reachable template, or in a tree a kept-alive
-    /// wrapper holds.
+    /// in the contents of a reachable template, or in a tree a wrapper
+    /// holds.
     pub(crate) fn reachable(&self) -> Vec<bool> {
         let high = self.arena.high() as usize;
         let mut seen = vec![false; high];
@@ -19,7 +19,7 @@ impl Dom {
             .filter(|&i| {
                 self.arena.is_live(i)
                     && self.n(i).parent == 0
-                    && (self.kind_of(i) == NodeKind::Document || self.has_kept_wrapper(i))
+                    && (self.kind_of(i) == NodeKind::Document || self.has_wrapper(i))
             })
             .collect();
         while let Some(root) = work.pop() {
@@ -36,11 +36,11 @@ impl Dom {
         seen
     }
 
-    /// Some node in the tree rooted at `root` has a kept-alive wrapper.
-    fn has_kept_wrapper(&self, root: u32) -> bool {
+    /// Some node in the tree rooted at `root` has a wrapper.
+    fn has_wrapper(&self, root: u32) -> bool {
         let mut x = root;
         while x != 0 {
-            if self.n(x).wrapper & 1 != 0 {
+            if self.n(x).wrapper != 0 {
                 return true;
             }
             x = self.next_in(x, root);
@@ -78,6 +78,8 @@ impl Dom {
                 r.form = 0;
             }
         }
+        self.zero.clear();
+        self.suspects.clear();
         freed
     }
 }
