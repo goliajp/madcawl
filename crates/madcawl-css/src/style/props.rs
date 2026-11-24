@@ -119,6 +119,8 @@ props! {
     AlignItems = "align-items", false;
     AlignSelf = "align-self", false;
     AlignContent = "align-content", false;
+    RowGap = "row-gap", false;
+    ColumnGap = "column-gap", false;
     VerticalAlign = "vertical-align", false;
 }
 

@@ -125,6 +125,22 @@ fn apply_rare(s: &mut ComputedStyle, p: Prop, v: &Specified, l: &Ctx) -> bool {
         (P::AlignItems, Specified::Align(a)) => r.align_items = *a,
         (P::AlignSelf, Specified::Align(a)) => r.align_self = *a,
         (P::AlignContent, Specified::Align(a)) => r.align_content = *a,
+        (P::RowGap | P::ColumnGap, v) => {
+            let g = match v {
+                Specified::Len(x) => {
+                    let Some(x) = x.resolve(l, false) else {
+                        return false;
+                    };
+                    Some(x)
+                }
+                _ => None,
+            };
+            if p == P::RowGap {
+                r.row_gap = g;
+            } else {
+                r.column_gap = g;
+            }
+        }
         (P::VerticalAlign, Specified::VAlign(k)) => r.vertical_align = VAlign::Kw(*k),
         (P::VerticalAlign, Specified::Len(x)) => {
             let Some(x) = x.resolve(l, false) else {

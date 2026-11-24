@@ -136,6 +136,9 @@ pub struct Rare {
     pub align_items: Align,
     pub align_self: Align,
     pub align_content: Align,
+    /// `None` is `normal`
+    pub row_gap: Option<Lp>,
+    pub column_gap: Option<Lp>,
     pub vertical_align: VAlign,
 }
 

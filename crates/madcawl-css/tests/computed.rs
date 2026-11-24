@@ -181,6 +181,25 @@ fn flex_and_alignment() {
 }
 
 #[test]
+fn gaps() {
+    let p = page(
+        "<!doctype html><style>#a { gap: 1em 5% } #b { grid-gap: 7px } #c { row-gap: 2px; gap: normal } \
+         #d { column-gap: -3px }</style><div id=a></div><div id=b></div><div id=c></div><div id=d></div>",
+    );
+    check(
+        &p,
+        &[
+            ("a", "row-gap", "16px"),
+            ("a", "column-gap", "5%"),
+            ("b", "row-gap", "7px"),
+            ("b", "column-gap", "7px"),
+            ("c", "row-gap", "normal"),
+            ("d", "column-gap", "normal"),
+        ],
+    );
+}
+
+#[test]
 fn the_user_agent_box_model() {
     let p = page(
         "<!doctype html><body id=body><p id=p>x</p><ul id=ul><li id=li>x<ul id=ul2></ul></li></ul>\

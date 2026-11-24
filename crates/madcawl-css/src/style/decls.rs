@@ -44,6 +44,8 @@ fn alias(name: &str) -> &str {
         "-webkit-flex-shrink" => "flex-shrink",
         "-webkit-flex-basis" => "flex-basis",
         "-webkit-order" => "order",
+        "grid-row-gap" => "row-gap",
+        "grid-column-gap" => "column-gap",
         "-webkit-justify-content" => "justify-content",
         "-webkit-align-items" => "align-items",
         "-webkit-align-self" => "align-self",

@@ -60,6 +60,10 @@ pub(crate) fn parse(p: Prop, src: &str, xs: &[Item]) -> Option<Specified> {
         P::Width | P::Height | P::MinWidth | P::MinHeight | P::MaxWidth | P::MaxHeight => {
             size(p, src, x, kw)?
         }
+        P::RowGap | P::ColumnGap => match kw {
+            Some("normal") => Specified::Auto,
+            _ => Specified::Len(parse_len(src, x, POSITIVE)?),
+        },
         P::FlexBasis => match kw {
             Some("auto") => Specified::Size(SizeKw::Auto),
             Some("content") => Specified::Size(SizeKw::Content),

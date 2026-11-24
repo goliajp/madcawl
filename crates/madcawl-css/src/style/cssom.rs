@@ -171,6 +171,16 @@ impl ComputedStyle {
             P::AlignItems => o.push_str(r.align_items.css()),
             P::AlignSelf => o.push_str(r.align_self.css()),
             P::AlignContent => o.push_str(r.align_content.css()),
+            P::RowGap | P::ColumnGap => {
+                match if p == P::RowGap {
+                    &r.row_gap
+                } else {
+                    &r.column_gap
+                } {
+                    Some(l) => lp(l, o),
+                    None => o.push_str("normal"),
+                }
+            }
             P::VerticalAlign => match &r.vertical_align {
                 VAlign::Kw(k) => o.push_str(k.css()),
                 VAlign::Lp(l) => lp(l, o),

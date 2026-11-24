@@ -104,7 +104,7 @@ pub use computed::{
 pub use device::Device;
 pub use features::Tier;
 pub use kw::*;
-pub use length::{Form, Lp};
+pub use length::{Form, Lp, to_fixed};
 pub use media::matches_media;
 pub use props::Prop;
 pub use restyle::{Change, Restyled};

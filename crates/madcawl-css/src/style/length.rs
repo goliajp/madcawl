@@ -137,8 +137,19 @@ impl Lp {
     }
 }
 
+/// Truncated toward zero, as WebKit turns a length into layout units; the slack keeps a value that float
+/// arithmetic left just under a multiple of 1/64 px on it. The slack is two ulps of the value as well: an
+/// `f32` of a few hundred px is already further than 1/1000 of a unit from the value it stands for, so a
+/// fixed slack would truncate a whole unit away from large lengths; past about 2^20 units (16384 px) an
+/// `f32` no longer tells units apart reliably and no slack helps. Layout resolves percentages through
+/// this too, so computed and used lengths round the same way. At a scale that is not a whole number, a
+/// device-pixel length (a snapped border) is not a multiple of 1/64 px and lands on the unit below it.
 pub fn to_fixed(v: f32) -> i32 {
-    (v * UNIT).round().clamp(i32::MIN as f32, i32::MAX as f32) as i32
+    let u = f64::from(v) * f64::from(UNIT);
+    let slack = 1e-3 + u.abs() * f64::from(f32::EPSILON) * 2.0;
+    (u + slack.copysign(u))
+        .trunc()
+        .clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32
 }
 
 fn eval(e: &Expr, c: &Ctx) -> Option<(f32, f32)> {
@@ -294,5 +305,24 @@ pub fn zero_pct() -> SpecLen {
     SpecLen::Lin {
         v: Linear::default(),
         form: Form::Pct,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::to_fixed;
+
+    #[test]
+    fn large_lengths_left_just_under_a_unit_keep_it() {
+        // a length computed in f32 can land an ulp under the multiple of 1/64 px it stands for, which past
+        // 256 px is more than 1/1000 of a unit; checked below 2^20 units (16384 px), where an f32 still
+        // tells units apart by many ulps
+        for n in (1..130).map(|k| k * 7919) {
+            let under = f32::from_bits((n as f32 / 64.0).to_bits() - 1);
+            assert_eq!(to_fixed(under), n, "{under}");
+            assert_eq!(to_fixed(-under), -n, "{under}");
+            assert_eq!(to_fixed(n as f32 / 64.0), n);
+        }
+        assert_eq!(to_fixed(426.66624), 27306);
     }
 }

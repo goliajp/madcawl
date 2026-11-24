@@ -30,6 +30,8 @@ pub enum Short {
     Font,
     Flex,
     FlexFlow,
+    /// `gap`: the row gap, then the column gap
+    Gap,
     Overflow,
     ListStyle,
     PlaceContent,
@@ -64,6 +66,7 @@ pub(crate) fn by_name(name: &str) -> Option<Short> {
         "font" => S::Font,
         "flex" => S::Flex,
         "flex-flow" => S::FlexFlow,
+        "gap" | "grid-gap" => S::Gap,
         "overflow" => S::Overflow,
         "list-style" => S::ListStyle,
         "place-content" => S::PlaceContent,
@@ -148,6 +151,7 @@ pub(crate) fn longhands(sh: Short) -> Vec<What> {
             .map(What::Prop)
             .into(),
         Short::FlexFlow => [P::FlexDirection, P::FlexWrap].map(What::Prop).into(),
+        Short::Gap => [P::RowGap, P::ColumnGap].map(What::Prop).into(),
         Short::Overflow => [P::OverflowX, P::OverflowY].map(What::Prop).into(),
         Short::ListStyle => [P::ListStyleType, P::ListStylePosition]
             .map(What::Prop)
@@ -211,6 +215,17 @@ fn values(sh: Short, src: &str, xs: &[Item]) -> Option<Vec<Specified>> {
         Short::Font => font_shorthand(src, xs)?,
         Short::Flex => flex(src, xs)?,
         Short::FlexFlow => flex_flow(src, xs)?,
+        Short::Gap => {
+            let v: Vec<Specified> = xs
+                .iter()
+                .map(|x| one(Prop::RowGap, src, x))
+                .collect::<Option<_>>()?;
+            match &v[..] {
+                [a] => vec![a.clone(), a.clone()],
+                [a, b] => vec![a.clone(), b.clone()],
+                _ => return None,
+            }
+        }
         Short::Overflow => match xs {
             [a] => {
                 let v = one(P::OverflowX, src, a)?;

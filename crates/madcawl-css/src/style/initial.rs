@@ -74,6 +74,8 @@ pub(crate) fn initial() -> ComputedStyle {
             align_items: Align::Normal,
             align_self: Align::Auto,
             align_content: Align::Normal,
+            row_gap: None,
+            column_gap: None,
             vertical_align: VAlign::Kw(VerticalAlign::Baseline),
         }),
     }
@@ -163,6 +165,8 @@ impl ComputedStyle {
             AlignItems => rare.align_items,
             AlignSelf => rare.align_self,
             AlignContent => rare.align_content,
+            RowGap => rare.row_gap,
+            ColumnGap => rare.column_gap,
             VerticalAlign => rare.vertical_align,
         );
         if p == Prop::FontSize && self.font.size_keyword != from.font.size_keyword {
