@@ -116,8 +116,8 @@ fn supported(name: &str, src: &str, value: Span) -> bool {
     if name.starts_with("--") {
         return true;
     }
-    match props::Prop::from_name(name) {
-        Some(p) => props::parse(p, src, value).is_some(),
+    match props::declaration_parses(name, src, value) {
+        Some(ok) => ok,
         None => KNOWN.binary_search(&name).is_ok(),
     }
 }

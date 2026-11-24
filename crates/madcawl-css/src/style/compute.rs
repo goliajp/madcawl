@@ -3,7 +3,8 @@
 //! specificity and order; the winning one per property; and from it,
 //! the parent's values and the initial ones, the computed values.
 
-use std::cell::RefCell;
+use std::borrow::Cow;
+use std::cell::Cell;
 use std::collections::HashMap;
 
 use madcawl_dom::{Dom, NodeId, NodeKind};
@@ -13,132 +14,112 @@ use crate::Span;
 use crate::parser::{BlockItem, parse_declaration_list};
 
 use super::Styles;
-use super::buckets::Buckets;
-use super::custom::{self, Memo};
+use super::computed::ComputedStyle;
+use super::custom;
+use super::device::Device;
+use super::hints::hints;
 use super::matching::{Matcher, text};
-use super::props::{self as props, Decl, PROPS, Prop, Specified, What, Wide, parse_block};
+use super::order::{Cascaded, Key};
+use super::prepared::Prepared;
+use super::props::{self as props, Decl, Prop, Specified, Wide, parse_block};
+use super::resolve::{Cx, apply, fix_font, fix_up};
 use super::rules::{NONE, Rules};
-use super::values::{ComputedStyle, Display, Float, Position};
+use super::shorthand;
+use super::states::ElementStates;
+use super::vals::items;
+use super::values::{Display, Float, Position};
 use super::var::substitute;
 
-/// A declared value's place in the cascade, compared as one number:
-/// origin and importance, element-attached, layer, specificity, order.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct Key(u128);
-
-impl Key {
-    fn new(origin: u32, important: bool, attached: bool, layer: u32, spec: u32, order: u32) -> Key {
-        let level = if important { 6 - origin } else { origin + 1 };
-        let layer = if important { !layer } else { layer };
-        Key(u128::from(level) << 100
-            | u128::from(attached) << 96
-            | u128::from(layer) << 64
-            | u128::from(spec) << 32
-            | u128::from(order))
-    }
-
-    fn level(self) -> u32 {
-        (self.0 >> 100) as u32
-    }
-
-    fn origin(self) -> u32 {
-        let l = self.level();
-        if l <= 3 { l - 1 } else { 6 - l }
-    }
-
-    /// Element-attached and layer, as one number
-    fn layer(self) -> u64 {
-        (self.0 >> 64) as u64 & ((1 << 33) - 1)
-    }
-}
-
-/// What a `revert` or `revert-layer` already seen leaves a property to.
-#[derive(Clone, Copy)]
-enum Floor {
-    /// Only origins below this one
-    Origin(u32),
-    /// Only lower layers at this level, or lower levels
-    Layer { level: u32, layer: u64 },
-}
-
-impl Floor {
-    fn allows(self, k: Key) -> bool {
-        match self {
-            Floor::Origin(o) => k.origin() < o,
-            Floor::Layer { level, layer } => k.level() != level || k.layer() < layer,
-        }
-    }
-}
-
-type Won<'d> = [Option<&'d Decl>; PROPS];
-
-enum Src {
+pub(crate) enum Src {
     Block(u32),
     Inline,
+    Hint,
 }
 
+fn parse_list(text: &str) -> Box<[Decl]> {
+    let decls: Vec<_> = parse_declaration_list(text)
+        .into_iter()
+        .filter_map(|i| match i {
+            BlockItem::Declaration(d) => Some(d),
+            _ => None,
+        })
+        .collect();
+    parse_block(text, &decls)
+}
+
+/// What the cascade of one document keeps while it styles elements.
 pub(crate) struct Run<'r, 'a> {
-    m: Matcher<'r, 'a>,
-    buckets: Buckets,
-    ranks: Vec<u32>,
-    inline: HashMap<String, Box<[Decl]>>,
-    candidates: Vec<u32>,
-    matched: Vec<(Key, bool, Src)>,
-    memo: RefCell<Memo>,
+    pub m: Matcher<'r, 'a>,
+    pub prep: &'r Prepared,
+    pub inline: HashMap<String, Box<[Decl]>>,
+    /// The presentational hints of the element being styled, and the
+    /// blocks hints parsed to
+    pub hint: Option<String>,
+    pub hinted: HashMap<String, Box<[Decl]>>,
+    pub candidates: Vec<u32>,
+    pub matched: Vec<(Key, bool, Src)>,
+    pub device: Device,
+    /// Look elements up by `PathKey`
+    pub path_key: bool,
+    /// Compute every `PathKey` hit again in full and compare
+    pub verify: bool,
+    pub sig: Vec<u64>,
+    /// By class list number, the text numbers of the classes in it that
+    /// some selector names
+    pub named: HashMap<u32, Vec<u64>>,
 }
 
 impl<'r, 'a> Run<'r, 'a> {
-    pub fn new(dom: &'r Dom, rules: &'r Rules<'a>) -> Self {
-        let quirks = dom.quirks_mode() == madcawl_html::QuirksMode::Quirks;
+    pub fn new(
+        dom: &'r Dom,
+        rules: &'r Rules<'a>,
+        prep: &'r Prepared,
+        states: &'r ElementStates,
+        device: Device,
+    ) -> Self {
         Run {
             m: Matcher {
                 dom,
                 rules,
-                quirks,
+                quirks: prep.quirks,
                 places: Default::default(),
+                states,
             },
-            buckets: Buckets::build(rules, quirks),
-            ranks: rules.layer_ranks(),
+            prep,
             inline: HashMap::new(),
+            hint: None,
+            hinted: HashMap::new(),
             candidates: Vec::new(),
             matched: Vec::new(),
-            memo: RefCell::new(Memo::new()),
+            device,
+            path_key: true,
+            verify: cfg!(debug_assertions),
+            sig: Vec::new(),
+            named: HashMap::new(),
         }
     }
 
+    /// Style every element of the document, in tree order.
     pub fn all(&mut self, out: &mut Styles) {
         let dom = self.m.dom;
-        let mut interned: HashMap<ComputedStyle, u32> = HashMap::new();
         for el in dom.descendants(dom.document()) {
-            if dom.kind(el) != NodeKind::Element {
-                continue;
+            if dom.kind(el) == NodeKind::Element {
+                self.style_one(el, out);
             }
-            let i = el.index() as usize;
-            if out.of.len() <= i {
-                out.of.resize(i + 1, 0);
-                out.flags.resize(i + 1, 0);
-                out.customs.resize(i + 1, NONE);
-            }
-            let parent = self.m.parent_element(el);
-            self.collect(el);
-            let s = self.element(el, parent, out);
-            let k = *interned.entry(s).or_insert_with(|| {
-                out.table.push(s);
-                out.table.len() as u32 - 1
-            });
-            out.of[i] = k + 1;
-            let above = parent.map_or(0, |p| {
-                self.m
-                    .flags_below(p, out.get(p), out.flags[p.index() as usize], el)
-            });
-            out.flags[i] = above | self.m.own_flags(el, s.display);
         }
     }
 
-    fn collect(&mut self, el: NodeId) {
-        self.matched.clear();
-        self.buckets
+    /// The rules that may match `el`, for `collect` and its signature.
+    pub(crate) fn candidates(&mut self, el: NodeId) {
+        self.prep
+            .buckets
             .candidates(self.m.dom, el, &mut self.candidates);
+    }
+
+    /// The declarations that apply to `el`, from `candidates`, sorted
+    /// highest first.
+    pub(crate) fn collect(&mut self, el: NodeId) {
+        self.matched.clear();
         let rules = self.m.rules;
         for &c in &self.candidates {
             let e = &rules.entries[c as usize];
@@ -146,7 +127,7 @@ impl<'r, 'a> Run<'r, 'a> {
                 continue;
             }
             let origin = rules.sheets[e.sheet as usize].origin as u32;
-            let layer = self.ranks[e.layer as usize];
+            let layer = self.prep.ranks[e.layer as usize];
             for important in [false, true] {
                 let k = Key::new(origin, important, false, layer, e.spec, e.order);
                 self.matched.push((k, important, Src::Block(e.block)));
@@ -155,14 +136,7 @@ impl<'r, 'a> Run<'r, 'a> {
         if let Some(style) = self.m.dom.attribute(el, atom!("style")) {
             let style = text(style);
             if !self.inline.contains_key(&*style) {
-                let decls: Vec<_> = parse_declaration_list(&style)
-                    .into_iter()
-                    .filter_map(|i| match i {
-                        BlockItem::Declaration(d) => Some(d),
-                        _ => None,
-                    })
-                    .collect();
-                let parsed = parse_block(&style, &decls);
+                let parsed = parse_list(&style);
                 self.inline.insert(style.into_owned(), parsed);
             }
             for important in [false, true] {
@@ -170,93 +144,105 @@ impl<'r, 'a> Run<'r, 'a> {
                 self.matched.push((k, important, Src::Inline));
             }
         }
+        self.hint = hints(self.m.dom, el);
+        if let Some(h) = &self.hint {
+            if !self.hinted.contains_key(h) {
+                self.hinted.insert(h.clone(), parse_list(h));
+            }
+            // author level, unlayered, before every author rule
+            let k = Key::new(2, false, false, self.prep.author_rank, 0, 0);
+            self.matched.push((k, false, Src::Hint));
+        }
         self.matched
             .sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
     }
 
-    /// The winning declaration of each property, and of each custom
-    /// property by name, among those `collect` found.
-    fn cascade(&self, el: NodeId) -> (Won<'_>, Vec<(&str, &Decl)>) {
-        let mut won: Won<'_> = [None; PROPS];
-        let mut floor: [Option<Floor>; PROPS] = [None; PROPS];
-        let mut customs: Vec<(&str, &Decl)> = Vec::new();
-        let style = self.m.dom.attribute(el, atom!("style")).map(|s| text(s));
-        for (key, important, src) in &self.matched {
-            let decls = match src {
-                Src::Block(b) => self.m.rules.blocks[*b as usize].get(),
-                Src::Inline => &self.inline[style.as_deref().expect("a style attribute")],
-            };
-            for d in decls.iter().rev().filter(|d| d.important == *important) {
-                let p = match &d.what {
-                    What::Prop(p) => *p as usize,
-                    What::Custom(name) => {
-                        if !customs.iter().any(|(n, _)| *n == &**name) {
-                            customs.push((name, d));
-                        }
-                        continue;
-                    }
-                };
-                if won[p].is_some() || floor[p].is_some_and(|f| !f.allows(*key)) {
-                    continue;
-                }
-                match d.value {
-                    Specified::Wide(Wide::Revert) => floor[p] = Some(Floor::Origin(key.origin())),
-                    Specified::Wide(Wide::RevertLayer) => {
-                        floor[p] = Some(Floor::Layer {
-                            level: key.level(),
-                            layer: key.layer(),
-                        })
-                    }
-                    _ => won[p] = Some(d),
-                }
+    /// The value `d` declares for `p` once `var()` in it is substituted;
+    /// `None` when that makes it invalid.
+    fn substituted(
+        &self,
+        p: Prop,
+        d: &Decl,
+        sets: &[custom::CustomSet],
+        set: u32,
+        budget: &Cell<usize>,
+    ) -> Option<Specified> {
+        let raw = d.raw.as_deref().expect("the text var() is in");
+        let mut get = |n: &str| custom::lookup(sets, set, n);
+        let t = substitute(raw, true, &mut get, budget)?;
+        let span = Span::new(0, t.len());
+        let v = match d.short {
+            None => props::parse(p, &t, span)?,
+            Some(sh) => {
+                let xs = items(&t, span, 64)?;
+                let all = shorthand::parse(sh, &t, &xs)?;
+                all.into_iter().find(|(w, _)| *w == d.what)?.1
             }
-        }
-        (won, customs)
+        };
+        (v != Specified::Unresolved).then_some(v)
     }
 
-    fn element(&self, el: NodeId, parent: Option<NodeId>, out: &mut Styles) -> ComputedStyle {
-        let (won, customs) = self.cascade(el);
+    /// The computed values of `el` from what `collect` found; its custom
+    /// property set goes into `out`.
+    pub(crate) fn element(
+        &self,
+        el: NodeId,
+        parent: Option<NodeId>,
+        out: &mut Styles,
+    ) -> ComputedStyle {
+        let initial = ComputedStyle::initial();
+        let Cascaded { won, customs, .. } = {
+            let from = parent.and_then(|p| out.get(p)).unwrap_or(initial);
+            self.cascade(el, from)
+        };
         let parent_set = parent.map_or(NONE, |p| out.customs[p.index() as usize]);
-        let mut memo = self.memo.borrow_mut();
-        let set = memo.element_set(&mut out.sets, parent_set, &customs);
+        let set = out.memo.element_set(&mut out.sets, parent_set, &customs);
         out.customs[el.index() as usize] = set;
-        let from = parent.and_then(|p| out.get(p)).copied();
-        let inherited = from.unwrap_or(ComputedStyle::INITIAL);
-        let mut s = ComputedStyle::INITIAL;
+        let from = parent.and_then(|p| out.get(p)).unwrap_or(initial);
+        let mut s = ComputedStyle::inheriting(from);
+        let cx = self.cx(out, self.m.is_root(el));
         for &p in Prop::ALL {
             let v = match won[p as usize] {
                 Some(d) if d.value == Specified::Unresolved => {
-                    let raw = d.raw.as_deref().expect("the text var() is in");
-                    let mut get = |n: &str| custom::lookup(&out.sets, set, n);
                     // invalid at computed-value time: as if unset
-                    substitute(raw, true, &mut get, &memo.budget)
-                        .and_then(|t| props::parse(p, &t, Span::new(0, t.len())))
-                        .filter(|v| *v != Specified::Unresolved)
+                    let b = &out.memo.budget;
+                    self.substituted(p, d, &out.sets, set, b).map(Cow::Owned)
                 }
-                d => d.map(|d| d.value),
+                d => d.map(|d| Cow::Borrowed(&d.value)),
             };
-            let inherit = match v {
-                None | Some(Specified::Unresolved | Specified::Wide(Wide::Unset)) => p.inherited(),
-                // a revert that found nothing below it
-                Some(Specified::Wide(Wide::Revert | Wide::RevertLayer)) => p.inherited(),
-                Some(Specified::Wide(Wide::Inherit)) => true,
-                Some(Specified::Wide(Wide::Initial)) => false,
+            match v.as_deref() {
+                None | Some(Specified::Wide(Wide::Unset | Wide::Revert | Wide::RevertLayer)) => {
+                    // already the parent's or the initial value
+                }
+                Some(Specified::Wide(Wide::Inherit)) => s.copy_from(from, p),
+                Some(Specified::Wide(Wide::Initial)) => s.copy_from(initial, p),
                 Some(v) => {
-                    s.set(v);
-                    continue;
+                    apply(&mut s, p, v, from, &cx);
                 }
-            };
-            if inherit {
-                s.copy_from(&inherited, p);
+            }
+            if p == Prop::FontSize {
+                fix_font(&mut s);
             }
         }
+        fix_up(&mut s);
         self.adjust(&mut s, el, out);
         s
     }
 
+    fn cx(&self, out: &Styles, root: bool) -> Cx {
+        let d = &self.device;
+        Cx {
+            root_font: if root { 16.0 } else { out.root_font },
+            vw: d.width as f32,
+            vh: d.height as f32,
+            scale: d.scale as f32,
+            dark: d.dark,
+        }
+    }
+
     /// The changes CSS Display and CSS 2 make once the values are known:
     /// floats, absolutely positioned boxes, the root, and flex and grid
-    /// items are block-level.
+    /// items are block-level, and flex and grid items do not float.
     fn adjust(&self, s: &mut ComputedStyle, el: NodeId, out: &Styles) {
         let out_of_flow = matches!(s.position, Position::Absolute | Position::Fixed);
         if out_of_flow {
@@ -277,6 +263,9 @@ impl<'r, 'a> Run<'r, 'a> {
                 }
                 None => break,
             }
+        }
+        if items {
+            s.float = Float::None;
         }
         if root || out_of_flow || s.float != Float::None || items {
             s.display = s.display.blockified();

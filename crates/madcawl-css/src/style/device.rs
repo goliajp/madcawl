@@ -26,3 +26,25 @@ impl Default for Device {
         }
     }
 }
+
+/// A length in CSS pixels, for media queries and computed values: font
+/// relative units against the initial font size.
+pub(crate) fn length_px(n: f64, unit: &str, d: &Device) -> Option<f64> {
+    Some(match unit {
+        "px" => n,
+        "em" | "rem" => n * 16.0,
+        "ex" | "rex" => n * 8.0,
+        "ch" | "rch" => n * 8.0,
+        "vw" | "svw" | "lvw" | "dvw" => n * d.width / 100.0,
+        "vh" | "svh" | "lvh" | "dvh" => n * d.height / 100.0,
+        "vmin" => n * d.width.min(d.height) / 100.0,
+        "vmax" => n * d.width.max(d.height) / 100.0,
+        "cm" => n * 96.0 / 2.54,
+        "mm" => n * 96.0 / 25.4,
+        "q" => n * 96.0 / 101.6,
+        "in" => n * 96.0,
+        "pt" => n * 96.0 / 72.0,
+        "pc" => n * 16.0,
+        _ => return None,
+    })
+}

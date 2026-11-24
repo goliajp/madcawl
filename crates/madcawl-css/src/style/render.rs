@@ -7,9 +7,10 @@ use madcawl_dom::NodeId;
 use madcawl_html::Namespace;
 use madcawl_str::{Atom, atom};
 
+use super::computed::ComputedStyle;
 use super::matching::Matcher;
-use super::values::{ComputedStyle, ContentVisibility, Display};
-use super::{CHILDREN_HIDDEN, CONTENTS_SKIPPED, NOT_RENDERED};
+use super::styles::{CHILDREN_HIDDEN, CONTENTS_SKIPPED, NOT_RENDERED};
+use super::values::{ContentVisibility, Display};
 
 impl Matcher<'_, '_> {
     /// The flags `el` has from its parent `p`, whose values are `ps` and
@@ -99,27 +100,30 @@ impl Matcher<'_, '_> {
         )
     }
 
-    /// An SVG element that is never rendered where it is.
+    /// An element that is never rendered where it is: an HTML `<source>`
+    /// or `<track>`, which WebKit leaves without a box whatever its
+    /// `display`, or an SVG element only ever referenced.
     pub(crate) fn never_rendered(&self, el: NodeId) -> bool {
-        self.named(
-            el,
-            Namespace::Svg,
-            &[
-                atom!("clipPath"),
-                atom!("defs"),
-                atom!("desc"),
-                atom!("filter"),
-                atom!("linearGradient"),
-                atom!("marker"),
-                atom!("mask"),
-                atom!("metadata"),
-                atom!("pattern"),
-                atom!("radialGradient"),
-                atom!("script"),
-                atom!("style"),
-                atom!("symbol"),
-                atom!("title"),
-            ],
-        )
+        self.named(el, Namespace::Html, &[atom!("source"), atom!("track")])
+            || self.named(
+                el,
+                Namespace::Svg,
+                &[
+                    atom!("clipPath"),
+                    atom!("defs"),
+                    atom!("desc"),
+                    atom!("filter"),
+                    atom!("linearGradient"),
+                    atom!("marker"),
+                    atom!("mask"),
+                    atom!("metadata"),
+                    atom!("pattern"),
+                    atom!("radialGradient"),
+                    atom!("script"),
+                    atom!("style"),
+                    atom!("symbol"),
+                    atom!("title"),
+                ],
+            )
     }
 }

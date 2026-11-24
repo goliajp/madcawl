@@ -12,12 +12,11 @@ use madcawl_html::{AttrNamespace, Namespace as ElementNs};
 use madcawl_str::{Atom, DomString};
 
 use crate::Name;
-use crate::selector::{
-    AttrOp, AttrSelector, CaseFlag, Combinator, Component, Namespace, SelectorList,
-};
+use crate::selector::{AttrSelector, CaseFlag, Combinator, Component, Namespace, SelectorList};
 
-use super::caseless::{caseless_eq, words};
+use super::caseless::{caseless_eq, value_matches, words};
 use super::rules::{Entry, NONE, Rules, Sel};
+use super::states::ElementStates;
 
 pub(crate) struct Matcher<'r, 'a> {
     pub dom: &'r Dom,
@@ -28,20 +27,12 @@ pub(crate) struct Matcher<'r, 'a> {
     /// children (`Place`); all zero until some selector asks about one
     /// of them
     pub places: RefCell<Vec<Place>>,
+    pub states: &'r ElementStates,
 }
 
 /// An element's position among its siblings, from 1: from the first,
 /// from the last, and the same among those of its type.
 pub(crate) type Place = [u32; 4];
-
-/// `have` is `want`, ASCII case-insensitively when `caseless`.
-fn same(have: &[u8], want: &[u8], caseless: bool) -> bool {
-    if caseless {
-        have.eq_ignore_ascii_case(want)
-    } else {
-        have == want
-    }
-}
 
 pub(crate) fn text(s: &DomString) -> Cow<'_, str> {
     match s.as_ascii_str() {
@@ -361,23 +352,5 @@ impl Matcher<'_, '_> {
                     && lang[..r.len()].eq_ignore_ascii_case(r)
                     && lang[r.len()] == b'-'
         })
-    }
-}
-
-fn value_matches(op: AttrOp, have: &str, want: &str, caseless: bool) -> bool {
-    let (h, w) = (have.as_bytes(), want.as_bytes());
-    let eq = |a: &[u8]| same(a, w, caseless);
-    let starts = h.len() >= w.len() && eq(&h[..w.len()]);
-    match op {
-        AttrOp::Equals => eq(h),
-        AttrOp::Includes => {
-            !w.is_empty()
-                && !w.iter().any(u8::is_ascii_whitespace)
-                && h.split(u8::is_ascii_whitespace).any(eq)
-        }
-        AttrOp::DashMatch => eq(h) || starts && h.get(w.len()) == Some(&b'-'),
-        AttrOp::Prefix => !w.is_empty() && starts,
-        AttrOp::Suffix => !w.is_empty() && h.len() >= w.len() && eq(&h[h.len() - w.len()..]),
-        AttrOp::Substring => !w.is_empty() && h.windows(w.len()).any(eq),
     }
 }

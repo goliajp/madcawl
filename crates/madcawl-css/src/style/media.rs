@@ -6,7 +6,8 @@
 use crate::Span;
 use crate::tokenizer::{Kind, Token};
 
-use super::device::Device;
+use super::calc::media_length;
+use super::device::{Device, length_px};
 use super::tokens;
 
 /// Whether the media query list `src[span]` matches; an empty list does.
@@ -279,8 +280,26 @@ impl Eval<'_> {
                 s.make_ascii_lowercase();
                 Value::Ident(s)
             }
+            Kind::Function => Value::Len(self.math(t)?),
             _ => return None,
         })
+    }
+
+    /// A math function of lengths, its function token `t` consumed.
+    fn math(&mut self, t: Token) -> Option<f64> {
+        let mut depth = 1;
+        let close = loop {
+            let x = *self.peek()?;
+            self.i += 1;
+            match x.kind {
+                Kind::Function | Kind::OpenParen => depth += 1,
+                Kind::CloseParen if depth == 1 => break x,
+                Kind::CloseParen => depth -= 1,
+                _ => {}
+            }
+        };
+        let inner = Span::new(t.span.end as usize, close.span.start as usize);
+        media_length(self.src, t, inner, self.d)
     }
 
     fn feature(&mut self) -> Option<bool> {
@@ -429,26 +448,4 @@ impl Eval<'_> {
         };
         Some(op.holds(have, want))
     }
-}
-
-/// A length in CSS pixels, for media queries and computed values: font
-/// relative units against the initial font size.
-pub(crate) fn length_px(n: f64, unit: &str, d: &Device) -> Option<f64> {
-    Some(match unit {
-        "px" => n,
-        "em" | "rem" => n * 16.0,
-        "ex" | "rex" => n * 8.0,
-        "ch" | "rch" => n * 8.0,
-        "vw" | "svw" | "lvw" | "dvw" => n * d.width / 100.0,
-        "vh" | "svh" | "lvh" | "dvh" => n * d.height / 100.0,
-        "vmin" => n * d.width.min(d.height) / 100.0,
-        "vmax" => n * d.width.max(d.height) / 100.0,
-        "cm" => n * 96.0 / 2.54,
-        "mm" => n * 96.0 / 25.4,
-        "q" => n * 96.0 / 101.6,
-        "in" => n * 96.0,
-        "pt" => n * 96.0 / 72.0,
-        "pc" => n * 16.0,
-        _ => return None,
-    })
 }

@@ -1,6 +1,7 @@
-//! The pseudo-classes, for a page no one has interacted with: nothing
-//! is hovered, focused, visited or targeted, form controls hold the
-//! values their markup gives them, and custom elements are undefined.
+//! The pseudo-classes. Hovered, pressed, focused and targeted are as
+//! the host's `ElementStates` say; nothing is ever visited; form
+//! controls hold the values their markup gives them, and custom
+//! elements are undefined.
 
 use madcawl_dom::{NodeId, NodeKind};
 use madcawl_str::{Atom, atom};
@@ -96,18 +97,14 @@ impl Matcher<'_, '_> {
             P::Defined => {
                 !self.is_html(el) || self.dom.local_name(el).is_some_and(|n| !atom_has_dash(n))
             }
-            P::Active
-            | P::Autofill
-            | P::Focus
-            | P::FocusVisible
-            | P::FocusWithin
+            P::Active | P::Focus | P::FocusVisible | P::Hover | P::Target => self.states.has(el, p),
+            P::FocusWithin => self.states.focus_within(self.dom, el),
+            P::Autofill
             | P::Fullscreen
-            | P::Hover
             | P::InRange
             | P::Modal
             | P::OutOfRange
             | P::PopoverOpen
-            | P::Target
             | P::UserInvalid
             | P::UserValid
             | P::Visited => false,

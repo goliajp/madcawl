@@ -152,12 +152,23 @@ pub(crate) struct Memo {
     pub budget: Cell<usize>,
 }
 
+impl Default for Memo {
+    fn default() -> Self {
+        Memo::new()
+    }
+}
+
 impl Memo {
     pub fn new() -> Self {
         Memo {
             made: HashMap::new(),
             budget: Cell::new(BUDGET),
         }
+    }
+
+    /// A new run of the cascade gets the whole budget again.
+    pub fn new_run(&self) {
+        self.budget.set(BUDGET);
     }
 
     /// The set an element gets: its parent's when it declares none.

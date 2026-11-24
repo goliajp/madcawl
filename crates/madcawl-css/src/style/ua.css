@@ -2,6 +2,7 @@
    displayed; where webkit's own sheet differs, webkit's */
 
 @namespace "http://www.w3.org/1999/xhtml";
+@namespace svg "http://www.w3.org/2000/svg";
 
 [hidden]:not([hidden=until-found i]):not(embed), area, base, basefont, datalist,
 head, link, meta, noembed, noframes, param, rp, script, style, template, title {
@@ -28,10 +29,6 @@ input[type=hidden i] {
 
 audio:not([controls]) {
   display: none !important;
-}
-
-source, track {
-  display: none;
 }
 
 html, body {
@@ -121,4 +118,282 @@ details > summary:first-of-type {
 
 input, select, button, textarea, marquee, meter, progress {
   display: inline-block;
+}
+
+/* the box, font and list defaults of webkit's sheet */
+
+body {
+  margin: 8px;
+}
+
+p, dl, blockquote, figure, multicol {
+  margin-block: 1em;
+}
+
+blockquote, figure {
+  margin-inline: 40px;
+}
+
+address, cite, dfn, em, i, var {
+  font-style: italic;
+}
+
+b, strong {
+  font-weight: bolder;
+}
+
+h1 {
+  font-size: 2em;
+  margin-block: 0.67em;
+  font-weight: bold;
+}
+
+:is(article, aside, nav, section) h1 {
+  font-size: 1.5em;
+  margin-block: 0.83em;
+}
+
+:is(article, aside, nav, section) :is(article, aside, nav, section) h1 {
+  font-size: 1.17em;
+  margin-block: 1em;
+}
+
+h2 {
+  font-size: 1.5em;
+  margin-block: 0.83em;
+  font-weight: bold;
+}
+
+h3 {
+  font-size: 1.17em;
+  margin-block: 1em;
+  font-weight: bold;
+}
+
+h4 {
+  margin-block: 1.33em;
+  font-weight: bold;
+}
+
+h5 {
+  font-size: 0.83em;
+  margin-block: 1.67em;
+  font-weight: bold;
+}
+
+h6 {
+  font-size: 0.67em;
+  margin-block: 2.33em;
+  font-weight: bold;
+}
+
+ul, menu, dir {
+  list-style-type: disc;
+  margin-block: 1em;
+  padding-inline-start: 40px;
+}
+
+ol {
+  list-style-type: decimal;
+  margin-block: 1em;
+  padding-inline-start: 40px;
+}
+
+li {
+  text-align: match-parent;
+}
+
+:is(ul, ol, menu, dir) :is(ul, menu, dir) {
+  list-style-type: circle;
+}
+
+:is(ul, ol, menu, dir) :is(ul, ol, menu, dir) :is(ul, menu, dir) {
+  list-style-type: square;
+}
+
+:is(dir, dl, menu, ol, ul) :is(dir, dl, menu, ol, ul) {
+  margin-block: 0;
+}
+
+dd {
+  margin-inline-start: 40px;
+}
+
+pre, xmp, plaintext, listing {
+  font-family: monospace;
+  white-space: pre;
+  margin-block: 1em;
+}
+
+tt, code, kbd, samp {
+  font-family: monospace;
+}
+
+small {
+  font-size: smaller;
+}
+
+big {
+  font-size: larger;
+}
+
+sub {
+  vertical-align: sub;
+  font-size: smaller;
+}
+
+sup {
+  vertical-align: super;
+  font-size: smaller;
+}
+
+center {
+  text-align: -webkit-center;
+}
+
+hr {
+  margin-block: 0.5em;
+  margin-inline: auto;
+  border-style: inset;
+  border-width: 1px;
+  color: gray;
+  overflow: hidden;
+}
+
+table {
+  box-sizing: border-box;
+  text-indent: initial;
+}
+
+thead, tbody, tfoot, tr {
+  border-color: inherit;
+}
+
+thead, tbody, tfoot, tr {
+  vertical-align: middle;
+}
+
+td, th {
+  vertical-align: inherit;
+  padding: 1px;
+}
+
+th {
+  font-weight: bold;
+}
+
+caption {
+  text-align: -webkit-center;
+}
+
+a:any-link {
+  color: -webkit-link;
+}
+
+mark {
+  background-color: yellow;
+  color: black;
+}
+
+fieldset {
+  margin-inline: 2px;
+  padding-block: 0.35em 0.625em;
+  padding-inline: 0.75em;
+  border: 2px groove threedface;
+}
+
+legend {
+  padding-inline: 2px;
+}
+
+input, textarea, select, button {
+  margin: 0em;
+  font: -webkit-small-control;
+  color: fieldtext;
+  line-height: normal;
+  text-indent: 0;
+  text-align: start;
+}
+
+input, textarea {
+  padding: 1px;
+  border: 2px inset;
+  background-color: field;
+}
+
+textarea {
+  font-family: monospace;
+  white-space: pre-wrap;
+}
+
+input[type=checkbox i], input[type=radio i] {
+  margin: 3px 2px;
+  padding: initial;
+  border: initial;
+  background-color: initial;
+  box-sizing: border-box;
+}
+
+input:is([type=button i], [type=submit i], [type=reset i]) {
+  white-space: pre;
+  color: buttontext;
+}
+
+input:is([type=button i], [type=submit i], [type=reset i]), button {
+  box-sizing: border-box;
+}
+
+button {
+  padding-block: 1px;
+  padding-inline: 6px;
+  border: 2px outset buttonborder;
+  background-color: buttonface;
+  color: buttontext;
+  text-align: center;
+}
+
+img, iframe, embed, object, video {
+  box-sizing: content-box;
+}
+
+iframe {
+  border: 2px inset;
+}
+
+[dir=ltr i] {
+  direction: ltr;
+}
+
+[dir=rtl i] {
+  direction: rtl;
+}
+
+bdo[dir] {
+  unicode-bidi: bidi-override;
+}
+
+ruby > rt {
+  font-size: 50%;
+}
+
+dialog {
+  position: absolute;
+  inset-inline: 0;
+  margin: auto;
+  border: solid;
+  padding: 1em;
+  background-color: canvas;
+  color: canvastext;
+}
+
+details > summary:first-of-type {
+  list-style: inside disclosure-closed;
+}
+
+details[open] > summary:first-of-type {
+  list-style-type: disclosure-open;
+}
+
+svg|svg:not(:root), svg|symbol, svg|image, svg|marker, svg|pattern, svg|foreignObject {
+  overflow: hidden;
 }

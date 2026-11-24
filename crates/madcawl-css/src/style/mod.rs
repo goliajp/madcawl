@@ -5,46 +5,115 @@
 //! device, finds its cascade layers, and flattens its style rules to
 //! one entry per selector; declaration blocks stay unparsed until an
 //! element matches them. `Cascade::compute` walks the document in tree
-//! order and gives every element its computed values (`Styles`).
+//! order and gives every element its computed values (`Styles`), in
+//! groups shared until written (`computed.rs`); an element whose chain
+//! of what selectors see matches one styled before takes its values by
+//! `PathKey` (`pathkey.rs`). `Cascade::restyle` brings the styles up to
+//! date after the document changes (`restyle.rs`).
 //!
 //! `style_document` does the whole thing for a parsed page: the user
 //! agent stylesheet, then the page's `<style>` elements and the
 //! stylesheets its `<link>` elements name, as the caller loads them.
 
+/// A keyword-valued type: its variants, how each is written, and the
+/// one a lowercase keyword names.
+macro_rules! keywords {
+    ($(#[$m:meta])* $ty:ident { $($v:ident = $s:literal),* $(,)? }) => {
+        $(#[$m])*
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub enum $ty {
+            $($v),*
+        }
+
+        impl $ty {
+            pub fn css(self) -> &'static str {
+                match self {
+                    $($ty::$v => $s),*
+                }
+            }
+
+            /// The one an ASCII-lowercase keyword names.
+            pub fn from_keyword(k: &str) -> Option<$ty> {
+                match k {
+                    $($s => Some($ty::$v),)*
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
 mod buckets;
+mod calc;
 mod caseless;
+mod colors;
 mod compute;
+mod computed;
+mod cssom;
 mod custom;
+mod decls;
 mod device;
+mod features;
+mod fonts;
+mod hints;
+mod initial;
+mod kw;
 mod layers;
+mod length;
+mod logical;
+mod longhand;
 mod matching;
 mod media;
 mod nth;
+mod order;
+mod pathkey;
+mod prepared;
 mod props;
 mod pseudo;
 mod render;
+mod resolve;
+mod resolve_box;
+mod restyle;
+mod roots;
 mod rules;
+mod shorthand;
 mod sources;
+mod states;
+mod styles;
 mod supports;
+mod vals;
 mod values;
 mod var;
 
+use std::cell::OnceCell;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use madcawl_dom::{Dom, NodeId, NodeKind};
+use madcawl_dom::Dom;
 use madcawl_str::HeldAtoms;
 
 use crate::Span;
 use crate::sheet::Stylesheet;
 use crate::tokenizer::{Kind, Token, Tokenizer};
 
+use prepared::Prepared;
+
+pub use computed::{
+    BoxModel, ComputedStyle, CssColor, Font, LineHeight, Paint, Place, Rare, Size, Text, VAlign,
+};
 pub use device::Device;
+pub use features::Tier;
+pub use kw::*;
+pub use length::{Form, Lp};
 pub use media::matches_media;
 pub use props::Prop;
+pub use restyle::{Change, Restyled};
 pub use rules::Origin;
 pub use sources::{SheetSource, sheet_sources};
+pub use states::ElementStates;
+pub use styles::{StyleStats, Styles};
 pub use supports::supports;
-pub use values::{ComputedStyle, ContentVisibility, Display, Float, Position, Visibility};
+pub use values::{ContentVisibility, Display, Float, Position, Visibility};
 
 /// The tokens of `src[span]` but whitespace.
 pub(crate) fn tokens(src: &str, span: Span) -> Vec<Token> {
@@ -69,6 +138,31 @@ pub struct Cascade<'a> {
     rules: rules::Rules<'a>,
     held: HeldAtoms,
     device: Device,
+    /// Built from the rules on first use, for each quirks mode
+    prepared: [OnceCell<Prepared>; 2],
+    /// Unique to this cascade and its set of stylesheets: styles made
+    /// under another one cannot be restyled incrementally
+    generation: u64,
+    path_key: bool,
+    verify: bool,
+}
+
+fn is_quirks(dom: &Dom) -> bool {
+    dom.quirks_mode() == madcawl_html::QuirksMode::Quirks
+}
+
+fn next_generation() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+/// How many selectors and declaration blocks the cascade holds, and how
+/// many blocks an element has matched, which parses them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RuleStats {
+    pub selectors: usize,
+    pub blocks: usize,
+    pub parsed: usize,
 }
 
 impl<'a> Cascade<'a> {
@@ -77,6 +171,10 @@ impl<'a> Cascade<'a> {
             rules: rules::Rules::new(),
             held: HeldAtoms::new(),
             device,
+            prepared: Default::default(),
+            generation: next_generation(),
+            path_key: true,
+            verify: cfg!(debug_assertions),
         }
     }
 
@@ -88,101 +186,63 @@ impl<'a> Cascade<'a> {
     /// which owns the atom table.
     pub fn add(&mut self, sheet: &'a Stylesheet, origin: Origin) {
         self.rules.add(sheet, origin, &self.held, &self.device);
+        self.prepared = Default::default();
+        self.generation = next_generation();
+    }
+
+    /// Whether elements are looked up by `PathKey` (on by default); off,
+    /// every element takes the full path.
+    pub fn set_path_key(&mut self, on: bool) {
+        self.path_key = on;
+    }
+
+    /// Whether every `PathKey` hit is computed again in full and
+    /// compared (`StyleStats::mismatches`); on by default in debug
+    /// builds.
+    pub fn set_verify(&mut self, on: bool) {
+        self.verify = on;
+    }
+
+    pub fn rule_stats(&self) -> RuleStats {
+        RuleStats {
+            selectors: self.rules.entries.len(),
+            blocks: self.rules.blocks.len(),
+            parsed: self
+                .rules
+                .blocks
+                .iter()
+                .filter(|b| b.parsed.get().is_some())
+                .count(),
+        }
+    }
+
+    fn prepared(&self, dom: &Dom) -> &Prepared {
+        let quirks = is_quirks(dom);
+        self.prepared[usize::from(quirks)].get_or_init(|| Prepared::new(&self.rules, quirks))
+    }
+
+    fn run<'r>(&'r self, dom: &'r Dom, states: &'r ElementStates) -> compute::Run<'r, 'a> {
+        let mut r = compute::Run::new(dom, &self.rules, self.prepared(dom), states, self.device);
+        r.path_key = self.path_key;
+        r.verify = self.verify;
+        r
     }
 
     /// The computed values of every element of `dom`'s document.
     pub fn compute(&self, dom: &Dom) -> Styles {
-        let mut out = Styles::default();
-        compute::Run::new(dom, &self.rules).all(&mut out);
-        out
-    }
-}
-
-/// The element or one of its ancestors is `display: none`.
-const NOT_RENDERED: u8 = 1;
-/// An ancestor is `content-visibility: hidden`, or otherwise does not
-/// render what is in it: its contents are skipped.
-const CONTENTS_SKIPPED: u8 = 2;
-/// The element's own children are not rendered (`render.rs`).
-const CHILDREN_HIDDEN: u8 = 4;
-
-/// The computed values of a document's elements, by node.
-#[derive(Default)]
-pub struct Styles {
-    /// By node index, 1 + the index in `table`; 0 for a node that has none
-    of: Vec<u32>,
-    flags: Vec<u8>,
-    table: Vec<ComputedStyle>,
-    /// By node index, the element's custom property set
-    customs: Vec<u32>,
-    sets: Vec<custom::CustomSet>,
-}
-
-impl Styles {
-    /// The computed values of an element in the document.
-    pub fn get(&self, n: NodeId) -> Option<&ComputedStyle> {
-        let k = *self.of.get(n.index() as usize)?;
-        (k != 0).then(|| &self.table[k as usize - 1])
+        self.compute_with(dom, &ElementStates::new())
     }
 
-    /// The computed value of the custom property `name` (with its
-    /// dashes) on an element.
-    pub fn custom_property(&self, n: NodeId, name: &str) -> Option<&str> {
-        let k = *self.customs.get(n.index() as usize)?;
-        custom::lookup(&self.sets, k, name)
-    }
-
-    /// Every custom property of an element and its computed value, by
-    /// name.
-    pub fn custom_properties(&self, n: NodeId) -> Vec<(&str, &str)> {
-        let k = self
-            .customs
-            .get(n.index() as usize)
-            .copied()
-            .unwrap_or(rules::NONE);
-        custom::all(&self.sets, k)
-    }
-
-    /// How many different sets of computed values the elements have.
-    pub fn distinct(&self) -> usize {
-        self.table.len()
-    }
-
-    fn flags_of(&self, dom: &Dom, n: NodeId) -> Option<(u8, &ComputedStyle)> {
-        let el = match dom.kind(n) {
-            NodeKind::Element => n,
-            _ => dom
-                .parent(n)
-                .filter(|&p| dom.kind(p) == NodeKind::Element)?,
+    /// The same, the elements in the states `states` gives.
+    pub fn compute_with(&self, dom: &Dom, states: &ElementStates) -> Styles {
+        let mut out = Styles {
+            generation: self.generation,
+            quirks: is_quirks(dom),
+            ..Styles::default()
         };
-        let s = self.get(el)?;
-        let f = self.flags[el.index() as usize];
-        let skipped = el != n
-            && (s.content_visibility == ContentVisibility::Hidden && s.display.can_contain_size()
-                || f & CHILDREN_HIDDEN != 0);
-        Some((
-            f & !CHILDREN_HIDDEN | if skipped { CONTENTS_SKIPPED } else { 0 },
-            s,
-        ))
-    }
-
-    /// Whether the node makes boxes: an element or text in the document
-    /// with no `display: none` on it or above it (nor `display:
-    /// contents` on a replaced element or form control), no
-    /// `content-visibility: hidden` above it on a box that can take size
-    /// containment, and not in what HTML and
-    /// SVG never render where it is (a closed `<details>` but its
-    /// summary, the fallback content of `<canvas>`, `<video>`,
-    /// `<audio>` and `<iframe>`, SVG `<defs>`, `<title>` and the like).
-    /// A text node goes by its parent element.
-    pub fn is_rendered(&self, dom: &Dom, n: NodeId) -> bool {
-        self.flags_of(dom, n).is_some_and(|(f, _)| f == 0)
-    }
-
-    /// Rendered, and `visibility: visible`.
-    pub fn is_visible(&self, dom: &Dom, n: NodeId) -> bool {
-        self.flags_of(dom, n)
-            .is_some_and(|(f, s)| f == 0 && s.visibility == Visibility::Visible)
+        out.memo.new_run();
+        self.run(dom, states).all(&mut out);
+        out
     }
 }
 

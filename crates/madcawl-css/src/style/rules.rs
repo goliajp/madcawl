@@ -93,9 +93,9 @@ impl Block<'_> {
     }
 }
 
-struct Layer {
+pub(crate) struct Layer {
     name: String,
-    children: Vec<u32>,
+    pub children: Vec<u32>,
 }
 
 #[derive(Default)]
@@ -104,9 +104,9 @@ pub(crate) struct Rules<'a> {
     pub parents: Vec<Parent<'a>>,
     pub entries: Vec<Entry<'a>>,
     pub blocks: Vec<Block<'a>>,
-    layers: Vec<Layer>,
+    pub layers: Vec<Layer>,
     /// The root layer of each origin
-    roots: [u32; 3],
+    pub roots: [u32; 3],
     order: u32,
     anonymous: u32,
 }
@@ -315,28 +315,5 @@ impl<'a> Rules<'a> {
             };
         }
         at
-    }
-
-    /// Each layer's rank among its origin's: a layer's sublayers come
-    /// before the rules directly in it, and the unlayered rules last.
-    pub fn layer_ranks(&self) -> Vec<u32> {
-        let mut rank = vec![0; self.layers.len()];
-        for &root in &self.roots {
-            let mut next = 0;
-            // post-order with an explicit stack: (layer, children done)
-            let mut stack = vec![(root, false)];
-            while let Some((l, done)) = stack.pop() {
-                if done {
-                    rank[l as usize] = next;
-                    next += 1;
-                    continue;
-                }
-                stack.push((l, true));
-                for &c in self.layers[l as usize].children.iter().rev() {
-                    stack.push((c, false));
-                }
-            }
-        }
-        rank
     }
 }

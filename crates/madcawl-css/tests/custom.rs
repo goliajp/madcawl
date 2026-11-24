@@ -245,7 +245,11 @@ fn a_chain_of_copies_draws_on_one_budget() {
     css.push_str(" }</style><i id=x></i>");
     let p = page(&css);
     let held: usize = (0..=100)
-        .filter_map(|i| p.styles.custom_property(p.el("x"), &format!("--b{i}")).map(str::len))
+        .filter_map(|i| {
+            p.styles
+                .custom_property(p.el("x"), &format!("--b{i}"))
+                .map(str::len)
+        })
         .sum();
     assert!(held <= 66 << 20, "copies hold {held} bytes");
     assert_eq!(p.styles.custom_property(p.el("x"), "--b100"), None);
