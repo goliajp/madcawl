@@ -72,6 +72,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "madcawl-text"
+version = "0.0.1"
+dependencies = [
+ "madcawl-unicode",
+]
+
+[[package]]
+name = "madcawl-unicode"
+version = "0.0.1"
+
+[[package]]
 name = "torajs-abi"
 version = "0.1.0"
 

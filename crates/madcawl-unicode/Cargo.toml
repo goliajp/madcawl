@@ -1,0 +1,14 @@
+[package]
+name = "madcawl-unicode"
+description = "Unicode character properties and the bidirectional, line breaking and text segmentation algorithms"
+version.workspace = true
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
