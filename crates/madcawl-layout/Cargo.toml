@@ -1,0 +1,19 @@
+[package]
+name = "madcawl-layout"
+description = "The box tree, the fragment tree, and block and inline layout over a styled DOM"
+version.workspace = true
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+madcawl-css = { path = "../madcawl-css" }
+madcawl-dom = { path = "../madcawl-dom" }
+madcawl-html = { path = "../madcawl-html" }
+madcawl-str = { path = "../madcawl-str" }
+madcawl-text = { path = "../madcawl-text" }
