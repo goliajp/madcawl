@@ -1,0 +1,22 @@
+[package]
+name = "madcawl-shell"
+description = "The windowless host: loads a page and reads it back as text an agent can act on"
+version.workspace = true
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "madcawl-shell"
+path = "src/main.rs"
+
+[dependencies]
+madcawl-css = { path = "../madcawl-css" }
+madcawl-dom = { path = "../madcawl-dom" }
+madcawl-html = { path = "../madcawl-html" }
+madcawl-str = { path = "../madcawl-str" }
