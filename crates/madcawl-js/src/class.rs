@@ -19,6 +19,11 @@ pub struct ClassId(pub u16);
 /// What a host function gets besides `this` and its arguments: the
 /// isolate and the host it was called with, as the engine passed them
 /// down. Made by the engine for one call, valid for that call.
+///
+/// The engine owns it, and the host keeps no pointer to it past the
+/// call. Its fields are only ever added to, never changed or reordered,
+/// so that what a host function needs later (the callee, a data word)
+/// comes here without touching [`HostFn`] or the generated shells.
 #[repr(C)]
 pub struct Ctx {
     pub engine: *mut c_void,

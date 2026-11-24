@@ -196,7 +196,7 @@ impl Stub {
             host: TypeId::of::<H>(),
             captures: captures.into_iter().map(Owned::into_raw).collect(),
         };
-        Stub::owned(self.alloc(realm.0, Body::Function { name: "", length: 0, call }))
+        Stub::owned(self.alloc(self.index(realm), Body::Function { name: "", length: 0, call }))
     }
 
     pub(crate) fn call_value<H: Host<Stub>>(&mut self, host: &mut H, f: Value, this: Value, args: &[Value]) -> Owned<Value> {
@@ -272,13 +272,13 @@ impl Stub {
         let r = self.realms.len() as u32;
         let global = self.alloc(r, Body::Object);
         self.realms.push(RealmData { global, detached: false, methods: Default::default() });
-        Realm(r)
+        Realm(r, self.id)
     }
 }
 
 /// Release what a realm holds itself.
 pub(crate) fn detach(e: &mut Stub, realm: Realm) {
-    let d = e.realm_data(realm.0);
+    let d = e.realm_data(e.index(realm));
     if d.detached {
         return;
     }

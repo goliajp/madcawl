@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use madcawl_dom::{Dom, NodeId, NodeKind};
 use madcawl_js::{
-    ClassDef, Deadline, Engine, ErrorKind, Host, HostRef, Member, ModuleRequest, Owned, Root, Step,
+    ClassDef, Deadline, Engine, ErrorKind, Halt, Host, HostRef, Member, ModuleRequest, Owned, Root, Step,
 };
 use madcawl_str::{Atom, HeldAtoms};
 
@@ -127,7 +127,7 @@ impl<E: Engine> DomHost<E> {
             .collect();
         let this = self.wrap(e, target);
         let arg = e.string(ty.to_dom_string());
-        let checkpoints = e.script_depth() == 0;
+        let checkpoints = !e.in_script();
         let (mut called, mut ended) = (0, false);
         for r in roots {
             if !ended {
@@ -137,13 +137,13 @@ impl<E: Engine> DomHost<E> {
                     e.release(res);
                 } else {
                     let _sentinel = res.into_raw();
-                    ended = e.is_terminating();
+                    ended = e.halt() != Halt::Running;
                     if !ended {
                         let ex = e.take_exception().expect("a thrown exception");
                         self.report_exception(e, ex);
                     }
                 }
-                // a checkpoint would start afresh after a termination
+                // halted script skips the task's checkpoint
                 if checkpoints && !ended {
                     e.run_microtasks(self);
                 }

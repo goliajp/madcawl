@@ -327,6 +327,8 @@ fn a_garbage_wrapper_read_between_unlink_batches_keeps_what_script_writes() {
         js.set(pairs[k + 1].get(), "next", pairs[k].get());
     }
     js.set(pairs[3].get(), "w", div.get());
+    let n = js.node(div.get());
+    let old = js.h.dom.wrapper(n);
     for v in pairs {
         js.drop(v);
     }
@@ -336,6 +338,7 @@ fn a_garbage_wrapper_read_between_unlink_batches_keeps_what_script_writes() {
     }
     // script reads the div again and gives it an expando
     let again = js.get(html.get(), "firstChild");
+    assert_ne!(Stub::wrapper_word(again.get()), old, "a new wrapper, not the condemned one");
     let tag = js.object();
     js.set(again.get(), "expando", tag.get());
     let stats = js.collect();
@@ -409,4 +412,33 @@ fn a_dead_wrapper_read_before_its_notice_is_replaced() {
     assert_eq!(js.h.dom.wrapper(n), 0);
     js.drop(html);
     js.audit();
+}
+
+#[test]
+#[should_panic(expected = "a wrapper for a host object found to be garbage")]
+fn a_wrapper_for_a_garbage_node_reached_by_its_raw_id_between_batches_is_refused() {
+    let mut js = Js::new();
+    js.collect();
+    // a garbage pair of plain objects comes first, so that the first
+    // unlink batch leaves the nodes alone
+    let pair = [js.object(), js.object()];
+    js.set(pair[0].get(), "next", pair[1].get());
+    js.set(pair[1].get(), "next", pair[0].get());
+    for v in pair {
+        js.drop(v);
+    }
+    // a detached parent and child hold each other: both are garbage
+    let p = element(&mut js, "div");
+    let c = element(&mut js, "i");
+    js.run(p.get(), "appendChild", &[c.get()]);
+    let id = js.node(c.get());
+    js.drop(c);
+    js.drop(p);
+    js.h.settle(&mut js.e);
+    while !js.e.unlinking() {
+        assert_eq!(js.h.collect(&mut js.e, Deadline::Work(1)), madcawl_js::Step::More);
+    }
+    // the raw id is counted by nothing: a wrapper made from it would be
+    // unlinked with the node
+    let _ = js.h.wrap(&mut js.e, id);
 }

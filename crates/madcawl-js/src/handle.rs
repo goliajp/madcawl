@@ -11,20 +11,23 @@
 //!   host reads through [`crate::Engine::wrapper_upgrade`].
 //!
 //! None of them gives its count back on drop, since that needs the
-//! engine: each has a method that takes it.
+//! engine: each has a method that takes it. None of them is `Send`: a
+//! count belongs to the isolate's thread.
+
+use std::marker::PhantomData;
 
 use crate::engine::{Engine, Tracer, Unlinker};
-use crate::value::Owned;
+use crate::value::{NotSend, Owned};
 
-pub struct Member<E: Engine>(Option<E::Value>);
+pub struct Member<E: Engine>(Option<E::Value>, NotSend);
 
 impl<E: Engine> Member<E> {
     pub fn new(v: Owned<E::Value>) -> Self {
-        Member(Some(v.into_raw()))
+        Member(Some(v.into_raw()), PhantomData)
     }
 
     pub fn empty() -> Self {
-        Member(None)
+        Member(None, PhantomData)
     }
 
     pub fn get(&self) -> Option<E::Value> {
@@ -52,11 +55,11 @@ impl<E: Engine> Member<E> {
     }
 }
 
-pub struct Root<E: Engine>(E::Value);
+pub struct Root<E: Engine>(E::Value, NotSend);
 
 impl<E: Engine> Root<E> {
     pub fn new(v: Owned<E::Value>) -> Self {
-        Root(v.into_raw())
+        Root(v.into_raw(), PhantomData)
     }
 
     pub fn get(&self) -> E::Value {

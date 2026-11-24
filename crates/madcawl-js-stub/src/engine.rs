@@ -5,14 +5,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use madcawl_js::{
-    Bound, ClassDef, Control, Deadline, Engine, ErrorKind, Host, HostFn, HostRef, Interrupt, Key, Owned,
-    ScriptOrigin, Step, ValueKind,
+    Bound, ClassDef, Control, Deadline, Engine, ErrorKind, Halt, Host, HostFn, HostRef, Interrupt, Key, Owned,
+    ScriptOrigin, Step, Unsupported, ValueKind,
 };
-use madcawl_str::DomString;
+use madcawl_str::{Atom, DomString};
 
 use crate::cell::{Body, Cell, ErasedClass};
 use crate::collect::{StubTracer, StubUnlinker, Vertex};
-use crate::isolate::{Realm, Stub};
+use crate::isolate::{ABORT, Realm, Stub, TERMINATE};
 use crate::props::{class_as, detach};
 use crate::value::{ABSENT, FALSE, NULL, THROWN, TRUE, UNDEFINED, Value};
 
@@ -107,6 +107,12 @@ impl Engine for Stub {
         Stub::owned(Value(s.into_raw().as_ptr() as u64))
     }
 
+    fn to_atom(&mut self, v: Value) -> Option<Atom> {
+        let mut b = Vec::new();
+        self.as_string(v)?.write_wtf8(&mut b);
+        Some(self.names.hold(&b))
+    }
+
     fn to_string<H: Host<Stub>>(&mut self, _host: &mut H, v: Value) -> Option<DomString> {
         if let Some(s) = self.as_string(v) {
             return Some(s);
@@ -153,7 +159,7 @@ impl Engine for Stub {
     }
 
     fn global(&mut self, realm: Realm) -> Owned<Value> {
-        let g = self.live_global(realm.0);
+        let g = self.live_global(self.index(realm));
         self.retain(g)
     }
 
@@ -174,21 +180,18 @@ impl Engine for Stub {
     }
 
     fn new_object(&mut self, realm: Realm) -> Owned<Value> {
-        Stub::owned(self.alloc(realm.0, Body::Object))
+        Stub::owned(self.alloc(self.index(realm), Body::Object))
     }
 
     fn get<H: Host<Stub>>(&mut self, host: &mut H, obj: Value, key: Key<'_>) -> Owned<Value> {
-        self.outermost();
         self.get_prop(host, obj, key)
     }
 
     fn set<H: Host<Stub>>(&mut self, host: &mut H, obj: Value, key: Key<'_>, v: Value) -> bool {
-        self.outermost();
         self.set_prop(host, obj, key, v)
     }
 
     fn delete<H: Host<Stub>>(&mut self, _host: &mut H, obj: Value, key: Key<'_>) -> bool {
-        self.outermost();
         self.delete_prop(obj, key)
     }
 
@@ -198,17 +201,16 @@ impl Engine for Stub {
     }
 
     fn call<H: Host<Stub>>(&mut self, host: &mut H, f: Value, this: Value, args: &[Value]) -> Owned<Value> {
-        self.outermost();
         self.call_value(host, f, this, args)
     }
 
     fn new_function<H: Host<Stub>>(&mut self, realm: Realm, name: &'static str, length: u8, f: Bound<HostFn, Stub, H>) -> Owned<Value> {
-        self.function::<H>(realm.0, name, length, f)
+        self.function::<H>(self.index(realm), name, length, f)
     }
 
     fn throw(&mut self, exception: Owned<Value>) -> Owned<Value> {
-        // script being ended registers nothing
-        if self.terminating {
+        // halted script registers nothing
+        if self.halted() {
             self.release(exception);
             return Stub::thrown();
         }
@@ -228,13 +230,14 @@ impl Engine for Stub {
     }
 
     fn new_wrapper<H: Host<Stub>>(&mut self, realm: Realm, class: &'static ClassDef<Stub, H>, obj: HostRef) -> Owned<Value> {
+        self.refuse_garbage(obj);
         let class = ErasedClass {
             def: std::ptr::from_ref(class).cast(),
             host: TypeId::of::<H>(),
             id: class.id,
         };
         let body = Body::Wrapper { class, obj, preserved: false, dead: false, condemned: false, orphan: false };
-        Stub::owned(self.alloc(realm.0, body))
+        Stub::owned(self.alloc(self.index(realm), body))
     }
 
     fn wrapper_word(wrapper: Value) -> u64 {
@@ -337,15 +340,15 @@ impl Engine for Stub {
     }
 
     fn run_microtasks<H: Host<Stub>>(&mut self, host: &mut H) {
-        self.outermost();
+        self.poll_interrupt();
         if std::mem::replace(&mut self.in_checkpoint, true) {
             return;
         }
-        while !self.terminating
+        while !self.halted()
             && let Some((job, arg)) = self.microtasks.pop_front()
         {
             let r = self.call_value(host, job, UNDEFINED, &[arg]).into_raw();
-            if r == THROWN && !self.terminating {
+            if r == THROWN && !self.halted() {
                 let e = self.take_exception().expect("a thrown exception");
                 host.report_exception(self, e);
             }
@@ -356,16 +359,32 @@ impl Engine for Stub {
         self.in_checkpoint = false;
     }
 
-    fn script_depth(&self) -> u32 {
-        self.depth
+    fn in_script(&self) -> bool {
+        self.depth != 0
     }
 
-    fn is_terminating(&self) -> bool {
-        self.terminating
+    fn halt(&self) -> Halt {
+        self.halt
+    }
+
+    fn resume(&mut self) -> Result<(), Unsupported> {
+        assert_eq!(self.depth, 0, "resumed from inside a call");
+        self.poll_interrupt();
+        assert_ne!(self.halt, Halt::Terminated, "a terminated isolate resumed");
+        self.halt = Halt::Running;
+        Ok(())
+    }
+
+    fn discard_microtasks(&mut self) -> Result<(), Unsupported> {
+        self.drop_microtasks();
+        Ok(())
     }
 
     fn evaluate<H: Host<Stub>>(&mut self, _host: &mut H, _realm: Realm, _source: &DomString, _origin: &ScriptOrigin<'_>) -> Owned<Value> {
-        self.outermost();
+        self.poll_interrupt();
+        if self.halted() {
+            return Stub::thrown();
+        }
         self.throw_error(ErrorKind::Syntax, NO_SCRIPT)
     }
 
@@ -378,7 +397,10 @@ impl Engine for Stub {
         _scopes: &[Value],
         _origin: &ScriptOrigin<'_>,
     ) -> Owned<Value> {
-        self.outermost();
+        self.poll_interrupt();
+        if self.halted() {
+            return Stub::thrown();
+        }
         self.throw_error(ErrorKind::Syntax, NO_SCRIPT)
     }
 
@@ -404,7 +426,12 @@ pub struct StubInterrupt(Arc<AtomicU8>);
 
 impl Interrupt for StubInterrupt {
     fn terminate(&self) {
-        self.0.fetch_or(1, Ordering::Relaxed);
+        self.0.fetch_or(TERMINATE, Ordering::Relaxed);
+    }
+
+    fn abort(&self) -> Result<(), Unsupported> {
+        self.0.fetch_or(ABORT, Ordering::Relaxed);
+        Ok(())
     }
 
     fn request_callback(&self) {

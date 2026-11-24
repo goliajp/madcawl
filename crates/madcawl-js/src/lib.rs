@@ -29,7 +29,7 @@
 //!   names are atoms.
 //! - The host drives collection by deadline, in batches
 //!   ([`Engine::collect_cycles`]), and decides microtask checkpoints by
-//!   [`Engine::script_depth`].
+//!   [`Engine::in_script`].
 //! - A browsing context's window is a WindowProxy whose target realm
 //!   changes on navigation. An isolate is an agent cluster; several may
 //!   share a thread.
@@ -61,8 +61,8 @@ pub use class::{
     Interceptors, Length, Operation, Setter,
 };
 pub use engine::{
-    Control, Deadline, Engine, Host, Interrupt, ModuleRequest, ScriptOrigin, Step, Tracer,
-    Unlinker,
+    Control, Deadline, Engine, Halt, Host, Interrupt, ModuleRequest, ScriptOrigin, Step, Tracer,
+    Unlinker, Unsupported,
 };
 pub use handle::{Member, Root};
 pub use value::{ErrorKind, HostRef, Key, Owned, ValueKind};

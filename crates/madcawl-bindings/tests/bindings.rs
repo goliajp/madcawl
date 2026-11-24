@@ -306,7 +306,7 @@ fn a_dispatch_script_started_runs_no_checkpoint_between_its_listeners() {
     assert_eq!(js.h.fire(&mut js.e, n, atom!("click")), 1);
     assert_eq!(js.read(log.get(), "seen"), "0", "the microtask waited for the outer listener");
     assert_eq!(js.read(log.get(), "mt"), "1", "and ran at the checkpoint after it");
-    assert_eq!(js.e.script_depth(), 0);
+    assert!(!js.e.in_script());
     for v in [f, click, log, b, a, name, doc] {
         js.drop(v);
     }

@@ -1,5 +1,6 @@
 //! Values as the host sees them, and who owns their counts.
 
+use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 
 use madcawl_str::{Atom, DomString};
@@ -9,17 +10,28 @@ use madcawl_str::{Atom, DomString};
 /// either stores it in a handle, returns it, or gives it back with
 /// [`crate::Engine::release`]. A plain `E::Value` is borrowed: valid for
 /// the call it was passed to, with no count of its own.
+///
+/// Not `Send`: the count belongs to the isolate's thread.
+///
+/// ```compile_fail
+/// fn send<T: Send>(_: T) {}
+/// // SAFETY: an uncounted value
+/// send(unsafe { madcawl_js::Owned::from_raw(0u64) });
+/// ```
 #[must_use = "an owned value carries a count: store it, return it or release it"]
 #[repr(transparent)]
 #[derive(Debug, PartialEq, Eq)]
-pub struct Owned<V: Copy>(V);
+pub struct Owned<V: Copy>(V, NotSend);
+
+/// Keeps a handle on its isolate's thread.
+pub(crate) type NotSend = PhantomData<*const ()>;
 
 impl<V: Copy> Owned<V> {
     /// # Safety
     /// The caller holds one count on `v` (or `v` is not counted) and
     /// gives it to the new `Owned`.
     pub unsafe fn from_raw(v: V) -> Self {
-        Owned(v)
+        Owned(v, PhantomData)
     }
 
     /// The value, borrowed: the count stays with `self`.

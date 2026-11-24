@@ -163,6 +163,15 @@ impl Stub {
         matches!(self.collector.phase, Phase::Unlink { .. })
     }
 
+    /// A wrapper is never made for a host object the collector found to
+    /// be garbage: script could reach it only through that wrapper, and
+    /// a later unlink batch would take what it writes there.
+    pub(crate) fn refuse_garbage(&self, obj: HostRef) {
+        if let Phase::Unlink { garbage, .. } = &self.collector.phase {
+            assert!(!garbage.contains(&Vertex::Host(obj)), "a wrapper for a host object found to be garbage");
+        }
+    }
+
     /// The counted edges out of `v`, as they are now.
     fn edges<H: Host<Stub>>(&self, host: &H, v: Vertex, out: &mut StubTracer) {
         match v {

@@ -391,7 +391,7 @@ unsafe extern "C" fn identity(ctx: *mut Ctx, _this: u64, argv: *const u64, argc:
     // SAFETY: the engine calls it with a context for Objs and its
     // arguments
     let ((e, _host), args) = unsafe { (Ctx::parts::<Stub, Objs>(ctx), Stub::values(argv, argc)) };
-    assert_eq!(e.script_depth(), 1, "inside a host function");
+    assert!(e.in_script(), "inside a host function");
     Stub::to_bits(e.retain(args[0]).into_raw())
 }
 

@@ -6,15 +6,16 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
-use madcawl_js::{Key, Owned};
+use madcawl_js::{Halt, Key, Owned};
 use madcawl_str::{Atom, DomString, HeldAtoms};
 
 use crate::cell::{Body, Cell, PropKey};
 use crate::collect::{Collector, Vertex};
 use crate::value::Value;
 
+/// A realm's number in its isolate, and the isolate's.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Realm(pub(crate) u32);
+pub struct Realm(pub(crate) u32, pub(crate) u32);
 
 pub(crate) struct RealmData {
     pub global: Value,
@@ -38,8 +39,8 @@ pub struct Stub {
     pub(crate) in_checkpoint: bool,
     /// Script and host functions on the stack.
     pub(crate) depth: u32,
-    /// Ending the running script on a terminate request.
-    pub(crate) terminating: bool,
+    /// Set from an interrupt request; only `resume` clears an abort.
+    pub(crate) halt: Halt,
     /// Dead wrappers whose host has not been told.
     pub(crate) notices: Vec<Value>,
     /// While a batch of unlinks runs, released values wait here.
@@ -70,7 +71,7 @@ impl Stub {
             microtasks: Default::default(),
             in_checkpoint: false,
             depth: 0,
-            terminating: false,
+            halt: Halt::Running,
             notices: Vec::new(),
             deferred: None,
             buffer: Vec::new(),
@@ -88,6 +89,11 @@ impl Stub {
     /// Cells alive, wrappers waiting for their host's notice included.
     pub fn live_cells(&self) -> usize {
         self.live
+    }
+
+    /// Microtasks waiting in the queue, for tests.
+    pub fn queued_microtasks(&self) -> usize {
+        self.microtasks.len()
     }
 
     /// The count of a cell or a string, for tests.
@@ -127,13 +133,27 @@ impl Stub {
         }
     }
 
-    /// Entering a script or host function; false when script is being
-    /// ended, and the function is not run.
-    pub(crate) fn enter(&mut self) -> bool {
-        if self.interrupt.fetch_and(!1, Ordering::Relaxed) & 1 != 0 {
-            self.terminating = true;
+    /// Take a pending interrupt request: a termination drops the queued
+    /// microtasks, and wins over an abort.
+    pub(crate) fn poll_interrupt(&mut self) {
+        let bits = self.interrupt.fetch_and(!(TERMINATE | ABORT), Ordering::Relaxed);
+        if bits & TERMINATE != 0 && self.halt != Halt::Terminated {
+            self.halt = Halt::Terminated;
+            self.drop_microtasks();
+        } else if bits & ABORT != 0 && self.halt == Halt::Running {
+            self.halt = Halt::Aborted;
         }
-        if self.terminating {
+    }
+
+    pub(crate) fn halted(&self) -> bool {
+        self.halt != Halt::Running
+    }
+
+    /// Entering a script or host function; false when script is
+    /// halted, and the function is not run.
+    pub(crate) fn enter(&mut self) -> bool {
+        self.poll_interrupt();
+        if self.halted() {
             return false;
         }
         self.depth += 1;
@@ -141,10 +161,11 @@ impl Stub {
     }
 
     /// Leaving the function entered; its result, or thrown when script
-    /// was ended meanwhile, with no exception left registered.
+    /// was halted meanwhile, with no exception left registered.
     pub(crate) fn leave(&mut self, r: Value) -> Value {
         self.depth -= 1;
-        if self.terminating {
+        self.poll_interrupt();
+        if self.halted() {
             self.release_value(r);
             if let Some(e) = self.exception.take() {
                 self.release_value(e);
@@ -154,12 +175,17 @@ impl Stub {
         r
     }
 
-    /// The host entering the isolate: at depth 0 that starts afresh
-    /// after a termination.
-    pub(crate) fn outermost(&mut self) {
-        if self.depth == 0 {
-            self.terminating = false;
+    pub(crate) fn drop_microtasks(&mut self) {
+        while let Some((j, a)) = self.microtasks.pop_front() {
+            self.release_value(j);
+            self.release_value(a);
         }
+    }
+
+    /// The index of `r`, which must be this isolate's.
+    pub(crate) fn index(&self, r: Realm) -> u32 {
+        assert_eq!(r.1, self.id, "a realm of another isolate");
+        r.0
     }
 
     /// The global of a realm that is not detached: detaching gave up its
@@ -272,17 +298,17 @@ impl Default for Stub {
 impl Drop for Stub {
     fn drop(&mut self) {
         for r in 0..self.realms.len() as u32 {
-            crate::props::detach(self, Realm(r));
+            crate::props::detach(self, Realm(r, self.id));
         }
         if let Some(e) = self.exception.take() {
             self.release_value(e);
         }
-        while let Some((j, a)) = self.microtasks.pop_front() {
-            self.release_value(j);
-            self.release_value(a);
-        }
+        self.drop_microtasks();
     }
 }
+
+pub(crate) const TERMINATE: u8 = 1;
+pub(crate) const ABORT: u8 = 4;
 
 /// # Safety
 /// `v` is a string value, and the string made takes one of its counts.

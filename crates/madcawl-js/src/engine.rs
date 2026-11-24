@@ -17,9 +17,9 @@ use crate::value::{ErrorKind, HostRef, Key, Owned, ValueKind};
 /// An isolate is one agent cluster: the realms of the agents that can
 /// share memory with each other. Several isolates may live on one
 /// thread (a content process's pages, run in turn); each has its own
-/// heap, cycle candidates, microtask queue, pending exception, script
-/// depth and termination state, and no value or handle passes from one
-/// to another.
+/// heap, cycle candidates, microtask queue, pending exception, whether
+/// the host is inside a call, and halt state, and no value, realm or
+/// handle passes from one to another.
 pub trait Engine: Sized + 'static {
     /// A script value: 8 bytes, copied by its bits, opaque to the host.
     type Value: Copy + Eq + Debug;
@@ -77,6 +77,12 @@ pub trait Engine: Sized + 'static {
 
     /// `s` as a value, taking its count: the block is not copied.
     fn string(&mut self, s: DomString) -> Owned<Self::Value>;
+    /// The atom that spells the string `v` is, held by the isolate for
+    /// as long as it lives; `None` when `v` is no string. Names (tag and
+    /// attribute names, event types) take this path, not
+    /// [`Engine::as_string`]: it makes no block for a short string kept
+    /// in the value word.
+    fn to_atom(&mut self, v: Self::Value) -> Option<Atom>;
     /// ECMAScript ToString; `None` when it threw.
     fn to_string<H: Host<Self>>(&mut self, host: &mut H, v: Self::Value) -> Option<DomString>;
     /// ECMAScript ToNumber; `None` when it threw.
@@ -93,6 +99,10 @@ pub trait Engine: Sized + 'static {
     /// Navigation: `proxy` forwards to the global of `realm` from now on.
     /// Script that holds the proxy sees the new global through the same
     /// object; the old realm is detached by the host as usual.
+    ///
+    /// `realm` is one of this isolate's. A window in another agent
+    /// cluster (a cross-site iframe, an opener) is never a target: the
+    /// host gives script a host object that stands for it instead.
     fn set_window_proxy_target(&mut self, proxy: Self::Value, realm: Self::Realm);
     /// The realm `proxy` forwards to; `None` when `proxy` is no WindowProxy.
     fn window_proxy_target(&self, proxy: Self::Value) -> Option<Self::Realm>;
@@ -120,8 +130,7 @@ pub trait Engine: Sized + 'static {
     fn delete<H: Host<Self>>(&mut self, host: &mut H, obj: Self::Value, key: Key<'_>) -> bool;
     fn is_callable(&self, v: Self::Value) -> bool;
     /// Call `f`. Thrown when it threw, with the exception registered, or
-    /// when script is being ended ([`Engine::is_terminating`]), with
-    /// none registered.
+    /// when script is halted ([`Engine::halt`]), with none registered.
     fn call<H: Host<Self>>(
         &mut self,
         host: &mut H,
@@ -161,6 +170,12 @@ pub trait Engine: Sized + 'static {
     /// gives up the count the wrapper held on the host object (and the
     /// preserved edge's count, if the bit was set), and makes a new
     /// wrapper; the engine sends no `wrapper_died` for the old one.
+    ///
+    /// After `None` the host never passes that word to the engine again.
+    /// From then on the old wrapper no longer holds the host object: the
+    /// engine's graph does not report that edge. The engine frees the
+    /// refused wrapper's memory itself once its count reaches 0, and the
+    /// host takes no part in that.
     ///
     /// The engine does not reuse a wrapper's memory before its notice is
     /// delivered by [`Engine::drain_host`] or refused here, so a word the
@@ -223,7 +238,7 @@ pub trait Engine: Sized + 'static {
     fn enqueue_microtask(&mut self, job: Owned<Self::Value>, arg: Owned<Self::Value>);
     /// Run microtasks until the queue is empty. The host calls it at
     /// each checkpoint: after a call into script returns with
-    /// [`Engine::script_depth`] 0, and at the end of every task; never
+    /// [`Engine::in_script`] false, and at the end of every task; never
     /// while script is on the stack (a listener of an event script
     /// dispatched runs with no checkpoint after it).
     ///
@@ -231,23 +246,33 @@ pub trait Engine: Sized + 'static {
     /// - Microtasks queued while draining run in the same drain.
     /// - A microtask's exception goes to [`Host::report_exception`] and
     ///   the draining goes on.
-    /// - When script is ended during the drain ([`Engine::is_terminating`])
-    ///   the draining stops, and nothing is reported; what is left stays
-    ///   queued for the next checkpoint.
+    /// - When script is halted during the drain ([`Engine::halt`]) the
+    ///   draining stops, and nothing is reported. After a termination the
+    ///   queue is gone; after an abort what is left stays queued, and
+    ///   nothing runs until [`Engine::resume`].
     fn run_microtasks<H: Host<Self>>(&mut self, host: &mut H);
 
-    /// How many script and host functions are on the stack: 0 when the
-    /// host is not inside a call into script. The engine counts every
-    /// entry into a script function or a host function.
-    fn script_depth(&self) -> u32;
-    /// The engine is ending the running script on a `terminate` request:
-    /// calls return thrown with no exception registered (one script had
-    /// registered is dropped, and `throw` registers none), and the host
-    /// reports nothing. It holds until the host next enters the isolate
-    /// with [`Engine::script_depth`] 0 (a call, a property access, a
-    /// checkpoint, an evaluation), which starts afresh; so a host that
-    /// saw a call end this way skips that task's checkpoint.
-    fn is_terminating(&self) -> bool;
+    /// Whether the host is inside a call into the isolate that can run
+    /// script or host functions: false exactly when no such call is on
+    /// the stack. Only false against true is promised; an engine counts
+    /// at most the host entering it and it entering a host function, not
+    /// every script function call.
+    fn in_script(&self) -> bool;
+    /// Whether script may run, after an [`Interrupt`] request was seen.
+    /// While halted, calls, checkpoints and evaluations return thrown at
+    /// once and run nothing, with no exception registered (one script
+    /// had registered is dropped, and `throw` registers none), and the
+    /// host reports nothing; a host that saw a call end this way skips
+    /// that task's checkpoint. No later entry clears it.
+    fn halt(&self) -> Halt;
+    /// Let script run again after an abort; only while not
+    /// [`Engine::in_script`]. A no-op when running. A terminated isolate
+    /// is never resumed. `Err` when the engine has no recoverable abort.
+    fn resume(&mut self) -> Result<(), Unsupported>;
+    /// Drop the queued microtasks without running them: the host's
+    /// choice after an abort, before it resumes. `Err` when the engine
+    /// has no recoverable abort.
+    fn discard_microtasks(&mut self) -> Result<(), Unsupported>;
 
     /// Compile and run a classic script.
     fn evaluate<H: Host<Self>>(
@@ -367,10 +392,31 @@ pub trait Control {
     fn memory_usage(&self) -> usize;
 }
 
+/// Where script stands after an [`Interrupt`] request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Halt {
+    Running,
+    /// [`Interrupt::abort`]: stopped until [`Engine::resume`], with the
+    /// microtask queue kept.
+    Aborted,
+    /// [`Interrupt::terminate`]: no script ever runs in this isolate
+    /// again, and its microtasks are dropped unrun.
+    Terminated,
+}
+
+/// The engine does not provide the recoverable abort.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Unsupported;
+
 /// Sent to another thread to stop or call back running script. The
 /// engine answers within its interrupt bound in script and its own
 /// builtins; host functions are the host's to keep short.
 pub trait Interrupt: Send + Sync + Clone {
+    /// End the agent: a worker terminated, a page torn down. Final.
     fn terminate(&self);
+    /// Stop the running script (a script that runs too long) and keep
+    /// the isolate for later tasks once the host resumes it. Optional
+    /// for an engine; nothing before J2 depends on it.
+    fn abort(&self) -> Result<(), Unsupported>;
     fn request_callback(&self);
 }
