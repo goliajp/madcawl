@@ -51,6 +51,8 @@
 
 mod class;
 mod engine;
+mod graph;
+mod halt;
 mod handle;
 mod value;
 
@@ -60,9 +62,8 @@ pub use class::{
     Attribute, Bound, ClassDef, ClassId, Constant, Ctx, Getter, HostFn, HostOps, IndexGetter,
     Interceptors, Length, Operation, Setter,
 };
-pub use engine::{
-    Control, Deadline, Engine, Halt, Host, Interrupt, ModuleRequest, ScriptOrigin, Step, Tracer,
-    Unlinker, Unsupported,
-};
+pub use engine::{Engine, Host, ModuleRequest, ScriptOrigin};
+pub use graph::{Deadline, Step, Tracer, Unlinker};
+pub use halt::{Control, Halt, Interrupt, Unsupported};
 pub use handle::{Member, Root};
 pub use value::{ErrorKind, HostRef, Key, Owned, ValueKind};

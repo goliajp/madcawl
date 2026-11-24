@@ -1,18 +1,16 @@
 //! The engine interface on the stub.
 
 use std::any::TypeId;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
 
 use madcawl_js::{
-    Bound, ClassDef, Control, Deadline, Engine, ErrorKind, Halt, Host, HostFn, HostRef, Interrupt, Key, Owned,
+    Bound, ClassDef, Deadline, Engine, ErrorKind, Halt, Host, HostFn, HostRef, Key, Owned,
     ScriptOrigin, Step, Unsupported, ValueKind,
 };
-use madcawl_str::{Atom, DomString};
+use madcawl_str::{Atom, DomString, HeldAtoms};
 
 use crate::cell::{Body, Cell, ErasedClass};
-use crate::collect::{StubTracer, StubUnlinker, Vertex};
-use crate::isolate::{ABORT, Realm, Stub, TERMINATE};
+use crate::collect::{Phase, StubTracer, StubUnlinker, Vertex};
+use crate::isolate::{Realm, Stub};
 use crate::props::{class_as, detach};
 use crate::value::{ABSENT, FALSE, NULL, THROWN, TRUE, UNDEFINED, Value};
 
@@ -107,10 +105,10 @@ impl Engine for Stub {
         Stub::owned(Value(s.into_raw().as_ptr() as u64))
     }
 
-    fn to_atom(&mut self, v: Value) -> Option<Atom> {
+    fn to_atom(&mut self, v: Value, held: &HeldAtoms) -> Option<Atom> {
         let mut b = Vec::new();
         self.as_string(v)?.write_wtf8(&mut b);
-        Some(self.names.hold(&b))
+        Some(held.hold(&b))
     }
 
     fn to_string<H: Host<Stub>>(&mut self, _host: &mut H, v: Value) -> Option<DomString> {
@@ -230,7 +228,11 @@ impl Engine for Stub {
     }
 
     fn new_wrapper<H: Host<Stub>>(&mut self, realm: Realm, class: &'static ClassDef<Stub, H>, obj: HostRef) -> Owned<Value> {
-        self.refuse_garbage(obj);
+        // script could reach a garbage host object only through this
+        // wrapper, and a later unlink batch would take what it writes there
+        if let Phase::Unlink { garbage, .. } = &self.collector.phase {
+            assert!(!garbage.contains(&Vertex::Host(obj)), "a wrapper for a host object found to be garbage");
+        }
         let class = ErasedClass {
             def: std::ptr::from_ref(class).cast(),
             host: TypeId::of::<H>(),
@@ -336,7 +338,7 @@ impl Engine for Stub {
     }
 
     fn enqueue_microtask(&mut self, job: Owned<Value>, arg: Owned<Value>) {
-        self.microtasks.push_back((job.into_raw(), arg.into_raw()));
+        self.queue_microtask(job.into_raw(), arg.into_raw());
     }
 
     fn run_microtasks<H: Host<Stub>>(&mut self, host: &mut H) {
@@ -368,10 +370,7 @@ impl Engine for Stub {
     }
 
     fn resume(&mut self) -> Result<(), Unsupported> {
-        assert_eq!(self.depth, 0, "resumed from inside a call");
-        self.poll_interrupt();
-        assert_ne!(self.halt, Halt::Terminated, "a terminated isolate resumed");
-        self.halt = Halt::Running;
+        self.resume_script();
         Ok(())
     }
 
@@ -421,40 +420,3 @@ fn number_text(n: f64) -> String {
     }
 }
 
-#[derive(Clone)]
-pub struct StubInterrupt(Arc<AtomicU8>);
-
-impl Interrupt for StubInterrupt {
-    fn terminate(&self) {
-        self.0.fetch_or(TERMINATE, Ordering::Relaxed);
-    }
-
-    fn abort(&self) -> Result<(), Unsupported> {
-        self.0.fetch_or(ABORT, Ordering::Relaxed);
-        Ok(())
-    }
-
-    fn request_callback(&self) {
-        self.0.fetch_or(2, Ordering::Relaxed);
-    }
-}
-
-impl Control for Stub {
-    type Interrupt = StubInterrupt;
-
-    fn interrupt_handle(&self) -> StubInterrupt {
-        StubInterrupt(self.interrupt.clone())
-    }
-
-    fn set_memory_limits(&mut self, soft: usize, hard: usize) {
-        self.limits = (soft, hard);
-    }
-
-    fn adjust_external_memory(&mut self, delta: isize) {
-        self.external += delta;
-    }
-
-    fn memory_usage(&self) -> usize {
-        self.live * size_of::<Cell>() + self.external.max(0) as usize
-    }
-}

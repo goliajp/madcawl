@@ -69,6 +69,10 @@ fn a_termination_drops_the_queue_and_no_script_runs_again() {
     assert_eq!(num(&mut e, &mut h, log.get(), "after"), 0.0);
     assert!(!next_task(&mut e, &mut h, realm, log.get()));
     assert_eq!(e.halt(), Halt::Terminated);
+    // a job queued later is dropped as it comes
+    let late = counter(&mut e, realm, log.get(), "late");
+    e.enqueue_microtask(late, undefined());
+    assert_eq!(e.queued_microtasks(), 0);
     e.release(log);
 }
 
@@ -137,5 +141,16 @@ fn termination_leaves_no_exception_registered() {
     assert!(e.take_exception().is_none(), "nothing for the next task to find");
     assert_eq!(num(&mut e, &mut h, log.get(), "never"), 0.0);
     e.release(f);
+    e.release(log);
+}
+
+#[test]
+fn an_abort_that_comes_between_tasks_ends_no_task() {
+    let (mut e, mut h) = (Stub::new(), Log::default());
+    let realm = e.new_realm();
+    let log = e.new_object(realm);
+    e.interrupt_handle().abort().expect("the stub can abort");
+    assert!(next_task(&mut e, &mut h, realm, log.get()), "no script ran when it came");
+    assert_eq!(e.halt(), Halt::Running);
     e.release(log);
 }

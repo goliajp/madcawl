@@ -133,22 +133,6 @@ impl Stub {
         }
     }
 
-    /// Take a pending interrupt request: a termination drops the queued
-    /// microtasks, and wins over an abort.
-    pub(crate) fn poll_interrupt(&mut self) {
-        let bits = self.interrupt.fetch_and(!(TERMINATE | ABORT), Ordering::Relaxed);
-        if bits & TERMINATE != 0 && self.halt != Halt::Terminated {
-            self.halt = Halt::Terminated;
-            self.drop_microtasks();
-        } else if bits & ABORT != 0 && self.halt == Halt::Running {
-            self.halt = Halt::Aborted;
-        }
-    }
-
-    pub(crate) fn halted(&self) -> bool {
-        self.halt != Halt::Running
-    }
-
     /// Entering a script or host function; false when script is
     /// halted, and the function is not run.
     pub(crate) fn enter(&mut self) -> bool {
@@ -163,8 +147,8 @@ impl Stub {
     /// Leaving the function entered; its result, or thrown when script
     /// was halted meanwhile, with no exception left registered.
     pub(crate) fn leave(&mut self, r: Value) -> Value {
-        self.depth -= 1;
         self.poll_interrupt();
+        self.depth -= 1;
         if self.halted() {
             self.release_value(r);
             if let Some(e) = self.exception.take() {
@@ -173,13 +157,6 @@ impl Stub {
             return crate::value::THROWN;
         }
         r
-    }
-
-    pub(crate) fn drop_microtasks(&mut self) {
-        while let Some((j, a)) = self.microtasks.pop_front() {
-            self.release_value(j);
-            self.release_value(a);
-        }
     }
 
     /// The index of `r`, which must be this isolate's.
@@ -306,9 +283,6 @@ impl Drop for Stub {
         self.drop_microtasks();
     }
 }
-
-pub(crate) const TERMINATE: u8 = 1;
-pub(crate) const ABORT: u8 = 4;
 
 /// # Safety
 /// `v` is a string value, and the string made takes one of its counts.

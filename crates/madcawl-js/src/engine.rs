@@ -2,11 +2,12 @@
 
 use std::fmt::Debug;
 use std::mem::{align_of, size_of};
-use std::time::Instant;
 
-use madcawl_str::{Atom, DomString};
+use madcawl_str::{Atom, DomString, HeldAtoms};
 
 use crate::class::{Bound, ClassDef, HostFn};
+use crate::graph::{Deadline, Step, Tracer, Unlinker};
+use crate::halt::{Halt, Unsupported};
 use crate::value::{ErrorKind, HostRef, Key, Owned, ValueKind};
 
 /// One isolate of an engine, used on the thread it belongs to: every
@@ -77,12 +78,13 @@ pub trait Engine: Sized + 'static {
 
     /// `s` as a value, taking its count: the block is not copied.
     fn string(&mut self, s: DomString) -> Owned<Self::Value>;
-    /// The atom that spells the string `v` is, held by the isolate for
-    /// as long as it lives; `None` when `v` is no string. Names (tag and
-    /// attribute names, event types) take this path, not
+    /// The atom that spells the string `v` is, held by `held` (the
+    /// caller's holder, such as its document's, so that names script
+    /// makes up go when it does); `None` when `v` is no string. Names
+    /// (tag and attribute names, event types) take this path, not
     /// [`Engine::as_string`]: it makes no block for a short string kept
     /// in the value word.
-    fn to_atom(&mut self, v: Self::Value) -> Option<Atom>;
+    fn to_atom(&mut self, v: Self::Value, held: &HeldAtoms) -> Option<Atom>;
     /// ECMAScript ToString; `None` when it threw.
     fn to_string<H: Host<Self>>(&mut self, host: &mut H, v: Self::Value) -> Option<DomString>;
     /// ECMAScript ToNumber; `None` when it threw.
@@ -254,11 +256,13 @@ pub trait Engine: Sized + 'static {
 
     /// Whether the host is inside a call into the isolate that can run
     /// script or host functions: false exactly when no such call is on
-    /// the stack. Only false against true is promised; an engine counts
-    /// at most the host entering it and it entering a host function, not
-    /// every script function call.
+    /// the stack. Only false against true is promised, so an engine
+    /// need not count every script function call: the host entering it
+    /// and it entering a host function are enough.
     fn in_script(&self) -> bool;
-    /// Whether script may run, after an [`Interrupt`] request was seen.
+    /// Whether script may run, as of the last [`crate::Interrupt`]
+    /// request the isolate has seen: a request is seen when the isolate
+    /// is next entered, not when it is sent.
     /// While halted, calls, checkpoints and evaluations return thrown at
     /// once and run nothing, with no exception registered (one script
     /// had registered is dropped, and `throw` registers none), and the
@@ -335,37 +339,6 @@ pub trait Host<E: Engine>: Sized + 'static {
     }
 }
 
-/// What `traverse` reports to. Each call is one counted edge.
-pub trait Tracer<E: Engine> {
-    /// An edge to another host object.
-    fn host(&mut self, obj: HostRef);
-    /// An edge to a script value: a member handle, a preserved wrapper.
-    fn value(&mut self, v: E::Value);
-}
-
-/// What `unlink` gives its edges up to. The engine releases them when
-/// the batch is over, so every object of the cycle stays readable until
-/// then.
-pub trait Unlinker<E: Engine> {
-    fn release(&mut self, v: Owned<E::Value>);
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum Deadline {
-    /// Stop after this many units of work (an object visited or
-    /// unlinked): deterministic, for tests and for budgets.
-    Work(u32),
-    At(Instant),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Step {
-    /// The collection is not finished; call again.
-    More,
-    /// Nothing more to do until new candidates come.
-    Done,
-}
-
 pub struct ScriptOrigin<'a> {
     pub url: &'a DomString,
     pub line: u32,
@@ -377,46 +350,4 @@ pub struct ModuleRequest<'a> {
     pub specifier: &'a DomString,
     /// The `type` import attribute.
     pub module_type: Option<Atom>,
-}
-
-/// What the host may do from any thread, and the memory limits.
-pub trait Control {
-    type Interrupt: Interrupt;
-    fn interrupt_handle(&self) -> Self::Interrupt;
-    /// Past `soft` the engine calls back the host; past `hard` it ends
-    /// the running script uncatchably.
-    fn set_memory_limits(&mut self, soft: usize, hard: usize);
-    /// Memory host objects keep alive (nodes, attributes, decoded
-    /// images), counted against the limits.
-    fn adjust_external_memory(&mut self, delta: isize);
-    fn memory_usage(&self) -> usize;
-}
-
-/// Where script stands after an [`Interrupt`] request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Halt {
-    Running,
-    /// [`Interrupt::abort`]: stopped until [`Engine::resume`], with the
-    /// microtask queue kept.
-    Aborted,
-    /// [`Interrupt::terminate`]: no script ever runs in this isolate
-    /// again, and its microtasks are dropped unrun.
-    Terminated,
-}
-
-/// The engine does not provide the recoverable abort.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Unsupported;
-
-/// Sent to another thread to stop or call back running script. The
-/// engine answers within its interrupt bound in script and its own
-/// builtins; host functions are the host's to keep short.
-pub trait Interrupt: Send + Sync + Clone {
-    /// End the agent: a worker terminated, a page torn down. Final.
-    fn terminate(&self);
-    /// Stop the running script (a script that runs too long) and keep
-    /// the isolate for later tasks once the host resumes it. Optional
-    /// for an engine; nothing before J2 depends on it.
-    fn abort(&self) -> Result<(), Unsupported>;
-    fn request_callback(&self);
 }

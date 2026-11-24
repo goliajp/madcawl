@@ -16,7 +16,8 @@
 
 use std::marker::PhantomData;
 
-use crate::engine::{Engine, Tracer, Unlinker};
+use crate::engine::Engine;
+use crate::graph::{Tracer, Unlinker};
 use crate::value::{NotSend, Owned};
 
 pub struct Member<E: Engine>(Option<E::Value>, NotSend);

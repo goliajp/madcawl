@@ -242,14 +242,15 @@ fn a_string_value_reads_as_the_atom_that_spells_it() {
     let realm = e.new_realm();
     let click = e.string(key("click"));
     let view = e.substring(click.get(), 0, 5);
-    let a = e.to_atom(click.get()).expect("a string");
-    assert_eq!(e.to_atom(view.get()), Some(a), "a view spells the same name");
+    let held = madcawl_str::HeldAtoms::new();
+    let a = e.to_atom(click.get(), &held).expect("a string");
+    assert_eq!(e.to_atom(view.get(), &held), Some(a), "a view spells the same name");
     let mut b = Vec::new();
     a.write_wtf8(&mut b);
     assert_eq!(b, b"click");
     let obj = e.new_object(realm);
-    assert_eq!(e.to_atom(obj.get()), None);
-    assert_eq!(e.to_atom(Stub::number(1.0)), None);
+    assert_eq!(e.to_atom(obj.get(), &held), None);
+    assert_eq!(e.to_atom(Stub::number(1.0), &held), None);
     for v in [obj, view, click] {
         e.release(v);
     }
