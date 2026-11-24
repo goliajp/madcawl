@@ -317,6 +317,26 @@ mod tests {
     }
 
     #[test]
+    fn a_released_atom_is_freed_and_held_again_under_a_new_generation() {
+        let h = HeldAtoms::new();
+        let first = h.hold(b"x-released-once");
+        h.release(first);
+        assert_eq!(h.len(), 0);
+        assert_eq!(Atom::lookup(b"x-released-once"), None);
+        let again = h.hold(b"x-released-once");
+        assert_ne!(first, again, "not answered from the recent names");
+        assert!(h.holds(b"x-released-once"));
+        let other = HeldAtoms::new();
+        assert_eq!(other.hold(b"x-released-once"), again);
+        h.release(again);
+        assert_eq!(
+            Atom::lookup(b"x-released-once"),
+            Some(again),
+            "the other holder keeps it"
+        );
+    }
+
+    #[test]
     fn a_keep_that_panics_leaves_the_table_usable() {
         let h = HeldAtoms::new();
         let gone = h.hold(b"x-gone-before-keep");

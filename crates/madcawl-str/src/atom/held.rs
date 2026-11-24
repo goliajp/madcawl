@@ -59,6 +59,14 @@ impl Held {
             .then_some(r.atom)
     }
 
+    fn forget(&mut self, atom: Atom) {
+        for r in self.recent.iter_mut().flat_map(|r| r.iter_mut()) {
+            if r.atom == atom {
+                r.len = u8::MAX;
+            }
+        }
+    }
+
     fn remember(&mut self, h: u32, name: &[u8], atom: Atom) {
         if name.len() > RECENT_LEN {
             return;
@@ -139,6 +147,27 @@ impl HeldAtoms {
         };
         held.atoms.insert(atom.0);
         t.entry(slot).count += 1;
+    }
+
+    /// Give back this holder's count on `atom`, which it holds; the name
+    /// is freed when no holder is left, and the atom then reads as gone.
+    pub fn release(&self, atom: Atom) {
+        if atom.is_static() {
+            return;
+        }
+        let mut held = self.held.borrow_mut();
+        assert!(held.atoms.remove(&atom.0), "release of an atom not held");
+        held.forget(atom);
+        table().release((atom.0 - COUNT as u32) & SLOT_MASK);
+    }
+
+    /// Whether holding `name` would add nothing: it is static or held
+    /// here already.
+    pub fn holds(&self, name: &[u8]) -> bool {
+        match Atom::lookup(name) {
+            Some(a) => a.is_static() || self.held.borrow().atoms.contains(&a.0),
+            None => false,
+        }
     }
 
     /// How many dynamic atoms this holder keeps.
