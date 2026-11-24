@@ -52,8 +52,12 @@ impl Dom {
     /// that pointed at them; how many were freed.
     ///
     /// Call it when no parser is building into this DOM: a `NodeId` of
-    /// a node outside every tree is no longer valid afterwards.
+    /// a node outside every tree is no longer valid afterwards. Only for
+    /// a DOM nothing holds by count yet: it ignores counts and tells no
+    /// engine, so once a node has had a wrapper or a `HeldNode`, or
+    /// suspects were taken, nodes go by `free_dead` and the collector.
     pub fn reclaim(&mut self) -> u32 {
+        assert!(!self.by_count, "reclaim on a DOM freed by count");
         let seen = self.reachable();
         let mut freed = 0;
         for i in 1..self.arena.high() {

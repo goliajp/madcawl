@@ -6,9 +6,10 @@
 
 [Exposed=Window]
 interface EventTarget {
-  // the options dictionary is not bound yet: only the capture boolean
-  undefined addEventListener(DOMString type, EventListener? callback, optional boolean capture = false);
-  undefined removeEventListener(DOMString type, EventListener? callback, optional boolean capture = false);
+  // the options dictionary is not bound yet: only the capture boolean;
+  // [Atom] (not in the standard) takes the type as an atom
+  undefined addEventListener([Atom] DOMString type, EventListener? callback, optional boolean capture = false);
+  undefined removeEventListener([Atom] DOMString type, EventListener? callback, optional boolean capture = false);
 };
 
 [Exposed=Window, HostOps]

@@ -188,7 +188,7 @@ fn two_isolates_on_one_thread_keep_their_own_state() {
     // a goes on with its own collection and exception
     while a.collect_cycles(&mut ha, Deadline::Work(1)) == Step::More {}
     assert_eq!(a.last_collection().garbage, 2);
-    let ex = a.take_exception().expect("a's own exception");
+    let ex = a.take_exception().expect("a's own exception, registered before the termination");
     a.release(ex);
     for (e, vs) in [(&mut a, vec![fa, la]), (&mut b, vec![fb, lb])] {
         for v in vs {

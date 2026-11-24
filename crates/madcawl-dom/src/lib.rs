@@ -11,15 +11,17 @@
 //! A node's count is the number of these edges that point at it: its
 //! parent holds it, each child holds it, each node holds its node
 //! document, a document holds its template contents owner, a template
-//! holds its contents, and a script wrapper holds its node. Siblings do
-//! not count. `Dom::audit` recomputes them all.
+//! holds its contents, a script wrapper holds its node, and so does each
+//! host handle (`HeldNode`). Siblings do not count. `Dom::audit`
+//! recomputes them all.
 //!
 //! Nothing is freed while a parser builds into the DOM: the parser holds
 //! handles no count records. `Dom::reclaim` frees what has left every
-//! tree once it is done. Once script holds nodes, they are freed by
-//! count instead (`host.rs`): a node whose count reaches 0 is freed by
-//! `Dom::free_dead`, and the cycles counts cannot free are the script
-//! engine's collector's, through `Dom::host_edges` and
+//! tree once it is done. Once script or the host holds nodes by count
+//! (a wrapper, a `HeldNode`, suspects handed out), they are freed by
+//! count instead, from then on (`host.rs`): a node whose count reaches
+//! 0 is freed by `Dom::free_dead`, and the cycles counts cannot free
+//! are the script engine's collector's, through `Dom::host_edges` and
 //! `Dom::unlink_node`.
 
 mod arena;
@@ -28,6 +30,7 @@ mod audit;
 mod classes;
 mod dat;
 mod dom;
+mod held;
 mod host;
 mod limits;
 mod node;
@@ -43,5 +46,6 @@ mod tree;
 
 pub use audit::Audit;
 pub use dom::{Attr, Dom, HEADROOM, Limits, NodeId, Refused};
+pub use held::HeldNode;
 pub use host::Edge;
 pub use node::NodeKind;

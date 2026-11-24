@@ -4,7 +4,7 @@
 
 use madcawl_dom::NodeId;
 use madcawl_js::{ClassDef, Engine, ErrorKind, Owned, ValueKind};
-use madcawl_str::DomString;
+use madcawl_str::{Atom, DomString};
 
 use crate::host::DomHost;
 
@@ -129,6 +129,20 @@ pub(crate) fn dom_string<E: Engine>(
     v: E::Value,
 ) -> Result<DomString, Thrown> {
     e.to_string(h, v).ok_or(Thrown)
+}
+
+/// A `DOMString` that is a name, as the atom that spells it, held by the
+/// document's holder. A string value gives its atom with no block made;
+/// any other value is converted by ToString first.
+pub(crate) fn atom<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Value) -> Result<Atom, Thrown> {
+    if let Some(a) = e.to_atom(v, &h.names) {
+        return Ok(a);
+    }
+    let s = dom_string(e, h, v)?;
+    let s = e.string(s);
+    let a = e.to_atom(s.get(), &h.names).expect("a string value");
+    e.release(s);
+    Ok(a)
 }
 
 pub(crate) fn dom_string_or_null<E: Engine>(

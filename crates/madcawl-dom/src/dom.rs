@@ -1,6 +1,7 @@
 //! The DOM of one agent, its limits, and reading it.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::num::NonZeroU32;
 
 use madcawl_html::{AttrNamespace, Namespace, QuirksMode};
@@ -74,6 +75,11 @@ pub struct Dom {
     /// Nodes whose count dropped and stayed above 0 outside every
     /// document, each once (`SUSPECTED`), for `take_suspects`.
     pub(crate) suspects: Vec<u32>,
+    /// The counts host handles hold, by node index (`HeldNode`).
+    pub(crate) held: HashMap<u32, u32>,
+    /// Script or the host has held nodes by count: `reclaim`, which frees
+    /// by reach and tells no one, may no longer run.
+    pub(crate) by_count: bool,
 }
 
 /// An attribute as stored.
@@ -114,6 +120,8 @@ impl Dom {
             stopped: false,
             zero: Vec::new(),
             suspects: Vec::new(),
+            held: HashMap::new(),
+            by_count: false,
         };
         dom.doc = dom.new_document(false).expect("room for the document");
         dom

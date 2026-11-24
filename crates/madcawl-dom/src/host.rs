@@ -108,6 +108,7 @@ impl Dom {
         let i = n.index();
         assert!(word != 0 && word & KEPT == 0, "a wrapper pointer");
         assert_eq!(self.n(i).wrapper, 0, "one wrapper per node");
+        self.by_count = true;
         self.m(i).wrapper = word;
         self.inc(i);
     }
@@ -178,6 +179,7 @@ impl Dom {
     /// every document, since the last call: candidates for the cycle
     /// collector.
     pub fn take_suspects(&mut self, out: &mut Vec<NodeId>) {
+        self.by_count = true;
         let mut list = std::mem::take(&mut self.suspects);
         for &i in &list {
             if !self.arena.is_live(i) {

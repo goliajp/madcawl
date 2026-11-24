@@ -209,6 +209,32 @@ fn listeners_are_added_once_called_and_removed() {
 }
 
 #[test]
+fn an_event_type_is_one_name_however_it_is_spelled_as_a_value() {
+    let mut js = Js::new();
+    let doc = js.doc();
+    let name = js.str("div");
+    let div = js.call(doc.get(), "createElement", &[name.get()]);
+    let log = js.object();
+    let f = js.closure(vec![log]);
+    let n = js.node(div.get());
+    // a name no static atom spells, as two separate strings
+    let (made, again) = (js.str("made-up-type"), js.str("made-up-type"));
+    js.run(div.get(), "addEventListener", &[made.get(), f.get()]);
+    js.run(div.get(), "addEventListener", &[again.get(), f.get()]);
+    assert_eq!(js.h.listener_count(n), 1, "both strings name one atom");
+    // a number is converted to its string first
+    js.run(div.get(), "addEventListener", &[Stub::number(7.0), f.get()]);
+    assert_eq!(js.h.listener_count(n), 2);
+    let seven = js.str("7");
+    js.run(div.get(), "removeEventListener", &[seven.get(), f.get()]);
+    js.run(div.get(), "removeEventListener", &[again.get(), f.get()]);
+    assert_eq!(js.h.listener_count(n), 0);
+    for v in [seven, again, made, f, div, name, doc] {
+        js.drop(v);
+    }
+}
+
+#[test]
 fn a_host_closed_gives_back_what_it_held() {
     let mut js = Js::new();
     let doc = js.doc();

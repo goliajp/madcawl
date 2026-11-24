@@ -63,6 +63,9 @@ impl Dom {
                 want[i] += 1;
             }
         }
+        for (&i, &k) in &self.held {
+            want[i as usize] += k;
+        }
         let roots = self.roots(high);
         let reachable = self.reachable();
         for i in (1..high).filter(|&i| live(i)) {

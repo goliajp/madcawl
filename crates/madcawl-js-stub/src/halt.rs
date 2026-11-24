@@ -56,8 +56,9 @@ impl Stub {
     pub(crate) fn resume_script(&mut self) {
         assert_eq!(self.depth, 0, "resumed from inside a call");
         self.poll_interrupt();
-        assert_ne!(self.halt, Halt::Terminated, "a terminated isolate resumed");
-        self.halt = Halt::Running;
+        if self.halt == Halt::Aborted {
+            self.halt = Halt::Running;
+        }
     }
 }
 

@@ -270,17 +270,24 @@ pub trait Engine: Sized + 'static {
     /// and it entering a host function are enough.
     fn in_script(&self) -> bool;
     /// Whether script may run, as of the last [`crate::Interrupt`]
-    /// request the isolate has seen: a request is seen when the isolate
-    /// is next entered, not when it is sent.
-    /// While halted, calls, checkpoints and evaluations return thrown at
-    /// once and run nothing, with no exception registered (one script
-    /// had registered is dropped, and `throw` registers none), and the
-    /// host reports nothing; a host that saw a call end this way skips
-    /// that task's checkpoint. No later entry clears it.
+    /// request the isolate has seen: a request is seen by the time the
+    /// isolate is next entered, not when it is sent.
+    /// While halted, calls, checkpoints, evaluations and handler
+    /// compilations return thrown at once and run nothing, and the host
+    /// reports nothing; a host that saw a call end this way skips that
+    /// task's checkpoint. No later entry clears it.
+    ///
+    /// Such an entry leaves no exception of its own: one script
+    /// registered while it ran is dropped, and `throw` registers none.
+    /// An exception the host registered before the entry is not script's
+    /// and stays, for [`Engine::take_exception`].
     fn halt(&self) -> Halt;
     /// Let script run again after an abort; only while not
-    /// [`Engine::in_script`]. A no-op when running. A terminated isolate
-    /// is never resumed. `Err` when the engine has no recoverable abort.
+    /// [`Engine::in_script`]. A no-op when running, and when terminated:
+    /// a termination another thread sends may be seen by this very
+    /// call, so the host cannot rule it out, and [`Engine::halt`] stays
+    /// `Terminated` after it. `Err` when the engine has no recoverable
+    /// abort.
     fn resume(&mut self) -> Result<(), Unsupported>;
     /// Drop the queued microtasks without running them: the host's
     /// choice after an abort, before it resumes. `Err` when the engine

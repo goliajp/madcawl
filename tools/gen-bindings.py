@@ -18,7 +18,10 @@ glue (`shell.rs`).
 The parser reads the subset of Web IDL the files use: interfaces with
 a parent, constants, attributes, operations with optional arguments and
 defaults, nullable types, and extended attribute lists (only
-`[HostOps]` is acted on).
+`[HostOps]` on an interface and `[Atom]` on an argument are acted on).
+A `[Atom] DOMString` argument is a name, such as an event type: the
+implementation gets an atom made from the value, with no string block
+for a short string.
 """
 import re
 import sys
@@ -28,6 +31,7 @@ import sys
 TYPES = {
     'DOMString': 'cv::dom_string(e, h, {v})?',
     'DOMString?': 'cv::dom_string_or_null(e, h, {v})?',
+    '[Atom] DOMString': 'cv::atom(e, h, {v})?',
     'EventListener?': 'cv::callback_or_null(e, {v})?',
     'any': '{v}',
 }
@@ -62,9 +66,9 @@ def parse(text):
                 o = re.fullmatch(r'(.+?)\s+(\w+)\s*\((.*)\)', member, re.S)
                 args = []
                 for arg in filter(None, (x.strip() for x in o.group(3).split(','))):
-                    a = re.fullmatch(r'(optional\s+)?(.+?)\s+(\w+)(?:\s*=\s*(\S+))?', arg)
-                    args.append({'type': a.group(2), 'name': a.group(3), 'optional': bool(a.group(1)),
-                                 'default': a.group(4)})
+                    a = re.fullmatch(r'(\[\s*Atom\s*\]\s*)?(optional\s+)?(.+?)\s+(\w+)(?:\s*=\s*(\S+))?', arg)
+                    args.append({'type': ('[Atom] ' if a.group(1) else '') + a.group(3), 'name': a.group(4),
+                                 'optional': bool(a.group(2)), 'default': a.group(5)})
                 iface['ops'].append({'name': o.group(2), 'ret': o.group(1), 'args': args})
         out.append(iface)
     return out

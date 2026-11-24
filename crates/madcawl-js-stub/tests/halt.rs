@@ -77,11 +77,21 @@ fn a_termination_drops_the_queue_and_no_script_runs_again() {
 }
 
 #[test]
-#[should_panic(expected = "a terminated isolate resumed")]
-fn a_terminated_isolate_is_never_resumed() {
-    let mut e = Stub::new();
+fn a_resume_that_meets_a_termination_leaves_the_isolate_terminated() {
+    let (mut e, mut h) = (Stub::new(), Log::default());
+    let realm = e.new_realm();
+    let log = e.new_object(realm);
+    halt_in_a_drain(&mut e, &mut h, realm, log.get(), aborts);
+    assert_eq!(e.halt(), Halt::Aborted);
+    // another thread terminates just before the host resumes
     e.interrupt_handle().terminate();
-    let _ = e.resume();
+    e.resume().expect("the stub can resume");
+    assert_eq!(e.halt(), Halt::Terminated);
+    assert_eq!(e.queued_microtasks(), 0);
+    assert!(!next_task(&mut e, &mut h, realm, log.get()));
+    e.resume().expect("the stub can resume");
+    assert_eq!(e.halt(), Halt::Terminated, "a resume never ends a termination");
+    e.release(log);
 }
 
 #[test]
@@ -142,6 +152,32 @@ fn termination_leaves_no_exception_registered() {
     assert_eq!(num(&mut e, &mut h, log.get(), "never"), 0.0);
     e.release(f);
     e.release(log);
+}
+
+#[test]
+fn an_exception_the_host_registered_before_a_terminated_call_stays() {
+    let (mut e, mut h) = (Stub::new(), Log::default());
+    let realm = e.new_realm();
+    let log = e.new_object(realm);
+    let f = counter(&mut e, realm, log.get(), "ran");
+    let mine = e.new_object(realm);
+    let kept = e.retain(mine.get());
+    let _sentinel = e.throw(kept).into_raw();
+    e.interrupt_handle().terminate();
+    let r = e.call(&mut h, f.get(), Stub::undefined(), &[]);
+    assert!(Stub::is_thrown(r.into_raw()));
+    let ex = e.take_exception().expect("the host's exception");
+    assert_eq!(ex.get(), mine.get());
+    e.release(ex);
+    // later entries make none of their own
+    let r = e.call(&mut h, f.get(), Stub::undefined(), &[]);
+    assert!(Stub::is_thrown(r.into_raw()));
+    e.run_microtasks(&mut h);
+    assert!(e.take_exception().is_none());
+    assert_eq!(num(&mut e, &mut h, log.get(), "ran"), 0.0);
+    for v in [mine, f, log] {
+        e.release(v);
+    }
 }
 
 #[test]

@@ -36,7 +36,7 @@ fn event_target_add_event_listener<E: Engine>(e: &mut E, h: &mut DomHost<E>, thi
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &EventTargetClass::<E>::DEF)?;
         cv::need(e, args, 2)?;
-        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        let a0 = cv::atom(e, h, cv::arg::<E>(args, 0))?;
         let a1 = cv::callback_or_null(e, cv::arg::<E>(args, 1))?;
         let a2 = cv::boolean_or(e, cv::arg::<E>(args, 2), false);
         impls::event_target::add_event_listener(e, h, this, a0, a1, a2)
@@ -50,7 +50,7 @@ fn event_target_remove_event_listener<E: Engine>(e: &mut E, h: &mut DomHost<E>, 
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &EventTargetClass::<E>::DEF)?;
         cv::need(e, args, 2)?;
-        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        let a0 = cv::atom(e, h, cv::arg::<E>(args, 0))?;
         let a1 = cv::callback_or_null(e, cv::arg::<E>(args, 1))?;
         let a2 = cv::boolean_or(e, cv::arg::<E>(args, 2), false);
         impls::event_target::remove_event_listener(e, h, this, a0, a1, a2)

@@ -442,3 +442,38 @@ fn a_wrapper_for_a_garbage_node_reached_by_its_raw_id_between_batches_is_refused
     // unlinked with the node
     let _ = js.h.wrap(&mut js.e, id);
 }
+
+#[test]
+fn a_node_the_host_holds_by_a_counted_handle_stays_out_of_the_garbage() {
+    let mut js = Js::new();
+    let base = js.h.dom.node_count();
+    js.collect();
+    let pair = [js.object(), js.object()];
+    js.set(pair[0].get(), "next", pair[1].get());
+    js.set(pair[1].get(), "next", pair[0].get());
+    for v in pair {
+        js.drop(v);
+    }
+    // the same detached pair, but the host holds the child across calls
+    let p = element(&mut js, "div");
+    let c = element(&mut js, "i");
+    js.run(p.get(), "appendChild", &[c.get()]);
+    let held = js.h.dom.hold(js.node(c.get()));
+    js.drop(c);
+    js.drop(p);
+    while !js.e.unlinking() {
+        assert_eq!(js.h.collect(&mut js.e, Deadline::Work(1)), madcawl_js::Step::More);
+    }
+    // between batches the handle's node may be wrapped
+    let again = js.h.wrap(&mut js.e, held.id());
+    while js.h.collect(&mut js.e, Deadline::Work(1)) == madcawl_js::Step::More {}
+    assert_eq!(js.e.last_collection().garbage, 2, "only the plain pair");
+    assert_eq!(js.h.dom.node_count(), base + 2);
+    js.audit();
+    js.drop(again);
+    js.h.dom.let_go(held);
+    js.h.settle(&mut js.e);
+    js.collect();
+    assert_eq!(js.h.dom.node_count(), base);
+    js.audit();
+}
