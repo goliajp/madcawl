@@ -1,0 +1,124 @@
+/* the html standard's rendering section, the rules that decide what is
+   displayed; where webkit's own sheet differs, webkit's */
+
+@namespace "http://www.w3.org/1999/xhtml";
+
+[hidden]:not([hidden=until-found i]):not(embed), area, base, basefont, datalist,
+head, link, meta, noembed, noframes, param, rp, script, style, template, title {
+  display: none;
+}
+
+[hidden=until-found i]:not(embed) {
+  content-visibility: hidden;
+}
+
+embed[hidden] {
+  display: inline;
+}
+
+input[type=hidden i] {
+  display: none !important;
+}
+
+@media (scripting) {
+  noscript {
+    display: none !important;
+  }
+}
+
+audio:not([controls]) {
+  display: none !important;
+}
+
+source, track {
+  display: none;
+}
+
+html, body {
+  display: block;
+}
+
+address, blockquote, center, dialog, div, figure, figcaption, footer, form,
+header, hr, legend, listing, main, p, plaintext, pre, search, xmp {
+  display: block;
+}
+
+dialog:not([open]) {
+  display: none;
+}
+
+[popover]:not(:popover-open):not(dialog[open]) {
+  display: none;
+}
+
+slot {
+  display: contents;
+}
+
+ruby {
+  display: ruby;
+}
+
+rt {
+  display: ruby-text;
+}
+
+article, aside, h1, h2, h3, h4, h5, h6, hgroup, nav, section {
+  display: block;
+}
+
+dir, dd, dl, dt, menu, ol, ul {
+  display: block;
+}
+
+li {
+  display: list-item;
+}
+
+table {
+  display: table;
+}
+
+caption {
+  display: table-caption;
+}
+
+colgroup {
+  display: table-column-group;
+}
+
+col {
+  display: table-column;
+}
+
+thead {
+  display: table-header-group;
+}
+
+tbody {
+  display: table-row-group;
+}
+
+tfoot {
+  display: table-footer-group;
+}
+
+tr {
+  display: table-row;
+}
+
+td, th {
+  display: table-cell;
+}
+
+fieldset, details, summary, optgroup, frameset, frame {
+  display: block;
+}
+
+input, select, button, textarea, marquee, meter, progress {
+  display: inline-block;
+}
+
+dialog:not([open]) {
+  display: none;
+}

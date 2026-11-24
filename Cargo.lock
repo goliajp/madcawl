@@ -17,6 +17,7 @@ dependencies = [
 name = "madcawl-css"
 version = "0.0.1"
 dependencies = [
+ "madcawl-dom",
  "madcawl-html",
  "madcawl-str",
 ]

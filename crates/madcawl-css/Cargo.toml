@@ -1,6 +1,6 @@
 [package]
 name = "madcawl-css"
-description = "CSS syntax, selectors and the stylesheet model"
+description = "CSS syntax, selectors, the stylesheet model, the cascade and computed values"
 version.workspace = true
 publish = false
 edition.workspace = true
@@ -16,6 +16,7 @@ madcawl-str = { path = "../madcawl-str" }
 # the encodings a stylesheet's bytes may be in are the ones the HTML
 # decoder already has
 madcawl-html = { path = "../madcawl-html" }
+madcawl-dom = { path = "../madcawl-dom" }
 
 [features]
 # count the tokenizer's work, for the fuzz driver (src/steps.rs)

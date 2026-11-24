@@ -1,5 +1,6 @@
 //! CSS: the tokenizer and parser of CSS Syntax Level 3, the selectors of
-//! Selectors Level 4, and the stylesheet model.
+//! Selectors Level 4, the stylesheet model, and the cascade and computed
+//! values over the DOM (`style`).
 //!
 //! Everything works on spans of the stylesheet's one copy of its source.
 //! The tokenizer is pulled a token at a time and allocates nothing. A
@@ -28,6 +29,7 @@ mod names;
 mod parser;
 pub mod selector;
 mod sheet;
+pub mod style;
 mod tokenizer;
 mod tree;
 mod worker;
