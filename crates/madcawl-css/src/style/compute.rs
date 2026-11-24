@@ -8,12 +8,14 @@ use std::collections::HashMap;
 use madcawl_dom::{Dom, NodeId, NodeKind};
 use madcawl_str::atom;
 
+use crate::Span;
 use crate::parser::{BlockItem, parse_declaration_list};
 
 use super::buckets::Buckets;
+use super::custom::{self, element_set, substitute};
 use super::matching::{Matcher, text};
-use super::props::{Decl, PROPS, Prop, Specified, Wide, parse_block};
-use super::rules::Rules;
+use super::props::{self as props, Decl, PROPS, Prop, Specified, What, Wide, parse_block};
+use super::rules::{NONE, Rules};
 use super::values::{ComputedStyle, ContentVisibility, Display, Float, Position};
 use super::{CONTENTS_SKIPPED, NOT_RENDERED, Styles};
 
@@ -66,6 +68,8 @@ impl Floor {
     }
 }
 
+type Won<'d> = [Option<&'d Decl>; PROPS];
+
 enum Src {
     Block(u32),
     Inline,
@@ -100,17 +104,19 @@ impl<'r, 'a> Run<'r, 'a> {
             if dom.kind(el) != NodeKind::Element {
                 continue;
             }
+            let i = el.index() as usize;
+            if out.of.len() <= i {
+                out.of.resize(i + 1, 0);
+                out.flags.resize(i + 1, 0);
+                out.customs.resize(i + 1, NONE);
+            }
             let parent = self.m.parent_element(el);
+            self.collect(el);
             let s = self.element(el, parent, out);
             let k = *interned.entry(s).or_insert_with(|| {
                 out.table.push(s);
                 out.table.len() as u32 - 1
             });
-            let i = el.index() as usize;
-            if out.of.len() <= i {
-                out.of.resize(i + 1, 0);
-                out.flags.resize(i + 1, 0);
-            }
             out.of[i] = k + 1;
             let above = parent.map_or(0, |p| {
                 let f = out.flags[p.index() as usize];
@@ -166,26 +172,29 @@ impl<'r, 'a> Run<'r, 'a> {
             .sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
     }
 
-    fn cascade(&mut self, el: NodeId) -> [Option<Specified>; PROPS] {
-        self.collect(el);
-        let mut won: [Option<Specified>; PROPS] = [None; PROPS];
+    /// The winning declaration of each property, and of each custom
+    /// property by name, among those `collect` found.
+    fn cascade(&self, el: NodeId) -> (Won<'_>, Vec<(&str, &Decl)>) {
+        let mut won: Won<'_> = [None; PROPS];
         let mut floor: [Option<Floor>; PROPS] = [None; PROPS];
-        let style = self
-            .m
-            .dom
-            .attribute(el, atom!("style"))
-            .map(|s| text(s).into_owned());
+        let mut customs: Vec<(&str, &Decl)> = Vec::new();
+        let style = self.m.dom.attribute(el, atom!("style")).map(|s| text(s));
         for (key, important, src) in &self.matched {
             let decls = match src {
                 Src::Block(b) => self.m.rules.blocks[*b as usize].get(),
                 Src::Inline => &self.inline[style.as_deref().expect("a style attribute")],
             };
-            for d in decls.iter().rev() {
-                let p = d.prop as usize;
-                if d.important != *important
-                    || won[p].is_some()
-                    || floor[p].is_some_and(|f| !f.allows(*key))
-                {
+            for d in decls.iter().rev().filter(|d| d.important == *important) {
+                let p = match &d.what {
+                    What::Prop(p) => *p as usize,
+                    What::Custom(name) => {
+                        if !customs.iter().any(|(n, _)| *n == &**name) {
+                            customs.push((name, d));
+                        }
+                        continue;
+                    }
+                };
+                if won[p].is_some() || floor[p].is_some_and(|f| !f.allows(*key)) {
                     continue;
                 }
                 match d.value {
@@ -196,20 +205,33 @@ impl<'r, 'a> Run<'r, 'a> {
                             layer: key.layer(),
                         })
                     }
-                    v => won[p] = Some(v),
+                    _ => won[p] = Some(d),
                 }
             }
         }
-        won
+        (won, customs)
     }
 
-    fn element(&mut self, el: NodeId, parent: Option<NodeId>, out: &Styles) -> ComputedStyle {
-        let won = self.cascade(el);
+    fn element(&self, el: NodeId, parent: Option<NodeId>, out: &mut Styles) -> ComputedStyle {
+        let (won, customs) = self.cascade(el);
+        let parent_set = parent.map_or(NONE, |p| out.customs[p.index() as usize]);
+        let set = element_set(&mut out.sets, parent_set, &customs);
+        out.customs[el.index() as usize] = set;
         let from = parent.and_then(|p| out.get(p)).copied();
         let inherited = from.unwrap_or(ComputedStyle::INITIAL);
         let mut s = ComputedStyle::INITIAL;
         for &p in Prop::ALL {
-            let v = won[p as usize];
+            let v = match won[p as usize] {
+                Some(d) if d.value == Specified::Unresolved => {
+                    let raw = d.raw.as_deref().expect("the text var() is in");
+                    let mut get = |n: &str| custom::lookup(&out.sets, set, n).map(str::to_owned);
+                    // invalid at computed-value time: as if unset
+                    substitute(raw, true, &mut get)
+                        .and_then(|t| props::parse(p, &t, Span::new(0, t.len())))
+                        .filter(|v| *v != Specified::Unresolved)
+                }
+                d => d.map(|d| d.value),
+            };
             let inherit = match v {
                 None | Some(Specified::Unresolved | Specified::Wide(Wide::Unset)) => p.inherited(),
                 // a revert that found nothing below it
@@ -217,7 +239,7 @@ impl<'r, 'a> Run<'r, 'a> {
                 Some(Specified::Wide(Wide::Inherit)) => true,
                 Some(Specified::Wide(Wide::Initial)) => false,
                 Some(v) => {
-                    set(&mut s, v);
+                    set_value(&mut s, v);
                     continue;
                 }
             };
@@ -259,7 +281,7 @@ impl<'r, 'a> Run<'r, 'a> {
     }
 }
 
-fn set(s: &mut ComputedStyle, v: Specified) {
+fn set_value(s: &mut ComputedStyle, v: Specified) {
     match v {
         Specified::Display(d) => s.display = d,
         Specified::Visibility(d) => s.visibility = d,

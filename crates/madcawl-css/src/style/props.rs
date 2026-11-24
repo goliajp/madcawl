@@ -72,8 +72,8 @@ pub enum Specified {
     Opacity(f32),
     Position(Position),
     Float(Float),
-    /// Holds `var()`: invalid at computed-value time until custom
-    /// properties are substituted, so it acts as `unset`
+    /// Holds `var()`, substituted at computed-value time; the text is
+    /// the declaration's `raw`
     Unresolved,
 }
 
@@ -146,43 +146,67 @@ pub fn parse(prop: Prop, src: &str, value: Span) -> Option<Specified> {
     })
 }
 
+/// What a declaration sets.
+#[derive(Clone, Debug, PartialEq)]
+pub enum What {
+    Prop(Prop),
+    /// A custom property, by its name with the dashes
+    Custom(Box<str>),
+}
+
 /// One parsed declaration.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Decl {
-    pub prop: Prop,
+    pub what: What,
+    /// For a custom property, a CSS-wide keyword or `Unresolved`
     pub value: Specified,
+    /// The value as written, when `var()` has to be substituted into it,
+    /// and a custom property's value, whitespace trimmed
+    pub raw: Option<Box<str>>,
     pub important: bool,
 }
 
 /// The declarations of a block this engine computes, in order; `all`
-/// with a CSS-wide keyword stands for each of them.
+/// with a CSS-wide keyword stands for each property but the custom
+/// ones.
 pub fn parse_block(src: &str, decls: &[Declaration]) -> Box<[Decl]> {
     let mut out = Vec::new();
     let mut name = String::new();
     for d in decls {
         name.clear();
         d.name.write_value(src, &mut name);
+        let text = d.value.of(src);
+        if name.starts_with("--") {
+            let wide = match parse(Prop::Display, src, d.value) {
+                Some(w @ Specified::Wide(_)) => w,
+                _ => Specified::Unresolved,
+            };
+            out.push(Decl {
+                what: What::Custom(name.as_str().into()),
+                value: wide,
+                raw: Some(text.trim_matches(|c: char| c.is_ascii_whitespace()).into()),
+                important: d.important,
+            });
+            continue;
+        }
         name.make_ascii_lowercase();
+        let parsed = |prop| {
+            let value = parse(prop, src, d.value)?;
+            let raw = (value == Specified::Unresolved).then(|| text.into());
+            Some(Decl {
+                what: What::Prop(prop),
+                value,
+                raw,
+                important: d.important,
+            })
+        };
         if name == "all" {
-            if let Some(v @ Specified::Wide(_)) = parse(Prop::Display, src, d.value) {
-                out.extend(Prop::ALL.iter().map(|&prop| Decl {
-                    prop,
-                    value: v,
-                    important: d.important,
-                }));
+            if let Some(Specified::Wide(_)) = parse(Prop::Display, src, d.value) {
+                out.extend(Prop::ALL.iter().filter_map(|&p| parsed(p)));
             }
             continue;
         }
-        let Some(prop) = Prop::from_name(&name) else {
-            continue;
-        };
-        if let Some(value) = parse(prop, src, d.value) {
-            out.push(Decl {
-                prop,
-                value,
-                important: d.important,
-            });
-        }
+        out.extend(Prop::from_name(&name).and_then(parsed));
     }
     out.into()
 }

@@ -13,6 +13,7 @@
 
 mod buckets;
 mod compute;
+mod custom;
 mod matching;
 mod media;
 mod props;
@@ -102,6 +103,9 @@ pub struct Styles {
     of: Vec<u32>,
     flags: Vec<u8>,
     table: Vec<ComputedStyle>,
+    /// By node index, the element's custom property set
+    customs: Vec<u32>,
+    sets: Vec<custom::CustomSet>,
 }
 
 impl Styles {
@@ -109,6 +113,24 @@ impl Styles {
     pub fn get(&self, n: NodeId) -> Option<&ComputedStyle> {
         let k = *self.of.get(n.index() as usize)?;
         (k != 0).then(|| &self.table[k as usize - 1])
+    }
+
+    /// The computed value of the custom property `name` (with its
+    /// dashes) on an element.
+    pub fn custom_property(&self, n: NodeId, name: &str) -> Option<&str> {
+        let k = *self.customs.get(n.index() as usize)?;
+        custom::lookup(&self.sets, k, name)
+    }
+
+    /// Every custom property of an element and its computed value, by
+    /// name.
+    pub fn custom_properties(&self, n: NodeId) -> Vec<(&str, &str)> {
+        let k = self
+            .customs
+            .get(n.index() as usize)
+            .copied()
+            .unwrap_or(rules::NONE);
+        custom::all(&self.sets, k)
     }
 
     /// How many different sets of computed values the elements have.
