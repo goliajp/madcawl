@@ -244,3 +244,29 @@ fn blockification() {
     assert_eq!(p.display("t"), Display::Table);
     assert_eq!(p.style("s").position, madcawl_css::style::Position::Sticky);
 }
+
+#[test]
+fn what_html_and_svg_never_render() {
+    let p = page(
+        "<details id=d><summary id=s>open me</summary><p id=p>inside</p>loose</details>\
+         <details id=o open><p id=op>shown</p></details><canvas id=c><p id=cp>fallback</p></canvas>\
+         <svg id=g><title id=t>name</title><defs><g id=dg></g></defs><text id=x>drawn</text></svg>",
+    );
+    assert!(p.rendered("d"));
+    assert!(p.rendered("s"));
+    assert!(!p.rendered("p"));
+    let loose = p.dom.last_child(p.el("d")).unwrap();
+    assert!(!p.styles.is_rendered(&p.dom, loose));
+    assert!(p.styles.is_rendered(&p.dom, p.text_in("s")));
+    assert!(p.rendered("op"));
+    assert!(p.rendered("c"));
+    assert!(!p.rendered("cp"));
+    assert!(!p.rendered("t"));
+    assert!(!p.rendered("dg"));
+    assert!(p.rendered("x"));
+    assert_eq!(
+        p.display("p"),
+        Display::Block,
+        "computed values are untouched"
+    );
+}

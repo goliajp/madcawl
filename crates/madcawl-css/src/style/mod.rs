@@ -18,6 +18,7 @@ mod matching;
 mod media;
 mod props;
 mod pseudo;
+mod render;
 mod rules;
 mod sources;
 mod supports;
@@ -93,8 +94,11 @@ impl<'a> Cascade<'a> {
 
 /// The element or one of its ancestors is `display: none`.
 const NOT_RENDERED: u8 = 1;
-/// An ancestor is `content-visibility: hidden`: its contents are skipped.
+/// An ancestor is `content-visibility: hidden`, or otherwise does not
+/// render what is in it: its contents are skipped.
 const CONTENTS_SKIPPED: u8 = 2;
+/// The element's own children are not rendered (`render.rs`).
+const CHILDREN_HIDDEN: u8 = 4;
 
 /// The computed values of a document's elements, by node.
 #[derive(Default)]
@@ -146,17 +150,22 @@ impl Styles {
                 .filter(|&p| dom.kind(p) == NodeKind::Element)?,
         };
         let s = self.get(el)?;
-        let mut f = self.flags[el.index() as usize];
-        if el != n && s.content_visibility == ContentVisibility::Hidden {
-            f |= CONTENTS_SKIPPED;
-        }
-        Some((f, s))
+        let f = self.flags[el.index() as usize];
+        let skipped = el != n
+            && (s.content_visibility == ContentVisibility::Hidden || f & CHILDREN_HIDDEN != 0);
+        Some((
+            f & !CHILDREN_HIDDEN | if skipped { CONTENTS_SKIPPED } else { 0 },
+            s,
+        ))
     }
 
     /// Whether the node makes boxes: an element or text in the document
-    /// with no `display: none` on it or above it and no
-    /// `content-visibility: hidden` above it. A text node goes by its
-    /// parent element.
+    /// with no `display: none` on it or above it, no
+    /// `content-visibility: hidden` above it, and not in what HTML and
+    /// SVG never render where it is (a closed `<details>` but its
+    /// summary, the fallback content of `<canvas>`, `<video>`,
+    /// `<audio>` and `<iframe>`, SVG `<defs>`, `<title>` and the like).
+    /// A text node goes by its parent element.
     pub fn is_rendered(&self, dom: &Dom, n: NodeId) -> bool {
         self.flags_of(dom, n).is_some_and(|(f, _)| f == 0)
     }

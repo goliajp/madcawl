@@ -17,7 +17,7 @@ use super::matching::{Matcher, text};
 use super::props::{self as props, Decl, PROPS, Prop, Specified, What, Wide, parse_block};
 use super::rules::{NONE, Rules};
 use super::values::{ComputedStyle, ContentVisibility, Display, Float, Position};
-use super::{CONTENTS_SKIPPED, NOT_RENDERED, Styles};
+use super::{CHILDREN_HIDDEN, CONTENTS_SKIPPED, NOT_RENDERED, Styles};
 
 /// A declared value's place in the cascade, compared as one number:
 /// origin and importance, element-attached, layer, specificity, order.
@@ -122,15 +122,18 @@ impl<'r, 'a> Run<'r, 'a> {
                 let f = out.flags[p.index() as usize];
                 let hides = out
                     .get(p)
-                    .is_some_and(|ps| ps.content_visibility == ContentVisibility::Hidden);
-                f | if hides { CONTENTS_SKIPPED } else { 0 }
+                    .is_some_and(|ps| ps.content_visibility == ContentVisibility::Hidden)
+                    || f & CHILDREN_HIDDEN != 0 && !self.m.shown_summary(p, el);
+                f & !CHILDREN_HIDDEN | if hides { CONTENTS_SKIPPED } else { 0 }
             });
-            let none = if s.display == Display::None {
-                NOT_RENDERED
-            } else {
-                0
-            };
-            out.flags[i] = above | none;
+            let mut own = 0;
+            if s.display == Display::None || self.m.never_rendered(el) {
+                own |= NOT_RENDERED;
+            }
+            if self.m.hides_children(el) {
+                own |= CHILDREN_HIDDEN;
+            }
+            out.flags[i] = above | own;
         }
     }
 
