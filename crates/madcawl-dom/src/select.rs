@@ -122,24 +122,21 @@ impl Dom {
             } else {
                 return Some(el);
             };
+            let mut has = 0;
             for k in 0..n {
-                if !self.charge(16) {
+                let u = self.attrs.attrs(from)[k];
+                // the value is shared, but counted, as replacing it gives
+                // its bytes back
+                if !self.charge(16 + crate::text::wtf8_len(u.value())) {
                     break;
                 }
-                let u = self.attrs.attrs(from)[k];
                 let value = u.value().clone();
                 b = self.attrs.push(
                     b,
                     crate::attrs::Unit::attr(u.local(), u.ns(), u.prefix(), value),
                 );
+                has |= self.copy_entry(from, b, u);
             }
-            if let Some(id) = self.attrs.id(from) {
-                self.attrs.set_id(b, id);
-            }
-            let classes = self.attrs.classes(from);
-            self.attrs.set_classes(b, classes);
-            let has = self.n(x).flags
-                & (crate::node::HAS_ID | crate::node::HAS_CLASS | crate::node::HAS_STYLE);
             let n = self.m(el);
             n.attrs = b;
             n.flags |= has;

@@ -24,6 +24,34 @@ pub(crate) struct Tail {
 const SPACES_LEN: usize = 32;
 const SPACES_KEPT: usize = 16;
 
+/// The length of `s` in WTF-8, which is what storing it was counted as.
+pub(crate) fn wtf8_len(s: &DomString) -> usize {
+    if let Some(b) = s.as_latin1() {
+        return b.len() + b.iter().filter(|&&c| c >= 0x80).count();
+    }
+    let (mut n, mut high) = (0, false);
+    for u in s.units() {
+        let low = (0xDC00..0xE000).contains(&u);
+        n += match u {
+            0..0x80 => 1,
+            0x80..0x800 => 2,
+            // the pair's four bytes: three for the high half, one more
+            _ if low && high => 1,
+            _ => 3,
+        };
+        high = (0xD800..0xDC00).contains(&u);
+    }
+    n
+}
+
+/// Whether `s` holds a high surrogate followed by a low one, each as
+/// three bytes: the form WTF-8 joins into one four-byte code point.
+pub(crate) fn split_pair(s: &[u8]) -> bool {
+    !s.is_ascii()
+        && s.windows(6)
+            .any(|w| w[0] == 0xED && w[1] & 0xF0 == 0xA0 && w[3] == 0xED && w[4] & 0xF0 == 0xB0)
+}
+
 fn is_space(b: u8) -> bool {
     matches!(b, b'\t' | b'\n' | 0x0C | b'\r' | b' ')
 }
@@ -44,6 +72,11 @@ impl Dom {
         self.bytes += k;
         self.cut = Some(Refused::Bytes);
         &s[..k]
+    }
+
+    /// Give back what `s`, a value no longer stored, was counted as.
+    pub(crate) fn refund(&mut self, s: &DomString) {
+        self.bytes -= wtf8_len(s);
     }
 
     /// Count `n` bytes of bookkeeping, if they fit.
@@ -163,6 +196,7 @@ impl Dom {
             // the node goes
             unsafe { drop_string(data) };
         } else if attrs != 0 {
+            self.drop_entries(i);
             for u in self.attrs.attrs(attrs) {
                 u.drop_value();
             }

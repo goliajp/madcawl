@@ -9,6 +9,8 @@ pub struct Limits {
     /// The most bytes of text, comments, attribute values and attribute
     /// slots (16 bytes each) the parser may hand the DOM.
     pub bytes: usize,
+    /// The most bytes the id and class tables hold, apart from `bytes`.
+    pub tables: usize,
 }
 
 /// The parser stops while at least this many nodes are left, because a
@@ -27,6 +29,7 @@ impl Default for Limits {
         Limits {
             nodes: SLOTS as u32 - 1,
             bytes: 1 << 30,
+            tables: 1 << 28,
         }
     }
 }

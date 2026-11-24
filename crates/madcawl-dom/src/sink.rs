@@ -61,28 +61,19 @@ impl Dom {
         Some(inert)
     }
 
-    /// Add one attribute; false once the byte limit is reached.
-    fn add_attr(&mut self, el: u32, a: AttrRef<'_>) -> bool {
-        if !self.charge(16) {
+    /// Add one attribute; false once the byte limit is reached, when
+    /// it is left out or its value is cut short.
+    pub(crate) fn add_attr(&mut self, el: u32, a: AttrRef<'_>) -> bool {
+        let mut b = self.n(el).attrs;
+        let room = if b == 0 { 32 } else { 16 };
+        if !self.charge(room) {
             return false;
         }
-        let v = self.admit(a.value);
-        self.atoms.keep(a.local);
-        let plain = a.ns == AttrNamespace::None;
-        let (value, classes) = if plain && a.local == atom!("class") {
-            let (s, k) = self.classes.intern(v, &self.atoms);
-            (s, Some(k))
-        } else {
-            (self.short.get(v), None)
-        };
-        let id = (plain && a.local == atom!("id") && !v.is_empty()).then(|| self.atoms.hold(v));
-        let mut b = self.n(el).attrs;
         if b == 0 {
-            if !self.charge(16) {
-                return false;
-            }
             b = self.attrs.alloc(1);
         }
+        self.atoms.keep(a.local);
+        let (value, classes, id, whole) = self.attr_value(a.ns, a.local, a.value);
         b = self
             .attrs
             .push(b, Unit::attr(a.local, a.ns, a.prefix, value));
@@ -95,13 +86,13 @@ impl Dom {
             self.attrs.set_id(b, id);
             flags |= HAS_ID;
         }
-        if plain && a.local == atom!("style") {
+        if a.ns == AttrNamespace::None && a.local == atom!("style") {
             flags |= HAS_STYLE;
         }
         let n = self.m(el);
         n.attrs = b;
         n.flags |= flags;
-        true
+        whole
     }
 
     fn has_attr_ns(&self, el: u32, ns: AttrNamespace, local: Atom) -> bool {
@@ -128,8 +119,10 @@ impl TreeSink for Dom {
         if !attrs.is_empty() && self.charge(16) {
             self.m(el).attrs = self.attrs.alloc(attrs.len());
         }
+        // past the byte limit the rest is left out; a value the id or
+        // class table refuses leaves only itself out
         for a in attrs.iter() {
-            if !self.add_attr(el, a) {
+            if !self.add_attr(el, a) && self.cut.is_some() {
                 break;
             }
         }
@@ -206,7 +199,7 @@ impl TreeSink for Dom {
             "attributes go on an element"
         );
         for a in attrs.iter() {
-            if !self.has_attr_ns(el, a.ns, a.local) && !self.add_attr(el, a) {
+            if !self.has_attr_ns(el, a.ns, a.local) && !self.add_attr(el, a) && self.cut.is_some() {
                 break;
             }
         }

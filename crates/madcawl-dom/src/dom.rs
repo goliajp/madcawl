@@ -8,9 +8,9 @@ use madcawl_html::{AttrNamespace, Namespace, QuirksMode};
 use madcawl_str::{Atom, DomString, HeldAtoms};
 
 use crate::arena::{Arena, SLOTS};
-pub use crate::limits::{HEADROOM, Limits, Refused};
 use crate::attrs::AttrHeap;
-use crate::classes::ClassLists;
+use crate::classes::Tables;
+pub use crate::limits::{HEADROOM, Limits, Refused};
 use crate::node::{
     IN_DOCUMENT, INERT, KIND_MASK, NS_MASK, NS_SHIFT, Node, NodeKind, QUIRKS_MASK, QUIRKS_SHIFT,
 };
@@ -52,7 +52,7 @@ pub(crate) struct Rare {
 pub struct Dom {
     pub(crate) arena: Arena,
     pub(crate) attrs: AttrHeap,
-    pub(crate) classes: ClassLists,
+    pub(crate) tables: Tables,
     /// Entry 0 is never used.
     pub(crate) rare: Vec<Rare>,
     /// Entries of freed nodes, used again.
@@ -63,7 +63,7 @@ pub struct Dom {
     /// Short attribute values and texts, shared.
     pub(crate) short: ShortStrings,
     pub(crate) tail: RefCell<Option<Tail>>,
-    /// The dynamic atoms names, ids and classes use.
+    /// The dynamic atoms names use.
     pub(crate) atoms: HeldAtoms,
     pub(crate) doc: u32,
     pub(crate) limits: Limits,
@@ -102,11 +102,14 @@ impl Dom {
             2 * HEADROOM
         );
         // a string under the byte limit is under the string length limit
-        assert!(limits.bytes <= 1 << 30, "a byte limit up to 1 GiB");
+        assert!(
+            limits.bytes.max(limits.tables) <= 1 << 30,
+            "limits up to 1 GiB"
+        );
         let mut dom = Dom {
             arena: Arena::new(),
             attrs: AttrHeap::new(),
-            classes: ClassLists::new(),
+            tables: Tables::new(limits.tables),
             rare: vec![Rare::default()],
             rare_free: Vec::new(),
             spaces: Vec::new(),
@@ -285,7 +288,7 @@ impl Dom {
     pub fn class_list(&self, n: NodeId) -> (u32, &[Atom]) {
         let b = self.n(n.index()).attrs;
         let k = if b == 0 { 0 } else { self.attrs.classes(b) };
-        (k, self.classes.list(k))
+        (k, self.tables.list(k))
     }
 
     /// The node's reference count.

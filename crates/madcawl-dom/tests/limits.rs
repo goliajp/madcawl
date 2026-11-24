@@ -18,7 +18,11 @@ fn parse(dom: Dom, input: &[u8]) -> Dom {
 }
 
 fn limited(nodes: u32, bytes: usize) -> Dom {
-    Dom::with_limits(Limits { nodes, bytes })
+    Dom::with_limits(Limits {
+        nodes,
+        bytes,
+        ..Limits::default()
+    })
 }
 
 #[test]

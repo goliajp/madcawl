@@ -151,6 +151,17 @@ impl AttrHeap {
         b
     }
 
+    /// Put `u` in the place of block `b`'s attribute `k`; the unit it
+    /// replaces, whose value the caller drops.
+    pub(crate) fn replace(&mut self, b: u32, k: usize, u: Unit) -> Unit {
+        std::mem::replace(&mut self.units[b as usize + 1 + k], u)
+    }
+
+    pub(crate) fn clear_id(&mut self, b: u32) {
+        let h = &mut self.units[b as usize];
+        h.c &= !0xFFFF_FFFF;
+    }
+
     /// The `id` atom of block `b`.
     pub(crate) fn id(&self, b: u32) -> Option<Atom> {
         let v = self.units[b as usize].c as u32;

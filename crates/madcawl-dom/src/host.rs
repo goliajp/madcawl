@@ -34,14 +34,6 @@ pub enum Edge {
 const KEPT: u64 = 1;
 
 impl Dom {
-    /// An HTML element named `name` (already lowercased), owned by the
-    /// document, in no tree; `None` when the DOM holds all it may.
-    pub fn new_element(&mut self, name: &[u8]) -> Option<NodeId> {
-        let local = self.atoms.hold(name);
-        self.element(Namespace::Html, local, self.doc)
-            .map(NodeId::at)
-    }
-
     /// A text node, in no tree; `None` past the node or byte limit.
     pub fn new_text(&mut self, data: DomString) -> Option<NodeId> {
         self.new_data(NodeKind::Text, data)
@@ -52,16 +44,23 @@ impl Dom {
     }
 
     fn new_data(&mut self, kind: NodeKind, data: DomString) -> Option<NodeId> {
-        if !self.charge(data.len()) {
+        if !self.take(data.len()) {
             return None;
         }
-        self.new_char_data(kind, self.doc, data).map(NodeId::at)
+        let cut = self.cut;
+        let n = self.new_char_data(kind, self.doc, data);
+        self.cut = cut;
+        n.map(NodeId::at)
     }
 
     /// Put `child` into `parent` before `before`, or last; moved from
     /// where it was. The caller has checked the move is allowed.
     pub fn insert_node(&mut self, parent: NodeId, child: NodeId, before: Option<NodeId>) {
-        self.insert(parent.index(), child.index(), before.map_or(0, NodeId::index));
+        self.insert(
+            parent.index(),
+            child.index(),
+            before.map_or(0, NodeId::index),
+        );
     }
 
     /// Take `child` out of its parent.
@@ -87,7 +86,7 @@ impl Dom {
     pub fn set_text(&mut self, n: NodeId, data: DomString) -> bool {
         let i = n.index();
         assert!(self.kind_of(i).is_char_data(), "character data");
-        if !self.charge(data.len()) {
+        if !self.take(data.len()) {
             return false;
         }
         self.settle(i);
@@ -116,7 +115,11 @@ impl Dom {
     /// The wrapper is gone: clear the word and its count on the node.
     pub fn clear_wrapper(&mut self, n: NodeId) {
         let i = n.index();
-        assert_eq!(self.n(i).wrapper & KEPT, 0, "a preserved wrapper does not die");
+        assert_eq!(
+            self.n(i).wrapper & KEPT,
+            0,
+            "a preserved wrapper does not die"
+        );
         assert_ne!(self.n(i).wrapper, 0, "a node with a wrapper");
         self.m(i).wrapper = 0;
         self.dec(i);
@@ -257,7 +260,11 @@ mod tests {
         assert_eq!(dom.ref_count(el), 1);
         dom.set_wrapper_preserved(el, true);
         assert_eq!(dom.wrapper(el), 0x1001);
-        assert_eq!(dom.ref_count(el), 1, "the preserved edge counts on the wrapper");
+        assert_eq!(
+            dom.ref_count(el),
+            1,
+            "the preserved edge counts on the wrapper"
+        );
         assert_eq!(dom.audit().mismatches(), 0);
         dom.set_wrapper_preserved(el, false);
         dom.clear_wrapper(el);
@@ -299,7 +306,10 @@ mod tests {
         let mut dom = Dom::new();
         let doc = dom.document();
         let p = dom.new_element(b"div").unwrap();
-        let (a, b) = (dom.new_element(b"a").unwrap(), dom.new_element(b"b").unwrap());
+        let (a, b) = (
+            dom.new_element(b"a").unwrap(),
+            dom.new_element(b"b").unwrap(),
+        );
         dom.insert_node(p, a, None);
         dom.insert_node(p, b, None);
         let mut s = Vec::new();
@@ -327,7 +337,10 @@ mod tests {
         let mut freed = Vec::new();
         for _ in 0..100 {
             let p = dom.new_element(b"div").unwrap();
-            let (a, b) = (dom.new_element(b"a").unwrap(), dom.new_element(b"b").unwrap());
+            let (a, b) = (
+                dom.new_element(b"a").unwrap(),
+                dom.new_element(b"b").unwrap(),
+            );
             dom.insert_node(p, a, None);
             dom.insert_node(p, b, None);
             // p, left holding b, becomes a suspect; then the pair is

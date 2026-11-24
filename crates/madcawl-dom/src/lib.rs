@@ -30,6 +30,7 @@ mod audit;
 mod classes;
 mod dat;
 mod dom;
+mod edit;
 mod held;
 mod host;
 mod limits;
