@@ -63,10 +63,9 @@ pub(crate) fn substitute<V: AsRef<str>>(
     get: &mut dyn FnMut(&str) -> Option<V>,
     budget: &Cell<usize>,
 ) -> Option<String> {
-    let limit = MAX_LEN.min(budget.get());
-    let mut out = String::with_capacity(src.len().min(limit));
+    let mut out = String::with_capacity(src.len().min(MAX_LEN.min(budget.get())));
     let span = Span::new(0, src.len());
-    let done = fill(src, span, separate, get, &mut out, limit);
+    let done = fill(src, span, separate, get, &mut out, budget);
     budget.set(budget.get().saturating_sub(out.len()));
     done.then_some(out)
 }
@@ -77,7 +76,7 @@ fn fill<V: AsRef<str>>(
     separate: bool,
     get: &mut dyn FnMut(&str) -> Option<V>,
     out: &mut String,
-    limit: usize,
+    budget: &Cell<usize>,
 ) -> bool {
     let mut t = Tokenizer::in_span(src, span);
     loop {
@@ -99,7 +98,7 @@ fn fill<V: AsRef<str>>(
                 };
                 let found = match (found, fallback) {
                     (Some(()), _) => true,
-                    (None, Some(f)) => fill(src, f, separate, get, out, limit),
+                    (None, Some(f)) => fill(src, f, separate, get, out, budget),
                     (None, None) => false,
                 };
                 if !found {
@@ -111,7 +110,9 @@ fn fill<V: AsRef<str>>(
             }
             _ => out.push_str(tok.span.of(src)),
         }
-        if out.len() > limit {
+        // read again each time: values `get` resolved meanwhile have
+        // already taken their share
+        if out.len() > MAX_LEN.min(budget.get()) {
             return false;
         }
     }

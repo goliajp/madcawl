@@ -231,3 +231,22 @@ fn doubling_values_on_every_element_stay_bounded() {
     );
     assert!(elapsed.as_secs() < 10, "took {elapsed:?}");
 }
+
+#[test]
+fn a_chain_of_copies_draws_on_one_budget() {
+    let mut css = String::from("<style>i { --a0: x;");
+    for i in 1..=20 {
+        css.push_str(&format!(" --a{i}: var(--a{j})var(--a{j});", j = i - 1));
+    }
+    css.push_str(" --b0: var(--a20);");
+    for i in 1..=100 {
+        css.push_str(&format!(" --b{i}: var(--b{j});", j = i - 1));
+    }
+    css.push_str(" }</style><i id=x></i>");
+    let p = page(&css);
+    let held: usize = (0..=100)
+        .filter_map(|i| p.styles.custom_property(p.el("x"), &format!("--b{i}")).map(str::len))
+        .sum();
+    assert!(held <= 66 << 20, "copies hold {held} bytes");
+    assert_eq!(p.styles.custom_property(p.el("x"), "--b100"), None);
+}
