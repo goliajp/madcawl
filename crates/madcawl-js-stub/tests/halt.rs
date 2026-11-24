@@ -154,3 +154,20 @@ fn an_abort_that_comes_between_tasks_ends_no_task() {
     assert_eq!(e.halt(), Halt::Running);
     e.release(log);
 }
+
+#[test]
+fn a_job_of_a_detached_realm_is_dropped_unrun() {
+    let (mut e, mut h) = (Stub::new(), Log::default());
+    let (kept, gone) = (e.new_realm(), e.new_realm());
+    let log = e.new_object(kept);
+    let theirs = counter(&mut e, gone, log.get(), "theirs");
+    let ours = counter(&mut e, kept, log.get(), "ours");
+    e.enqueue_microtask(theirs, undefined());
+    e.enqueue_microtask(ours, undefined());
+    e.detach_realm(gone);
+    e.run_microtasks(&mut h);
+    assert_eq!(num(&mut e, &mut h, log.get(), "theirs"), 0.0, "no script runs in a detached realm");
+    assert_eq!(num(&mut e, &mut h, log.get(), "ours"), 1.0);
+    assert_eq!(e.queued_microtasks(), 0);
+    e.release(log);
+}

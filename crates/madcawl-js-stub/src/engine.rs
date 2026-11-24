@@ -349,7 +349,7 @@ impl Engine for Stub {
         while !self.halted()
             && let Some((job, arg)) = self.microtasks.pop_front()
         {
-            let r = self.call_value(host, job, UNDEFINED, &[arg]).into_raw();
+            let r = if self.detached_job(job) { UNDEFINED } else { self.call_value(host, job, UNDEFINED, &[arg]).into_raw() };
             if r == THROWN && !self.halted() {
                 let e = self.take_exception().expect("a thrown exception");
                 host.report_exception(self, e);

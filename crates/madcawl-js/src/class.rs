@@ -203,7 +203,8 @@ pub struct Interceptors<E: 'static, H: 'static> {
 /// not run script, allocate engine objects, make wrappers, change a
 /// count or change an edge. `unlink` gives up the edges of an object
 /// found to be garbage; the object stays usable until the batch ends,
-/// since others in its cycle may still read it. `can_skip` says the
+/// since others in its cycle may still read it. It runs no script and
+/// makes no wrapper (it gets no engine to do either with). `can_skip` says the
 /// object is certainly alive (a node in an active document), so the
 /// collector does not enter it.
 pub struct HostOps<E: Engine, H: 'static> {

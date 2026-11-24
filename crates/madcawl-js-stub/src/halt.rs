@@ -47,6 +47,12 @@ impl Stub {
         }
     }
 
+    /// A queued job whose realm is detached: no script runs there.
+    pub(crate) fn detached_job(&self, job: Value) -> bool {
+        // SAFETY: a queued job is a live cell the queue holds
+        self.realms[unsafe { Cell::at(job) }.realm as usize].detached
+    }
+
     pub(crate) fn resume_script(&mut self) {
         assert_eq!(self.depth, 0, "resumed from inside a call");
         self.poll_interrupt();

@@ -8,6 +8,7 @@ use madcawl_str::{Atom, DomString, HeldAtoms};
 use crate::class::{Bound, ClassDef, HostFn};
 use crate::graph::{Deadline, Step, Tracer, Unlinker};
 use crate::halt::{Halt, Unsupported};
+use crate::script::{ModuleRequest, ScriptOrigin};
 use crate::value::{ErrorKind, HostRef, Key, Owned, ValueKind};
 
 /// One isolate of an engine, used on the thread it belongs to: every
@@ -198,9 +199,16 @@ pub trait Engine: Sized + 'static {
     ) -> Option<HostRef>;
     /// Deliver the notices kept for the host (`wrapper_died`), which
     /// arise wherever a count drops and are held until the host is at
-    /// hand, and free those wrappers. How many were delivered.
+    /// hand, and free those wrappers. How many were delivered. The host
+    /// calls it whenever it settles (after each call into the isolate
+    /// that can release values, and before and after a collection it
+    /// drives); until then a dead wrapper's memory and its host object's
+    /// count stay held.
     fn drain_host<H: Host<Self>>(&mut self, host: &mut H) -> usize;
 
+    /// A weak handle to `v`. A weak handle to a wrapper does not
+    /// preserve it: the wrapper may die while its host object lives, and
+    /// the handle then reads as gone.
     fn weak(&mut self, v: Self::Value) -> Self::Weak;
     fn weak_get(&mut self, w: &Self::Weak) -> Option<Owned<Self::Value>>;
     fn weak_drop(&mut self, w: Self::Weak);
@@ -236,7 +244,8 @@ pub trait Engine: Sized + 'static {
     fn collect_cycles<H: Host<Self>>(&mut self, host: &mut H, deadline: Deadline) -> Step;
 
     /// Queue `job(arg)`; `job` is callable (a host function for a host
-    /// microtask).
+    /// microtask). A job whose realm is detached by the time it would
+    /// run is dropped unrun.
     fn enqueue_microtask(&mut self, job: Owned<Self::Value>, arg: Owned<Self::Value>);
     /// Run microtasks until the queue is empty. The host calls it at
     /// each checkpoint: after a call into script returns with
@@ -337,17 +346,4 @@ pub trait Host<E: Engine>: Sized + 'static {
     fn promise_rejection(&mut self, e: &mut E, promise: E::Value, handled: bool) {
         let _ = (e, promise, handled);
     }
-}
-
-pub struct ScriptOrigin<'a> {
-    pub url: &'a DomString,
-    pub line: u32,
-    pub column: u32,
-}
-
-pub struct ModuleRequest<'a> {
-    pub referrer: Option<&'a DomString>,
-    pub specifier: &'a DomString,
-    /// The `type` import attribute.
-    pub module_type: Option<Atom>,
 }
