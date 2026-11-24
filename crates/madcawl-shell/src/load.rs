@@ -42,7 +42,18 @@ fn local(base: &Path, href: &str) -> Option<std::path::PathBuf> {
 }
 
 pub fn style(dom: &Dom, base: Option<&Path>, encoding: Encoding, sheets: &mut Sheets) -> Styles {
-    style_document(dom, Device::default(), &mut |href| {
+    style_for(dom, base, encoding, sheets, Device::default())
+}
+
+/// The same for another device, such as a screen of another scale.
+pub fn style_for(
+    dom: &Dom,
+    base: Option<&Path>,
+    encoding: Encoding,
+    sheets: &mut Sheets,
+    device: Device,
+) -> Styles {
+    style_document(dom, device, &mut |href| {
         let text = base
             .and_then(|b| local(b, href))
             .and_then(|p| std::fs::read(p).ok())
