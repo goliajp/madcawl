@@ -4,7 +4,7 @@
 
 use std::mem::{offset_of, size_of};
 
-pub use torajs_abi::str::{STR_DATA_OFF, STR_FLAG_IS_ASCII, STR_FLAG_IS_LATIN1, STR_LEN_OFF, STR_PAD_OFF};
+pub use torajs_abi::str::{STR_DATA_OFF, STR_FLAG_IS_ASCII, STR_FLAG_IS_LATIN1, STR_LEN_OFF, STR_MAX_LEN, STR_PAD_OFF};
 pub use torajs_abi::{FLAG_STATIC_LITERAL, HEADER_FLAGS_OFF, HEADER_TAG_OFF, HEAP_HEADER_SIZE, HeapHeader, Tag};
 
 // the header word is read and written as a native integer
@@ -15,9 +15,6 @@ pub const REFCOUNT_OFF: usize = offset_of!(HeapHeader, refcount);
 /// The tag of a string block. Whether a script value is a string is
 /// the engine's to say, never read from a tag.
 pub const TAG_STR: u16 = Tag::Str as u16;
-/// The most code units a string block holds.
-// remove once torajs-abi exports STR_MAX_LEN
-pub const STR_MAX_LEN: usize = (1 << 31) - 1;
 
 const COUNT_SHIFT: u32 = REFCOUNT_OFF as u32 * 8;
 const TAG_SHIFT: u32 = HEADER_TAG_OFF as u32 * 8;
