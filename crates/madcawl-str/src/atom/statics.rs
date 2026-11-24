@@ -3,7 +3,7 @@
 
 use std::ptr::NonNull;
 
-use madcawl_abi as abi;
+use crate::abi;
 
 use super::generated::{COUNT, NAMES};
 use crate::block::Block;

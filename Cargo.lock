@@ -3,10 +3,6 @@
 version = 4
 
 [[package]]
-name = "madcawl-abi"
-version = "0.0.1"
-
-[[package]]
 name = "madcawl-bindings"
 version = "0.0.1"
 dependencies = [
@@ -29,7 +25,6 @@ dependencies = [
 name = "madcawl-dom"
 version = "0.0.1"
 dependencies = [
- "madcawl-abi",
  "madcawl-html",
  "madcawl-str",
 ]
@@ -40,6 +35,7 @@ version = "0.0.1"
 dependencies = [
  "madcawl-dom",
  "madcawl-str",
+ "torajs-encoding",
 ]
 
 [[package]]
@@ -53,7 +49,6 @@ dependencies = [
 name = "madcawl-js-stub"
 version = "0.0.1"
 dependencies = [
- "madcawl-abi",
  "madcawl-js",
  "madcawl-str",
 ]
@@ -62,5 +57,13 @@ dependencies = [
 name = "madcawl-str"
 version = "0.0.1"
 dependencies = [
- "madcawl-abi",
+ "torajs-abi",
 ]
+
+[[package]]
+name = "torajs-abi"
+version = "0.1.0"
+
+[[package]]
+name = "torajs-encoding"
+version = "0.1.0"

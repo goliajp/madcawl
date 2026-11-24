@@ -1,6 +1,6 @@
 use super::generated::NAMES;
 use super::*;
-use madcawl_abi as abi;
+use crate::abi;
 
 #[test]
 fn every_static_name_finds_its_own_atom() {
@@ -78,7 +78,7 @@ fn a_static_block_is_static_in_the_engine_layout() {
     assert_eq!(abi::tag(h), abi::TAG_STR);
     assert_eq!(
         abi::flags(h),
-        abi::FLAG_STATIC | abi::STR_FLAG_IS_LATIN1 | abi::STR_FLAG_IS_ASCII
+        abi::FLAG_STATIC_LITERAL | abi::STR_FLAG_IS_LATIN1 | abi::STR_FLAG_IS_ASCII
     );
     assert_eq!(s.block().0.as_ptr() as usize % 8, 0);
     // SAFETY: the word at offset 12 follows the length
@@ -86,7 +86,7 @@ fn a_static_block_is_static_in_the_engine_layout() {
         s.block()
             .0
             .as_ptr()
-            .add(abi::STR_POOL_OFF)
+            .add(abi::STR_PAD_OFF)
             .cast::<u32>()
             .read()
     };

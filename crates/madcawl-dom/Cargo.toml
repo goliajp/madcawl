@@ -12,6 +12,5 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-madcawl-abi = { path = "../madcawl-abi" }
 madcawl-str = { path = "../madcawl-str" }
 madcawl-html = { path = "../madcawl-html" }

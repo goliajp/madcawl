@@ -100,7 +100,7 @@ impl Stub {
     pub fn count_of(&self, v: Value) -> u32 {
         assert!(v.is_block(), "a counted value");
         // SAFETY: a block value points at a live block, header first
-        madcawl_abi::refcount(unsafe { *(v.0 as *const u64) })
+        madcawl_str::abi::refcount(unsafe { *(v.0 as *const u64) })
     }
 
     pub(crate) fn alloc(&mut self, realm: u32, body: Body) -> Value {

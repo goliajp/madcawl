@@ -12,7 +12,7 @@
 //! A pointer is either a `DomString` block (type tag `TAG_STR`) or one
 //! of the stub's cells.
 
-use madcawl_abi as abi;
+use madcawl_str::abi;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 #[repr(transparent)]

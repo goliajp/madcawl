@@ -2,7 +2,15 @@
 //! write is always valid UTF-8, so it is WTF-8 the tokenizer can read
 //! as it is.
 
-use super::Encoding;
+use torajs_encoding::big5::Big5Decoder;
+use torajs_encoding::euc_jp::EucJpDecoder;
+use torajs_encoding::euc_kr::EucKrDecoder;
+use torajs_encoding::gb18030::Gb18030Decoder;
+use torajs_encoding::iso_2022_jp::Iso2022JpDecoder;
+use torajs_encoding::shift_jis::ShiftJisDecoder;
+use torajs_encoding::single_byte;
+use torajs_encoding::utf16::{Endian, Utf16Decoder};
+use torajs_encoding::{Encoding, Family};
 
 const REPLACEMENT: &[u8] = "\u{FFFD}".as_bytes();
 
@@ -16,32 +24,35 @@ pub struct Decoder {
 #[derive(Clone, Debug)]
 enum Kind {
     Utf8(Utf8),
-    Utf16 {
-        big: bool,
-        lead_byte: Option<u8>,
-        lead_surrogate: Option<u16>,
-    },
+    Utf16(Endian, Utf16Decoder),
+    SingleByte(&'static single_byte::Index),
     XUserDefined,
+    Gb18030(Gb18030Decoder),
+    Big5(Big5Decoder),
+    EucJp(EucJpDecoder),
+    Iso2022Jp(Iso2022JpDecoder),
+    ShiftJis(ShiftJisDecoder),
+    EucKr(EucKrDecoder),
     /// The replacement encoding: one U+FFFD for any input at all
     Replacement {
         written: bool,
     },
-    /// Every other encoding
-    Legacy,
 }
 
 impl Decoder {
     pub fn new(encoding: Encoding) -> Self {
-        let kind = match encoding {
-            Encoding::Utf8 => Kind::Utf8(Utf8::default()),
-            Encoding::Utf16be | Encoding::Utf16le => Kind::Utf16 {
-                big: encoding == Encoding::Utf16be,
-                lead_byte: None,
-                lead_surrogate: None,
-            },
-            Encoding::XUserDefined => Kind::XUserDefined,
-            Encoding::Replacement => Kind::Replacement { written: false },
-            _ => Kind::Legacy,
+        let kind = match encoding.family() {
+            Family::Utf8 => Kind::Utf8(Utf8::default()),
+            Family::Utf16(endian) => Kind::Utf16(endian, Utf16Decoder::default()),
+            Family::SingleByte(index) => Kind::SingleByte(index),
+            Family::XUserDefined => Kind::XUserDefined,
+            Family::Gb18030 => Kind::Gb18030(Gb18030Decoder::default()),
+            Family::Big5 => Kind::Big5(Big5Decoder::default()),
+            Family::EucJp => Kind::EucJp(EucJpDecoder::default()),
+            Family::Iso2022Jp => Kind::Iso2022Jp(Iso2022JpDecoder::default()),
+            Family::ShiftJis => Kind::ShiftJis(ShiftJisDecoder::default()),
+            Family::EucKr => Kind::EucKr(EucKrDecoder::default()),
+            _ => Kind::Replacement { written: false },
         };
         Decoder { kind }
     }
@@ -49,44 +60,33 @@ impl Decoder {
     /// Decode `input`, appending to `out`. `last` when no more input
     /// follows: what is left unfinished then is an error.
     pub fn decode(&mut self, input: &[u8], out: &mut Vec<u8>, last: bool) {
-        match &mut self.kind {
-            Kind::Utf8(d) => d.decode(input, out, last),
-            Kind::Utf16 {
-                big,
-                lead_byte,
-                lead_surrogate,
-            } => utf16(*big, lead_byte, lead_surrogate, input, out, last),
-            Kind::XUserDefined => {
-                for &b in input {
-                    let c = if b < 0x80 {
-                        u32::from(b)
-                    } else {
-                        0xF780 + u32::from(b) - 0x80
-                    };
-                    push(out, c);
-                }
+        let r = match &mut self.kind {
+            Kind::Utf8(d) => {
+                d.decode(input, out, last);
+                Ok(())
             }
+            Kind::Utf16(endian, d) => d.decode(*endian, input, last, false, out),
+            Kind::SingleByte(index) => single_byte::decode(index, input, false, out),
+            Kind::XUserDefined => {
+                single_byte::decode_x_user_defined(input, out);
+                Ok(())
+            }
+            Kind::Gb18030(d) => d.decode(input, last, false, out),
+            Kind::Big5(d) => d.decode(input, last, false, out),
+            Kind::EucJp(d) => d.decode(input, last, false, out),
+            Kind::Iso2022Jp(d) => d.decode(input, last, false, out),
+            Kind::ShiftJis(d) => d.decode(input, last, false, out),
+            Kind::EucKr(d) => d.decode(input, last, false, out),
             Kind::Replacement { written } => {
                 if !input.is_empty() && !*written {
                     *written = true;
                     out.extend_from_slice(REPLACEMENT);
                 }
+                Ok(())
             }
-            Kind::Legacy => legacy(input, out),
-        }
-    }
-}
-
-/// The legacy single-byte and multi-byte encodings need their index
-/// tables, which this crate does not carry yet: ASCII decodes as
-/// itself, every other byte as U+FFFD.
-fn legacy(input: &[u8], out: &mut Vec<u8>) {
-    for &b in input {
-        if b < 0x80 {
-            out.push(b);
-        } else {
-            out.extend_from_slice(REPLACEMENT);
-        }
+        };
+        // a decoder that is not fatal writes U+FFFD and goes on
+        let Ok(()) = r else { unreachable!("a lossy decoder failed") };
     }
 }
 
@@ -211,47 +211,6 @@ impl Utf8 {
             *self = Utf8::default();
         }
         true
-    }
-}
-
-/// The standard's shared UTF-16 decoder.
-fn utf16(
-    big: bool,
-    lead_byte: &mut Option<u8>,
-    lead_surrogate: &mut Option<u16>,
-    input: &[u8],
-    out: &mut Vec<u8>,
-    last: bool,
-) {
-    for &b in input {
-        let Some(lead) = lead_byte.take() else {
-            *lead_byte = Some(b);
-            continue;
-        };
-        let unit = if big {
-            u16::from_be_bytes([lead, b])
-        } else {
-            u16::from_le_bytes([lead, b])
-        };
-        if let Some(high) = lead_surrogate.take() {
-            if (0xDC00..=0xDFFF).contains(&unit) {
-                let c = 0x1_0000 + ((u32::from(high) - 0xD800) << 10) + (u32::from(unit) - 0xDC00);
-                push(out, c);
-                continue;
-            }
-            // the unit is read again after the error
-            out.extend_from_slice(REPLACEMENT);
-        }
-        match unit {
-            0xD800..=0xDBFF => *lead_surrogate = Some(unit),
-            0xDC00..=0xDFFF => out.extend_from_slice(REPLACEMENT),
-            _ => push(out, u32::from(unit)),
-        }
-    }
-    if last && (lead_byte.is_some() || lead_surrogate.is_some()) {
-        *lead_byte = None;
-        *lead_surrogate = None;
-        out.extend_from_slice(REPLACEMENT);
     }
 }
 

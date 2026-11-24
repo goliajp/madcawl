@@ -85,7 +85,7 @@ fn a_count_at_its_limit_aborts_instead_of_wrapping() {
     const CHILD: &str = "MADCAWL_STR_COUNT_LIMIT_CHILD";
     if std::env::var_os(CHILD).is_some() {
         let s = DomString::from_wtf8("counted, not static".as_bytes());
-        assert_eq!(s.flags() & abi::FLAG_STATIC, 0);
+        assert_eq!(s.flags() & abi::FLAG_STATIC_LITERAL, 0);
         // SAFETY: a counted block's first word is its count
         unsafe { s.block.as_ptr().cast::<u32>().write(u32::MAX) };
         let _again = s.clone();
@@ -144,7 +144,7 @@ fn the_word_after_the_length_is_zero() {
         DomString::from_wtf8("漢".as_bytes()),
     ] {
         // SAFETY: the word at offset 12 follows the length
-        let pool = unsafe { s.block.as_ptr().add(abi::STR_POOL_OFF).cast::<u32>().read() };
+        let pool = unsafe { s.block.as_ptr().add(abi::STR_PAD_OFF).cast::<u32>().read() };
         assert_eq!(pool, 0);
     }
 }

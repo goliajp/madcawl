@@ -1,7 +1,7 @@
 //! Strings the DOM and the script engine share without copying, and
 //! the atoms names are interned as.
 //!
-//! A string is one heap block in the engine's layout (`madcawl-abi`):
+//! A string is one heap block in the engine's layout ([`abi`]):
 //! a counted header, the length in UTF-16 code units, and the payload
 //! stored one byte per code unit when every unit fits in Latin-1, two
 //! bytes otherwise. Most text on the web is Latin-1, so most strings
@@ -15,8 +15,7 @@ use std::alloc::{alloc, dealloc};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
-use madcawl_abi as abi;
-
+pub mod abi;
 mod atom;
 mod block;
 mod static_str;
@@ -226,7 +225,7 @@ impl DomString {
             let p = block.as_ptr();
             p.cast::<u64>().write(abi::header(abi::TAG_STR, flags));
             p.add(abi::STR_LEN_OFF).cast::<u32>().write(units as u32);
-            p.add(abi::STR_POOL_OFF).cast::<u32>().write(0);
+            p.add(abi::STR_PAD_OFF).cast::<u32>().write(0);
         }
         Self::from_block(block)
     }
@@ -312,7 +311,7 @@ impl From<StaticStr> for DomString {
 
 impl Clone for DomString {
     fn clone(&self) -> Self {
-        if self.flags() & abi::FLAG_STATIC == 0 {
+        if self.flags() & abi::FLAG_STATIC_LITERAL == 0 {
             // SAFETY: a counted block's first word is its count
             unsafe {
                 let rc = self.block.as_ptr().cast::<u32>();
@@ -331,7 +330,7 @@ impl Clone for DomString {
 
 impl Drop for DomString {
     fn drop(&mut self) {
-        if self.flags() & abi::FLAG_STATIC != 0 {
+        if self.flags() & abi::FLAG_STATIC_LITERAL != 0 {
             return;
         }
         // SAFETY: a counted block's first word is its count; the last

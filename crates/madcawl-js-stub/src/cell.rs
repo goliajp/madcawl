@@ -3,7 +3,7 @@
 
 use std::any::TypeId;
 
-use madcawl_abi as abi;
+use madcawl_str::abi;
 use madcawl_js::{ClassId, HostFn, HostRef};
 use madcawl_str::Atom;
 

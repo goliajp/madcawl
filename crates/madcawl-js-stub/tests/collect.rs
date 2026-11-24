@@ -2,7 +2,7 @@
 //! header at offset 0, host-to-host edges, member handles and a
 //! wrapper word, kept by hand by these rules.
 
-use madcawl_abi as abi;
+use madcawl_str::abi;
 use madcawl_js::{
     Bound, ClassDef, ClassId, Ctx, Deadline, Engine, Host, HostOps, HostRef, Key, Member, Root, Step,
     Tracer, Unlinker,

@@ -1,6 +1,6 @@
 //! Strings that live for the whole program, readable from any thread.
 
-use madcawl_abi as abi;
+use crate::abi;
 
 use crate::block::{Block, View};
 
@@ -22,7 +22,7 @@ impl StaticStr {
     /// `block` is a string block with `FLAG_STATIC` set that stays
     /// valid and unchanged for the rest of the program.
     pub(crate) unsafe fn new(block: Block) -> Self {
-        debug_assert!(block.flags() & abi::FLAG_STATIC != 0);
+        debug_assert!(block.flags() & abi::FLAG_STATIC_LITERAL != 0);
         Self(block)
     }
 

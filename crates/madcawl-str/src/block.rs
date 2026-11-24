@@ -3,7 +3,7 @@
 use std::alloc::Layout;
 use std::ptr::NonNull;
 
-use madcawl_abi as abi;
+use crate::abi;
 
 use crate::wtf8::push_wtf8;
 

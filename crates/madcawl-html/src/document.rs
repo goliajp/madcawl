@@ -7,7 +7,7 @@ use std::cell::Cell;
 
 use madcawl_str::{Atom, atom};
 
-use crate::encoding::{Confidence, Decoder, Encoding, bom, extract_from_content, prescan};
+use crate::encoding::{Confidence, Decoder, Encoding, bom, extract_from_content, is_utf16, prescan};
 use crate::error::ParseError;
 use crate::token::Token;
 use crate::tokenizer::{Flow, Sink, Step, Tokenizer};
@@ -243,7 +243,7 @@ impl<D> Watch<D> {
         };
         // "change the encoding"
         self.tentative.set(None);
-        if current.is_utf16() {
+        if is_utf16(current) {
             return;
         }
         let new = match new {

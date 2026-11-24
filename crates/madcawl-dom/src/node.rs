@@ -2,14 +2,14 @@
 
 use std::mem::{align_of, offset_of, size_of};
 
-use madcawl_abi as abi;
+use madcawl_str::abi;
 
 /// Every kind of node has this layout. Fields are indices into the
 /// arena (0 is none) unless said otherwise.
 #[repr(C, align(64))]
 pub(crate) struct Node {
     /// The engine's object header: count, type tag, flags. Only the
-    /// count is written, through `madcawl-abi`; the tag and flag halves
+    /// count is written, through `madcawl_str::abi`; the tag and flag halves
     /// stay zero until the host type range is agreed with the engine.
     pub header: u64,
     pub parent: u32,

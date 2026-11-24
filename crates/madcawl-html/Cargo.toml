@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 madcawl-str = { path = "../madcawl-str" }
+torajs-encoding = { path = "../../../torajs/crates/torajs-encoding" }
 
 [features]
 # count the parser's work, for the fuzz driver (src/steps.rs)

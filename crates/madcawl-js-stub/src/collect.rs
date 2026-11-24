@@ -19,7 +19,7 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
-use madcawl_abi as abi;
+use madcawl_str::abi;
 use madcawl_js::trial::SideGraph;
 use madcawl_js::{Deadline, Host, HostRef, Owned, Step, Tracer, Unlinker};
 

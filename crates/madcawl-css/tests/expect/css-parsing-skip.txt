@@ -1,23 +1,6 @@
 # files of css-parsing-tests this crate does not run, one per line: the
 # file, then why. every case in a listed file counts as skipped
 #
-# cases of stylesheet_bytes.json (numbered from 1) whose bytes are in
-# ISO-8859-2 or ISO-8859-5: the encoding is determined right, but the
-# decoder madcawl-html has decodes every non-ASCII byte of a legacy
-# encoding as U+FFFD until it has the index tables. a listed case that
-# passes fails the test, so this list goes when the tables come
-stylesheet_bytes.json#8 legacy decoding: ISO-8859-2
-stylesheet_bytes.json#9 legacy decoding: ISO-8859-5
-stylesheet_bytes.json#10 legacy decoding: ISO-8859-2
-stylesheet_bytes.json#12 legacy decoding: ISO-8859-5
-stylesheet_bytes.json#21 legacy decoding: ISO-8859-2
-stylesheet_bytes.json#22 legacy decoding: ISO-8859-5
-stylesheet_bytes.json#23 legacy decoding: ISO-8859-2
-stylesheet_bytes.json#24 legacy decoding: ISO-8859-5
-stylesheet_bytes.json#25 legacy decoding: ISO-8859-5
-stylesheet_bytes.json#26 legacy decoding: ISO-8859-2
-stylesheet_bytes.json#27 legacy decoding: ISO-8859-2
-#
 # cases of component_value_list.json that expect a unicode-range token:
 # the current CSS Syntax 3 no longer has one (`u+1` is an identifier and
 # a number), and `<urange>` is read from those tokens where a descriptor
