@@ -6,34 +6,8 @@
 use crate::Span;
 use crate::tokenizer::{Kind, Token};
 
+use super::device::Device;
 use super::tokens;
-
-/// What media queries are evaluated against.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Device {
-    /// The viewport, in CSS pixels
-    pub width: f64,
-    pub height: f64,
-    /// Device pixels per CSS pixel
-    pub scale: f64,
-    pub dark: bool,
-    /// `print` media instead of `screen`
-    pub print: bool,
-    pub scripting: bool,
-}
-
-impl Default for Device {
-    fn default() -> Device {
-        Device {
-            width: 1280.0,
-            height: 800.0,
-            scale: 1.0,
-            dark: false,
-            print: false,
-            scripting: false,
-        }
-    }
-}
 
 /// Whether the media query list `src[span]` matches; an empty list does.
 pub fn matches_media(src: &str, span: Span, device: &Device) -> bool {
@@ -41,7 +15,18 @@ pub fn matches_media(src: &str, span: Span, device: &Device) -> bool {
     if toks.is_empty() {
         return true;
     }
-    toks.split(|t| t.kind == Kind::Comma).any(|q| {
+    let mut depth = 0u32;
+    let top_comma = |t: &Token| {
+        match t.kind {
+            Kind::Function | Kind::OpenParen | Kind::OpenSquare | Kind::OpenCurly => depth += 1,
+            Kind::CloseParen | Kind::CloseSquare | Kind::CloseCurly => {
+                depth = depth.saturating_sub(1)
+            }
+            _ => {}
+        }
+        t.kind == Kind::Comma && depth == 0
+    };
+    toks.split(top_comma).any(|q| {
         let mut e = Eval {
             src,
             t: q,

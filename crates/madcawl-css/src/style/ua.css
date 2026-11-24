@@ -115,10 +115,10 @@ fieldset, details, summary, optgroup, frameset, frame {
   display: block;
 }
 
-input, select, button, textarea, marquee, meter, progress {
-  display: inline-block;
+details > summary:first-of-type {
+  display: list-item;
 }
 
-dialog:not([open]) {
-  display: none;
+input, select, button, textarea, marquee, meter, progress {
+  display: inline-block;
 }

@@ -35,15 +35,16 @@ impl Matcher<'_, '_> {
         self.dom.attribute(el, name).is_some()
     }
 
-    fn input_type(&self, el: NodeId) -> String {
-        self.dom
-            .attribute(el, atom!("type"))
-            .map(|t| text(t).trim().to_ascii_lowercase())
-            .unwrap_or_default()
+    /// The `type` attribute, trimmed, is one of `types`, which are lower
+    /// case; a missing one is `""`.
+    fn type_is(&self, el: NodeId, types: &[&str]) -> bool {
+        let t = self.dom.attribute(el, atom!("type")).map(text);
+        let t = t.as_deref().map_or("", str::trim);
+        types.iter().any(|w| w.eq_ignore_ascii_case(t))
     }
 
     fn checkable(&self, el: NodeId) -> bool {
-        self.html(el, atom!("input")) && matches!(&*self.input_type(el), "checkbox" | "radio")
+        self.html(el, atom!("input")) && self.type_is(el, &["checkbox", "radio"])
     }
 
     pub(crate) fn pseudo(&self, p: PseudoClass, el: NodeId) -> bool {
@@ -58,24 +59,11 @@ impl Matcher<'_, '_> {
             P::FirstChild => self.prev_element(el).is_none(),
             P::LastChild => self.next_element(el).is_none(),
             P::OnlyChild => self.prev_element(el).is_none() && self.next_element(el).is_none(),
-            P::FirstOfType | P::LastOfType | P::OnlyOfType => {
-                let same = |x: NodeId| {
-                    self.dom.local_name(x) == self.dom.local_name(el)
-                        && self.dom.namespace(x) == self.dom.namespace(el)
-                };
-                let none_before = || {
-                    std::iter::successors(self.prev_element(el), |&x| self.prev_element(x))
-                        .all(|x| !same(x))
-                };
-                let none_after = || {
-                    std::iter::successors(self.next_element(el), |&x| self.next_element(x))
-                        .all(|x| !same(x))
-                };
-                match p {
-                    P::FirstOfType => none_before(),
-                    P::LastOfType => none_after(),
-                    _ => none_before() && none_after(),
-                }
+            P::FirstOfType => self.place(el)[2] == 1,
+            P::LastOfType => self.place(el)[3] == 1,
+            P::OnlyOfType => {
+                let p = self.place(el);
+                p[2] == 1 && p[3] == 1
             }
             P::Link | P::AnyLink => {
                 (self.html(el, atom!("a")) || self.html(el, atom!("area")))
@@ -180,15 +168,17 @@ impl Matcher<'_, '_> {
             return true;
         }
         self.html(el, atom!("input"))
-            && !matches!(
-                &*self.input_type(el),
-                "hidden" | "range" | "color" | "submit" | "image" | "reset" | "button"
+            && !self.type_is(
+                el,
+                &[
+                    "hidden", "range", "color", "submit", "image", "reset", "button",
+                ],
             )
     }
 
     fn text_field(&self, el: NodeId) -> bool {
         self.html(el, atom!("textarea"))
-            || self.html(el, atom!("input")) && TEXT_TYPES.contains(&&*self.input_type(el))
+            || self.html(el, atom!("input")) && self.type_is(el, TEXT_TYPES)
     }
 
     fn read_write(&self, el: NodeId) -> bool {
@@ -198,8 +188,10 @@ impl Matcher<'_, '_> {
         let mut x = Some(el);
         while let Some(n) = x {
             if let Some(v) = self.dom.attribute(n, atom!("contenteditable")) {
-                let v = text(v).to_ascii_lowercase();
-                return matches!(&*v, "" | "true" | "plaintext-only");
+                let v = text(v);
+                return ["", "true", "plaintext-only"]
+                    .iter()
+                    .any(|w| w.eq_ignore_ascii_case(&v));
             }
             x = self.parent_element(n);
         }
@@ -259,10 +251,12 @@ impl Matcher<'_, '_> {
             if self.is_html(n)
                 && let Some(d) = self.dom.attribute(n, atom!("dir"))
             {
-                match &*text(d).to_ascii_lowercase() {
-                    "rtl" => return Dir::Rtl,
-                    "ltr" | "auto" => return Dir::Ltr,
-                    _ => {}
+                let d = text(d);
+                if d.eq_ignore_ascii_case("rtl") {
+                    return Dir::Rtl;
+                }
+                if d.eq_ignore_ascii_case("ltr") || d.eq_ignore_ascii_case("auto") {
+                    return Dir::Ltr;
                 }
             }
             x = self.parent_element(n);

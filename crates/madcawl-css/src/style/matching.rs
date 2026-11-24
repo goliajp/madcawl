@@ -5,6 +5,7 @@
 //! element `:has()` is on.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 
 use madcawl_dom::{Dom, NodeId, NodeKind};
 use madcawl_html::{AttrNamespace, Namespace as ElementNs};
@@ -12,9 +13,10 @@ use madcawl_str::{Atom, DomString};
 
 use crate::Name;
 use crate::selector::{
-    AttrOp, AttrSelector, CaseFlag, Combinator, Component, Namespace, Nth, NthKind, SelectorList,
+    AttrOp, AttrSelector, CaseFlag, Combinator, Component, Namespace, SelectorList,
 };
 
+use super::caseless::{caseless_eq, words};
 use super::rules::{Entry, NONE, Rules, Sel};
 
 pub(crate) struct Matcher<'r, 'a> {
@@ -22,6 +24,23 @@ pub(crate) struct Matcher<'r, 'a> {
     pub rules: &'r Rules<'a>,
     /// Ids and classes compare ASCII case-insensitively
     pub quirks: bool,
+    /// By node index, where an element is among its parent's element
+    /// children (`Place`); all zero until some selector asks about one
+    /// of them
+    pub places: RefCell<Vec<Place>>,
+}
+
+/// An element's position among its siblings, from 1: from the first,
+/// from the last, and the same among those of its type.
+pub(crate) type Place = [u32; 4];
+
+/// `have` is `want`, ASCII case-insensitively when `caseless`.
+fn same(have: &[u8], want: &[u8], caseless: bool) -> bool {
+    if caseless {
+        have.eq_ignore_ascii_case(want)
+    } else {
+        have == want
+    }
 }
 
 pub(crate) fn text(s: &DomString) -> Cow<'_, str> {
@@ -33,12 +52,6 @@ pub(crate) fn text(s: &DomString) -> Cow<'_, str> {
             Cow::Owned(String::from_utf8_lossy(&v).into_owned())
         }
     }
-}
-
-fn atom_text(a: Atom) -> String {
-    let mut v = Vec::new();
-    a.write_wtf8(&mut v);
-    String::from_utf8_lossy(&v).into_owned()
 }
 
 /// HTML attributes whose values selectors compare ASCII
@@ -202,7 +215,7 @@ impl Matcher<'_, '_> {
         false
     }
 
-    fn list(&self, k: u32, l: &SelectorList, el: NodeId, parent: u32) -> bool {
+    pub(crate) fn list(&self, k: u32, l: &SelectorList, el: NodeId, parent: u32) -> bool {
         l.iter()
             .any(|s| self.from(k, &s.components, 0, el, parent, None))
     }
@@ -235,7 +248,8 @@ impl Matcher<'_, '_> {
             }
             Component::Id(n) => dom.element_id(el).is_some_and(|id| {
                 if self.quirks {
-                    atom_text(id).eq_ignore_ascii_case(self.name(k, *n))
+                    let v = dom.attribute(el, madcawl_str::atom!("id")).expect("an id");
+                    caseless_eq(v, 0..v.len(), self.name(k, *n))
                 } else {
                     id == self.atom(k, *n)
                 }
@@ -244,9 +258,10 @@ impl Matcher<'_, '_> {
                 let (_, classes) = dom.class_list(el);
                 if self.quirks {
                     let want = self.name(k, *n);
-                    classes
-                        .iter()
-                        .any(|&c| atom_text(c).eq_ignore_ascii_case(want))
+                    !classes.is_empty()
+                        && dom
+                            .attribute(el, madcawl_str::atom!("class"))
+                            .is_some_and(|v| words(v).any(|r| caseless_eq(v, r, want)))
                 } else {
                     classes.contains(&self.atom(k, *n))
                 }
@@ -292,42 +307,6 @@ impl Matcher<'_, '_> {
         })
     }
 
-    fn nth(&self, k: u32, n: &Nth, el: NodeId, parent: u32) -> bool {
-        let of_type = matches!(n.kind, NthKind::OfType | NthKind::LastOfType);
-        let (ns, local) = (self.dom.namespace(el), self.dom.local_name(el));
-        let counts = |x: NodeId| {
-            if of_type {
-                self.dom.local_name(x) == local && self.dom.namespace(x) == ns
-            } else {
-                n.of.as_ref().is_none_or(|l| self.list(k, l, x, parent))
-            }
-        };
-        if !counts(el) {
-            return false;
-        }
-        let back = matches!(n.kind, NthKind::Child | NthKind::OfType);
-        let mut i: i64 = 1;
-        let mut x = if back {
-            self.prev_element(el)
-        } else {
-            self.next_element(el)
-        };
-        while let Some(s) = x {
-            i += counts(s) as i64;
-            x = if back {
-                self.prev_element(s)
-            } else {
-                self.next_element(s)
-            };
-        }
-        let (a, b) = (i64::from(n.a), i64::from(n.b));
-        if a == 0 {
-            i == b
-        } else {
-            (i - b) % a == 0 && (i - b) / a >= 0
-        }
-    }
-
     fn has(&self, k: u32, l: &SelectorList, el: NodeId, parent: u32) -> bool {
         l.iter().any(|s| {
             let siblings = matches!(
@@ -364,43 +343,41 @@ impl Matcher<'_, '_> {
                         || a.ns == AttrNamespace::None && self.is_html(n))
             });
             if let Some(a) = found {
-                lang = Some(text(a.value).to_ascii_lowercase());
+                lang = Some(text(a.value));
                 break;
             }
             x = self.parent_element(n);
         }
         let Some(lang) = lang else { return false };
+        let lang = lang.as_bytes();
         ranges.iter().any(|&r| {
-            let r = self.name(k, r).to_ascii_lowercase();
+            let r = self.name(k, r);
             if r == "*" {
                 return !lang.is_empty();
             }
-            let r = r.strip_prefix("*-").unwrap_or(&r);
-            lang == r || lang.starts_with(r) && lang.as_bytes().get(r.len()) == Some(&b'-')
+            let r = r.strip_prefix("*-").unwrap_or(r).as_bytes();
+            lang.eq_ignore_ascii_case(r)
+                || lang.len() > r.len()
+                    && lang[..r.len()].eq_ignore_ascii_case(r)
+                    && lang[r.len()] == b'-'
         })
     }
 }
 
 fn value_matches(op: AttrOp, have: &str, want: &str, caseless: bool) -> bool {
-    let (h, w): (Cow<'_, str>, Cow<'_, str>) = if caseless {
-        (
-            have.to_ascii_lowercase().into(),
-            want.to_ascii_lowercase().into(),
-        )
-    } else {
-        (have.into(), want.into())
-    };
-    let (h, w) = (&*h, &*w);
+    let (h, w) = (have.as_bytes(), want.as_bytes());
+    let eq = |a: &[u8]| same(a, w, caseless);
+    let starts = h.len() >= w.len() && eq(&h[..w.len()]);
     match op {
-        AttrOp::Equals => h == w,
+        AttrOp::Equals => eq(h),
         AttrOp::Includes => {
             !w.is_empty()
-                && !w.contains(|c: char| c.is_ascii_whitespace())
-                && h.split(|c: char| c.is_ascii_whitespace()).any(|p| p == w)
+                && !w.iter().any(u8::is_ascii_whitespace)
+                && h.split(u8::is_ascii_whitespace).any(eq)
         }
-        AttrOp::DashMatch => h == w || h.starts_with(w) && h.as_bytes().get(w.len()) == Some(&b'-'),
-        AttrOp::Prefix => !w.is_empty() && h.starts_with(w),
-        AttrOp::Suffix => !w.is_empty() && h.ends_with(w),
-        AttrOp::Substring => !w.is_empty() && h.contains(w),
+        AttrOp::DashMatch => eq(h) || starts && h.get(w.len()) == Some(&b'-'),
+        AttrOp::Prefix => !w.is_empty() && starts,
+        AttrOp::Suffix => !w.is_empty() && h.len() >= w.len() && eq(&h[h.len() - w.len()..]),
+        AttrOp::Substring => !w.is_empty() && h.windows(w.len()).any(eq),
     }
 }

@@ -5,8 +5,8 @@ use crate::Span;
 use crate::parser::Declaration;
 use crate::tokenizer::Kind;
 
-use super::tokens;
 use super::values::{ContentVisibility, Display, Float, Position, Visibility};
+use super::{custom, tokens};
 
 macro_rules! props {
     ($($v:ident = $s:literal, $inherited:literal;)*) => {
@@ -84,7 +84,7 @@ pub fn parse(prop: Prop, src: &str, value: Span) -> Option<Specified> {
     if t.iter()
         .any(|t| t.kind == Kind::Function && (t.value_is(src, "var") || t.value_is(src, "env")))
     {
-        return Some(Specified::Unresolved);
+        return custom::vars_valid(src, value).then_some(Specified::Unresolved);
     }
     let mut words: Vec<String> = Vec::with_capacity(t.len());
     let mut all_idents = true;
@@ -177,6 +177,9 @@ pub fn parse_block(src: &str, decls: &[Declaration]) -> Box<[Decl]> {
         d.name.write_value(src, &mut name);
         let text = d.value.of(src);
         if name.starts_with("--") {
+            if !custom::vars_valid(src, d.value) {
+                continue;
+            }
             let wide = match parse(Prop::Display, src, d.value) {
                 Some(w @ Specified::Wide(_)) => w,
                 _ => Specified::Unresolved,

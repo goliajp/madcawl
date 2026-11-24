@@ -11,13 +11,13 @@ use madcawl_str::atom;
 use crate::Span;
 use crate::parser::{BlockItem, parse_declaration_list};
 
+use super::Styles;
 use super::buckets::Buckets;
 use super::custom::{self, element_set, substitute};
 use super::matching::{Matcher, text};
 use super::props::{self as props, Decl, PROPS, Prop, Specified, What, Wide, parse_block};
 use super::rules::{NONE, Rules};
-use super::values::{ComputedStyle, ContentVisibility, Display, Float, Position};
-use super::{CHILDREN_HIDDEN, CONTENTS_SKIPPED, NOT_RENDERED, Styles};
+use super::values::{ComputedStyle, Display, Float, Position};
 
 /// A declared value's place in the cascade, compared as one number:
 /// origin and importance, element-attached, layer, specificity, order.
@@ -88,7 +88,12 @@ impl<'r, 'a> Run<'r, 'a> {
     pub fn new(dom: &'r Dom, rules: &'r Rules<'a>) -> Self {
         let quirks = dom.quirks_mode() == madcawl_html::QuirksMode::Quirks;
         Run {
-            m: Matcher { dom, rules, quirks },
+            m: Matcher {
+                dom,
+                rules,
+                quirks,
+                places: Default::default(),
+            },
             buckets: Buckets::build(rules, quirks),
             ranks: rules.layer_ranks(),
             inline: HashMap::new(),
@@ -119,21 +124,10 @@ impl<'r, 'a> Run<'r, 'a> {
             });
             out.of[i] = k + 1;
             let above = parent.map_or(0, |p| {
-                let f = out.flags[p.index() as usize];
-                let hides = out
-                    .get(p)
-                    .is_some_and(|ps| ps.content_visibility == ContentVisibility::Hidden)
-                    || f & CHILDREN_HIDDEN != 0 && !self.m.shown_summary(p, el);
-                f & !CHILDREN_HIDDEN | if hides { CONTENTS_SKIPPED } else { 0 }
+                self.m
+                    .flags_below(p, out.get(p), out.flags[p.index() as usize], el)
             });
-            let mut own = 0;
-            if s.display == Display::None || self.m.never_rendered(el) {
-                own |= NOT_RENDERED;
-            }
-            if self.m.hides_children(el) {
-                own |= CHILDREN_HIDDEN;
-            }
-            out.flags[i] = above | own;
+            out.flags[i] = above | self.m.own_flags(el, s.display);
         }
     }
 
@@ -155,17 +149,18 @@ impl<'r, 'a> Run<'r, 'a> {
             }
         }
         if let Some(style) = self.m.dom.attribute(el, atom!("style")) {
-            let style = text(style).into_owned();
-            self.inline.entry(style).or_insert_with_key(|s| {
-                let decls: Vec<_> = parse_declaration_list(s)
+            let style = text(style);
+            if !self.inline.contains_key(&*style) {
+                let decls: Vec<_> = parse_declaration_list(&style)
                     .into_iter()
                     .filter_map(|i| match i {
                         BlockItem::Declaration(d) => Some(d),
                         _ => None,
                     })
                     .collect();
-                parse_block(s, &decls)
-            });
+                let parsed = parse_block(&style, &decls);
+                self.inline.insert(style.into_owned(), parsed);
+            }
             for important in [false, true] {
                 let k = Key::new(2, important, true, 0, 0, 0);
                 self.matched.push((k, important, Src::Inline));

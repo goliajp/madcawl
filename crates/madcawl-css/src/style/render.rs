@@ -8,8 +8,38 @@ use madcawl_html::Namespace;
 use madcawl_str::{Atom, atom};
 
 use super::matching::Matcher;
+use super::values::{ComputedStyle, ContentVisibility, Display};
+use super::{CHILDREN_HIDDEN, CONTENTS_SKIPPED, NOT_RENDERED};
 
 impl Matcher<'_, '_> {
+    /// The flags `el` has from its parent `p`, whose values are `ps` and
+    /// flags `f`.
+    pub(crate) fn flags_below(
+        &self,
+        p: NodeId,
+        ps: Option<&ComputedStyle>,
+        f: u8,
+        el: NodeId,
+    ) -> u8 {
+        let hides = ps.is_some_and(|ps| {
+            ps.content_visibility == ContentVisibility::Hidden && ps.display.can_contain_size()
+        }) || f & CHILDREN_HIDDEN != 0 && !self.shown_summary(p, el);
+        f & !CHILDREN_HIDDEN | if hides { CONTENTS_SKIPPED } else { 0 }
+    }
+
+    /// The flags `el` has of itself, its computed `display` being
+    /// `display`.
+    pub(crate) fn own_flags(&self, el: NodeId, display: Display) -> u8 {
+        let none = display == Display::None
+            || display == Display::Contents && self.contents_is_none(el)
+            || self.never_rendered(el);
+        let mut f = if none { NOT_RENDERED } else { 0 };
+        if self.hides_children(el) {
+            f |= CHILDREN_HIDDEN;
+        }
+        f
+    }
+
     fn named(&self, el: NodeId, ns: Namespace, names: &[Atom]) -> bool {
         self.dom.namespace(el) == Some(ns)
             && self.dom.local_name(el).is_some_and(|n| names.contains(&n))
@@ -40,6 +70,33 @@ impl Matcher<'_, '_> {
                 .children(parent)
                 .find(|&c| self.named(c, Namespace::Html, &[atom!("summary")]))
                 == Some(child)
+    }
+
+    /// `display: contents` on it behaves as `display: none`: the
+    /// replaced elements and form controls (HTML, "Rendering").
+    pub(crate) fn contents_is_none(&self, el: NodeId) -> bool {
+        self.named(
+            el,
+            Namespace::Html,
+            &[
+                atom!("audio"),
+                atom!("br"),
+                atom!("canvas"),
+                atom!("embed"),
+                atom!("frame"),
+                atom!("frameset"),
+                atom!("iframe"),
+                atom!("img"),
+                atom!("input"),
+                atom!("meter"),
+                atom!("object"),
+                atom!("progress"),
+                atom!("select"),
+                atom!("textarea"),
+                atom!("video"),
+                atom!("wbr"),
+            ],
+        )
     }
 
     /// An SVG element that is never rendered where it is.

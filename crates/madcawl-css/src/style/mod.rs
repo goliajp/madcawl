@@ -12,10 +12,14 @@
 //! stylesheets its `<link>` elements name, as the caller loads them.
 
 mod buckets;
+mod caseless;
 mod compute;
 mod custom;
+mod device;
+mod layers;
 mod matching;
 mod media;
+mod nth;
 mod props;
 mod pseudo;
 mod render;
@@ -33,7 +37,8 @@ use crate::Span;
 use crate::sheet::Stylesheet;
 use crate::tokenizer::{Kind, Token, Tokenizer};
 
-pub use media::{Device, matches_media};
+pub use device::Device;
+pub use media::matches_media;
 pub use props::Prop;
 pub use rules::Origin;
 pub use sources::{SheetSource, sheet_sources};
@@ -152,7 +157,8 @@ impl Styles {
         let s = self.get(el)?;
         let f = self.flags[el.index() as usize];
         let skipped = el != n
-            && (s.content_visibility == ContentVisibility::Hidden || f & CHILDREN_HIDDEN != 0);
+            && (s.content_visibility == ContentVisibility::Hidden && s.display.can_contain_size()
+                || f & CHILDREN_HIDDEN != 0);
         Some((
             f & !CHILDREN_HIDDEN | if skipped { CONTENTS_SKIPPED } else { 0 },
             s,
@@ -160,8 +166,10 @@ impl Styles {
     }
 
     /// Whether the node makes boxes: an element or text in the document
-    /// with no `display: none` on it or above it, no
-    /// `content-visibility: hidden` above it, and not in what HTML and
+    /// with no `display: none` on it or above it (nor `display:
+    /// contents` on a replaced element or form control), no
+    /// `content-visibility: hidden` above it on a box that can take size
+    /// containment, and not in what HTML and
     /// SVG never render where it is (a closed `<details>` but its
     /// summary, the fallback content of `<canvas>`, `<video>`,
     /// `<audio>` and `<iframe>`, SVG `<defs>`, `<title>` and the like).

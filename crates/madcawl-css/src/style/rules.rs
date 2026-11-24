@@ -9,12 +9,13 @@ use madcawl_html::Namespace;
 use madcawl_str::{Atom, HeldAtoms};
 
 use crate::parser::Declaration;
+use crate::selector;
 use crate::selector::{Component, SelectorList};
 use crate::sheet::{Rule, Stylesheet};
-use crate::tokenizer::Kind;
-use crate::{Span, selector};
 
-use super::media::{Device, matches_media};
+use super::device::Device;
+use super::layers::layer_names;
+use super::media::matches_media;
 use super::props::{Decl, parse_block};
 use super::supports::supports;
 
@@ -94,7 +95,6 @@ impl Block<'_> {
 
 struct Layer {
     name: String,
-    parent: u32,
     children: Vec<u32>,
 }
 
@@ -134,7 +134,6 @@ impl<'a> Rules<'a> {
             r.roots[k] = r.layers.len() as u32;
             r.layers.push(Layer {
                 name: String::new(),
-                parent: NONE,
                 children: Vec::new(),
             });
         }
@@ -249,7 +248,7 @@ impl<'a> Rules<'a> {
                     self.walk(k, rules, parent, layer, d)
                 }
                 Rule::Layer { names, rules: None } => {
-                    for name in layer_names(src, *names) {
+                    for name in layer_names(src, *names).unwrap_or_default() {
                         self.declare(layer, &name);
                     }
                 }
@@ -257,7 +256,9 @@ impl<'a> Rules<'a> {
                     names,
                     rules: Some(rules),
                 } => {
-                    let mut list = layer_names(src, *names);
+                    let Some(mut list) = layer_names(src, *names) else {
+                        continue;
+                    };
                     let inner = match list.len() {
                         0 => {
                             self.anonymous += 1;
@@ -306,7 +307,6 @@ impl<'a> Rules<'a> {
                     let c = self.layers.len() as u32;
                     self.layers.push(Layer {
                         name: part.to_owned(),
-                        parent: at,
                         children: Vec::new(),
                     });
                     self.layers[at as usize].children.push(c);
@@ -337,29 +337,6 @@ impl<'a> Rules<'a> {
                 }
             }
         }
-        debug_assert!(
-            self.layers
-                .iter()
-                .all(|l| l.parent != NONE || l.name.is_empty())
-        );
         rank
     }
-}
-
-/// The names of `@layer a, b.c`, each dotted name as one string.
-fn layer_names(src: &str, span: Span) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    for t in super::tokens(src, span) {
-        match t.kind {
-            Kind::Ident => t.write_value(src, &mut cur),
-            Kind::Delim(b'.') => cur.push('.'),
-            Kind::Comma => out.push(std::mem::take(&mut cur)),
-            _ => return Vec::new(),
-        }
-    }
-    if !cur.is_empty() {
-        out.push(cur);
-    }
-    out
 }

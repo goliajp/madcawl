@@ -6,22 +6,28 @@
 use std::collections::HashMap;
 
 use madcawl_dom::{Dom, NodeId};
+use madcawl_str::atom;
 
 use crate::selector::Component;
 
+use super::caseless::{caseless_hash, words};
 use super::rules::{Rules, Sel};
 
+/// Ids and classes are keyed by their atom, or in quirks mode, where
+/// they match ASCII case-insensitively, by `caseless_hash` of their
+/// text.
 #[derive(Default)]
 pub(crate) struct Buckets {
-    id: HashMap<u32, Vec<u32>>,
-    class: HashMap<u32, Vec<u32>>,
+    quirks: bool,
+    id: HashMap<u64, Vec<u32>>,
+    class: HashMap<u64, Vec<u32>>,
     local: HashMap<u32, Vec<u32>>,
     any: Vec<u32>,
 }
 
 enum Key {
-    Id(u32),
-    Class(u32),
+    Id(u64),
+    Class(u64),
     Local(u32, u32),
     Any,
     /// A pseudo-element: it matches no element
@@ -29,23 +35,29 @@ enum Key {
 }
 
 impl Buckets {
-    /// In quirks mode ids and classes match ASCII case-insensitively,
-    /// which atoms cannot look up, so they are not keys.
     pub fn build(rules: &Rules<'_>, quirks: bool) -> Buckets {
-        let mut b = Buckets::default();
+        let mut b = Buckets {
+            quirks,
+            ..Buckets::default()
+        };
         for (i, e) in rules.entries.iter().enumerate() {
-            let atoms = &rules.sheets[e.sheet as usize].atoms;
-            let atom = |n: crate::Name| atoms[n.index()].index();
+            let data = &rules.sheets[e.sheet as usize];
+            let atom = |n: crate::Name| data.atoms[n.index()].index();
+            let key_of = |n: crate::Name| {
+                if quirks {
+                    caseless_hash(data.sheet.names().get(n).encode_utf16())
+                } else {
+                    u64::from(atom(n))
+                }
+            };
             let mut key = Key::Any;
             if let Sel::Complex(c) = e.sel {
                 for comp in c.comps {
                     let k = match comp {
                         Component::Combinator(_) => break,
                         Component::PseudoElement(_) => Key::Never,
-                        Component::Id(n) if !quirks => Key::Id(atom(*n)),
-                        Component::Class(n) if !quirks && !matches!(key, Key::Id(_)) => {
-                            Key::Class(atom(*n))
-                        }
+                        Component::Id(n) => Key::Id(key_of(*n)),
+                        Component::Class(n) if !matches!(key, Key::Id(_)) => Key::Class(key_of(*n)),
                         Component::Type { name, lower, .. } if matches!(key, Key::Any) => {
                             Key::Local(atom(*name), atom(*lower))
                         }
@@ -77,14 +89,30 @@ impl Buckets {
     /// The rules `el` may match, each once, in no particular order.
     pub fn candidates(&self, dom: &Dom, el: NodeId, out: &mut Vec<u32>) {
         out.clear();
-        if let Some(id) = dom.element_id(el)
-            && let Some(v) = self.id.get(&id.index())
-        {
-            out.extend_from_slice(v);
-        }
-        for c in dom.class_list(el).1 {
-            if let Some(v) = self.class.get(&c.index()) {
+        let mut add = |map: &HashMap<u64, Vec<u32>>, k: u64| {
+            if let Some(v) = map.get(&k) {
                 out.extend_from_slice(v);
+            }
+        };
+        if self.quirks {
+            if dom.element_id(el).is_some()
+                && let Some(v) = dom.attribute(el, atom!("id"))
+            {
+                add(&self.id, caseless_hash(v.units()));
+            }
+            if !dom.class_list(el).1.is_empty()
+                && let Some(v) = dom.attribute(el, atom!("class"))
+            {
+                for r in words(v) {
+                    add(&self.class, caseless_hash(r.map(|i| v.unit(i))));
+                }
+            }
+        } else {
+            if let Some(id) = dom.element_id(el) {
+                add(&self.id, u64::from(id.index()));
+            }
+            for c in dom.class_list(el).1 {
+                add(&self.class, u64::from(c.index()));
             }
         }
         if let Some(n) = dom.local_name(el)

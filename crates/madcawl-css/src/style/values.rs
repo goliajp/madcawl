@@ -87,6 +87,28 @@ impl Display {
         )
     }
 
+    /// Whether its box can take size containment, which
+    /// `content-visibility: hidden` needs to skip its contents: not with
+    /// no box, a non-atomic inline, or an internal table or ruby box
+    /// but a cell (CSS Containment, "size containment").
+    pub fn can_contain_size(self) -> bool {
+        use Display::*;
+        !matches!(
+            self,
+            None | Contents
+                | Inline
+                | InlineListItem
+                | Ruby
+                | RubyText
+                | TableRowGroup
+                | TableHeaderGroup
+                | TableFooterGroup
+                | TableRow
+                | TableColumnGroup
+                | TableColumn
+        )
+    }
+
     /// The legacy and multi-keyword forms (`block flow`, `inline
     /// flex list-item` and so on) as one value; `None` when the
     /// combination is not one.

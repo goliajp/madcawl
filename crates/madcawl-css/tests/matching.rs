@@ -79,6 +79,15 @@ fn structural() {
     assert_eq!(hit("span:only-of-type", body), ["f"]);
     assert_eq!(hit("div:empty", body), ["h"]);
     assert_eq!(hit(":nth-child(2 of p)", body), ["g"]);
+    assert_eq!(hit("p:nth-last-of-type(2)", body), ["e"]);
+    assert_eq!(hit(":nth-last-child(1 of p)", body), ["g"]);
+    let mixed = "<div><b id=a></b>x<i id=b></i><!-- --><b id=c></b><i id=d></i><b id=e></b></div>";
+    assert_eq!(hit("b:nth-of-type(2n+1)", mixed), ["a", "e"]);
+    assert_eq!(
+        hit("i:nth-last-of-type(1), b:nth-child(3)", mixed),
+        ["c", "d"]
+    );
+    assert_eq!(hit("i:first-of-type, b:last-of-type", mixed), ["b", "e"]);
 }
 
 #[test]
@@ -120,6 +129,13 @@ fn quirks_mode_ids_and_classes_ignore_case() {
     );
     assert_eq!(p.display("a"), Display::None);
     assert_eq!(p.display("bar"), Display::None);
+    let p = page(
+        "<style>.foo.BAR { display: none } #MiXeD.q { display: none } .\u{e9} { display: none }</style>\
+         <p id=a class='  FOO\tbar '></p><p id=mixed class=Q></p><p id=b class=\u{c9}></p>",
+    );
+    assert_eq!(p.display("a"), Display::None);
+    assert_eq!(p.display("mixed"), Display::None);
+    assert_eq!(p.display("b"), Display::Block, "only ASCII ignores case");
     let p = page("<!doctype html><style>.Foo { display: none }</style><p id=a class=foo></p>");
     assert_eq!(p.display("a"), Display::Block);
 }

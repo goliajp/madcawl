@@ -270,3 +270,77 @@ fn what_html_and_svg_never_render() {
         "computed values are untouched"
     );
 }
+
+#[test]
+fn a_layer_rule_with_a_bad_prelude_is_dropped() {
+    let p = page(
+        "<style>@layer a b { #a { display: none } } @layer 1 { #b { display: none } }\
+         @layer a. { #c { display: none } } @layer a .b { #d { display: none } }\
+         @layer x.y { #e { display: none } } @layer a b; @layer , { #f { display: none } }</style>\
+         <p id=a><p id=b><p id=c><p id=d><p id=e><p id=f>",
+    );
+    let hidden: Vec<&str> = ["a", "b", "c", "d", "e", "f"]
+        .into_iter()
+        .filter(|id| p.display(id) == Display::None)
+        .collect();
+    assert_eq!(hidden, ["e"]);
+}
+
+#[test]
+fn media_query_lists_split_at_top_level_commas() {
+    let p = page(
+        "<style>@media (min-width: 1px, foo) { #a { display: none } }\
+         @media (min-width: 1px), (frob) { #b { display: none } }</style><p id=a><p id=b>",
+    );
+    assert_eq!(p.display("a"), Display::Block, "one query, not valid");
+    assert_eq!(p.display("b"), Display::None);
+}
+
+#[test]
+fn contents_on_replaced_elements_and_controls_is_none() {
+    let p = page(
+        "<style>.c { display: contents }</style><img id=a class=c><input id=b class=c>\
+         <video id=v class=c><p id=vp></p></video><div id=d class=c><span id=s>t</span></div>\
+         <button id=e class=c>go</button>",
+    );
+    assert!(!p.rendered("a"));
+    assert!(!p.rendered("b"));
+    assert!(!p.rendered("v"));
+    assert!(p.rendered("d"));
+    assert!(p.rendered("s"));
+    assert!(p.rendered("e"), "a button's contents are rendered");
+    assert_eq!(p.display("a"), Display::Contents);
+}
+
+#[test]
+fn content_visibility_hidden_needs_size_containment() {
+    let p = page(
+        "<style>.h { content-visibility: hidden }</style>\
+         <div id=d class=h><b id=db>x</b>t</div><span id=s class=h><b id=sb>y</b>u</span>\
+         <table><tr id=r class=h><td id=c class=h><b id=cb>z</b></td></tr></table>",
+    );
+    assert!(p.rendered("d"));
+    assert!(!p.rendered("db"));
+    assert!(
+        !p.styles
+            .is_rendered(&p.dom, p.dom.last_child(p.el("d")).unwrap())
+    );
+    assert!(p.rendered("sb"), "an inline box is not contained");
+    assert!(
+        p.styles
+            .is_rendered(&p.dom, p.dom.last_child(p.el("s")).unwrap())
+    );
+    assert!(p.rendered("c"), "a row is not contained");
+    assert!(!p.rendered("cb"), "a cell is");
+}
+
+#[test]
+fn a_details_summary_is_a_list_item() {
+    let p = page(
+        "<details><summary id=a>one</summary><summary id=b>two</summary></details>\
+         <summary id=c>loose</summary>",
+    );
+    assert_eq!(p.display("a"), Display::ListItem);
+    assert_eq!(p.display("b"), Display::Block);
+    assert_eq!(p.display("c"), Display::Block);
+}

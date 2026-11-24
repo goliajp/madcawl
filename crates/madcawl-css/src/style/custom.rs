@@ -14,6 +14,11 @@ use super::rules::NONE;
 
 const MAX_DEPTH: u8 = 8;
 
+/// The longest text substitution may make; longer is guaranteed-invalid,
+/// as a few properties that each use the last twice would otherwise
+/// grow exponentially.
+const MAX_LEN: usize = 1 << 20;
+
 /// A name and its value, `None` for the guaranteed-invalid value.
 type Var = (Box<str>, Option<Box<str>>);
 
@@ -66,10 +71,13 @@ enum State {
 
 /// An element's declared custom properties resolved over its parent's
 /// set: `var()` in them substituted, a cycle making every property in
-/// it guaranteed-invalid.
+/// it guaranteed-invalid, fallbacks or not.
 struct Resolver<'d, 's> {
     declared: &'d [(&'d str, &'d Decl)],
     state: Vec<State>,
+    /// The properties being resolved, outermost first
+    stack: Vec<usize>,
+    cyclic: Vec<bool>,
     sets: &'s [CustomSet],
     parent: u32,
 }
@@ -85,10 +93,21 @@ impl Resolver<'_, '_> {
     fn value(&mut self, i: usize) -> Option<String> {
         match &self.state[i] {
             State::Done(v) => return v.clone(),
-            State::Busy => return None,
+            State::Busy => {
+                let at = self
+                    .stack
+                    .iter()
+                    .position(|&j| j == i)
+                    .expect("busy is stacked");
+                for &j in &self.stack[at..] {
+                    self.cyclic[j] = true;
+                }
+                return None;
+            }
             State::Todo => {}
         }
         self.state[i] = State::Busy;
+        self.stack.push(i);
         let (name, d) = self.declared[i];
         let v = match (&d.value, &d.raw) {
             (Specified::Wide(Wide::Initial), _) => None,
@@ -96,6 +115,8 @@ impl Resolver<'_, '_> {
             (_, Some(raw)) if has_var(raw) => substitute(raw, false, &mut |n| self.get(n)),
             (_, raw) => Some(raw.as_deref().unwrap_or_default().to_owned()),
         };
+        self.stack.pop();
+        let v = v.filter(|_| !self.cyclic[i]);
         self.state[i] = State::Done(v.clone());
         v
     }
@@ -113,6 +134,8 @@ pub(crate) fn element_set(
     let mut r = Resolver {
         declared,
         state: declared.iter().map(|_| State::Todo).collect(),
+        stack: Vec::new(),
+        cyclic: vec![false; declared.len()],
         sets,
         parent,
     };
@@ -163,13 +186,35 @@ pub(crate) fn has_var(src: &str) -> bool {
     }
 }
 
+/// Whether every `var()` and `env()` in `src[span]` is well formed: a
+/// declaration with one that is not is invalid when parsed.
+pub(crate) fn vars_valid(src: &str, span: Span) -> bool {
+    let mut t = Tokenizer::in_span(src, span);
+    loop {
+        let tok = t.next_token();
+        let is_var = tok.value_is(src, "var");
+        match tok.kind {
+            Kind::Eof => return true,
+            Kind::Function if is_var || tok.value_is(src, "env") => {
+                match arguments(src, &mut t, is_var) {
+                    Some((_, Some(f))) if !vars_valid(src, f) => return false,
+                    Some(_) => {}
+                    None => return false,
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// The environment variables a page sees in a window with no insets.
 fn env(name: &str) -> Option<&'static str> {
     name.starts_with("safe-area-inset-").then_some("0px")
 }
 
 /// `src` with every `var()` and `env()` replaced; `None` when one has
-/// no value and no fallback. With `separate`, each substituted value is
+/// no value and no fallback, or the result is longer than `MAX_LEN`.
+/// With `separate`, each substituted value is
 /// kept apart from what is around it by empty comments, so that
 /// tokenizing the result gives the tokens substitution gave.
 pub(crate) fn substitute(
@@ -185,7 +230,7 @@ pub(crate) fn substitute(
         match tok.kind {
             Kind::Eof => return Some(out),
             Kind::Function if is_var || tok.value_is(src, "env") => {
-                let (name, fallback) = arguments(src, &mut t)?;
+                let (name, fallback) = arguments(src, &mut t, is_var)?;
                 let v = if is_var {
                     get(&name)
                 } else {
@@ -206,19 +251,25 @@ pub(crate) fn substitute(
             }
             _ => out.push_str(tok.span.of(src)),
         }
+        if out.len() > MAX_LEN {
+            return None;
+        }
     }
 }
 
-/// After `var(`: the name, and the fallback after the comma if there is
-/// one; the tokenizer is left after the closing parenthesis.
-fn arguments(src: &str, t: &mut Tokenizer<'_>) -> Option<(String, Option<Span>)> {
+/// After `var(` or `env(`: the name, and the fallback after the comma if
+/// there is one; the tokenizer is left after the closing parenthesis.
+/// `None` when they are not well formed.
+fn arguments(src: &str, t: &mut Tokenizer<'_>, is_var: bool) -> Option<(String, Option<Span>)> {
     let mut name = None;
     let mut fallback: Option<Span> = None;
     let mut depth = 0u32;
     loop {
         let tok = t.next_token();
         match tok.kind {
-            Kind::Eof | Kind::CloseParen if depth == 0 => break,
+            // the end closes what is open, at any depth
+            Kind::Eof => break,
+            Kind::CloseParen if depth == 0 => break,
             Kind::Function | Kind::OpenParen => depth += 1,
             Kind::CloseParen => depth -= 1,
             _ => {}
@@ -232,6 +283,9 @@ fn arguments(src: &str, t: &mut Tokenizer<'_>) -> Option<(String, Option<Span>)>
             Kind::Ident if name.is_none() => {
                 let mut s = String::new();
                 tok.write_value(src, &mut s);
+                if is_var && !s.starts_with("--") {
+                    return None;
+                }
                 name = Some(s);
             }
             Kind::Comma if name.is_some() => {

@@ -116,3 +116,67 @@ fn custom_properties_cascade_too() {
     assert_eq!(p.styles.custom_property(p.el("a"), "--x"), Some("none"));
     assert_eq!(p.display("a"), Display::Flex);
 }
+
+#[test]
+fn an_unclosed_function_in_a_fallback_ends_with_the_value() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let p = page(
+            "<p id=a style='display: var(--a, f('></p><p id=b></p>\
+             <style>#b{display:var(--a,f(}",
+        );
+        tx.send((p.display("a"), p.display("b"))).unwrap();
+    });
+    let got = rx
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("substitution ends");
+    assert_eq!(got, (Display::Inline, Display::Inline));
+}
+
+#[test]
+fn substitution_has_a_length_limit() {
+    let mut css = String::from(":root { --a0: x;");
+    for i in 1..=26 {
+        css.push_str(&format!(" --a{i}: var(--a{j})var(--a{j});", j = i - 1));
+    }
+    css.push_str(" display: var(--a26, block) }");
+    let p = page(&format!("<html id=r><style>{css}</style>"));
+    let len = |n: &str| p.styles.custom_property(p.el("r"), n).map(str::len);
+    assert_eq!(len("--a10"), Some(1 << 10));
+    assert_eq!(len("--a20"), Some(1 << 20));
+    assert_eq!(len("--a21"), None, "over the limit: guaranteed-invalid");
+    assert_eq!(len("--a26"), None);
+    assert_eq!(p.display("r"), Display::Block);
+}
+
+#[test]
+fn a_cycle_is_invalid_whatever_its_fallbacks() {
+    let p = page(
+        "<style>#a { --a: var(--b, x); --b: var(--a); --c: var(--a,ok); display: var(--a, block) }\
+         #b { --a: var(--a, x) }</style><p id=a></p><p id=b></p>",
+    );
+    let get = |id: &str, n: &str| p.styles.custom_property(p.el(id), n);
+    assert_eq!(get("a", "--a"), None);
+    assert_eq!(get("a", "--b"), None);
+    assert_eq!(
+        get("a", "--c"),
+        Some("ok"),
+        "outside the cycle: the fallback"
+    );
+    assert_eq!(p.display("a"), Display::Block);
+    assert_eq!(get("b", "--a"), None);
+}
+
+#[test]
+fn var_needs_a_custom_property_name() {
+    let p = page(
+        "<style>#a { display: block; display: var(foo, none) }\
+         #b { --x: ok; --x: var(bar, no); display: var(--x, var(baz)) }\
+         #c { display: grid; display: var(--m, var(nope, none)) }</style>\
+         <p id=a></p><p id=b></p><p id=c></p>",
+    );
+    assert_eq!(p.display("a"), Display::Block, "invalid when parsed");
+    assert_eq!(p.styles.custom_property(p.el("b"), "--x"), Some("ok"));
+    assert_eq!(p.display("b"), Display::Block, "the user agent's");
+    assert_eq!(p.display("c"), Display::Grid, "in a fallback too");
+}
