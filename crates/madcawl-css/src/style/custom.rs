@@ -4,20 +4,23 @@
 //! made. An element that declares none shares its parent's set; one
 //! that declares some gets a new set of only those, over its parent's.
 //! A chain deeper than `MAX_DEPTH` is flattened into one set, so a
-//! lookup walks a bounded number of sets.
+//! lookup walks a bounded number of sets. Elements with the same
+//! parent set and the same declarations share one set.
 
-use crate::Span;
-use crate::tokenizer::{Kind, Tokenizer};
+use std::cell::Cell;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 use super::props::{Decl, Specified, Wide};
 use super::rules::NONE;
+use super::var::{MAX_LEN, has_var, substitute};
 
 const MAX_DEPTH: u8 = 8;
 
-/// The longest text substitution may make; longer is guaranteed-invalid,
-/// as a few properties that each use the last twice would otherwise
-/// grow exponentially.
-const MAX_LEN: usize = 1 << 20;
+/// How much text substitution may make in one cascade run, all
+/// elements together; past it, what is left to substitute is
+/// guaranteed-invalid.
+pub(crate) const BUDGET: usize = 64 * MAX_LEN;
 
 /// A name and its value, `None` for the guaranteed-invalid value.
 type Var = (Box<str>, Option<Box<str>>);
@@ -63,34 +66,51 @@ pub(crate) fn all(sets: &[CustomSet], mut k: u32) -> Vec<(&str, &str)> {
     out
 }
 
-enum State {
+#[derive(Clone)]
+enum Val<'a> {
+    /// A parent set's value, or one as written
+    Ref(&'a str),
+    Own(Rc<str>),
+}
+
+impl AsRef<str> for Val<'_> {
+    fn as_ref(&self) -> &str {
+        match self {
+            Val::Ref(s) => s,
+            Val::Own(s) => s,
+        }
+    }
+}
+
+enum State<'a> {
     Todo,
     Busy,
-    Done(Option<String>),
+    Done(Option<Val<'a>>),
 }
 
 /// An element's declared custom properties resolved over its parent's
 /// set: `var()` in them substituted, a cycle making every property in
 /// it guaranteed-invalid, fallbacks or not.
-struct Resolver<'d, 's> {
-    declared: &'d [(&'d str, &'d Decl)],
-    state: Vec<State>,
+struct Resolver<'a> {
+    declared: &'a [(&'a str, &'a Decl)],
+    state: Vec<State<'a>>,
     /// The properties being resolved, outermost first
     stack: Vec<usize>,
     cyclic: Vec<bool>,
-    sets: &'s [CustomSet],
+    sets: &'a [CustomSet],
     parent: u32,
+    budget: &'a Cell<usize>,
 }
 
-impl Resolver<'_, '_> {
-    fn get(&mut self, name: &str) -> Option<String> {
+impl<'a> Resolver<'a> {
+    fn get(&mut self, name: &str) -> Option<Val<'a>> {
         match self.declared.iter().position(|(n, _)| *n == name) {
             Some(i) => self.value(i),
-            None => lookup(self.sets, self.parent, name).map(str::to_owned),
+            None => lookup(self.sets, self.parent, name).map(Val::Ref),
         }
     }
 
-    fn value(&mut self, i: usize) -> Option<String> {
+    fn value(&mut self, i: usize) -> Option<Val<'a>> {
         match &self.state[i] {
             State::Done(v) => return v.clone(),
             State::Busy => {
@@ -109,11 +129,14 @@ impl Resolver<'_, '_> {
         self.state[i] = State::Busy;
         self.stack.push(i);
         let (name, d) = self.declared[i];
+        let budget = self.budget;
         let v = match (&d.value, &d.raw) {
             (Specified::Wide(Wide::Initial), _) => None,
-            (Specified::Wide(_), _) => lookup(self.sets, self.parent, name).map(str::to_owned),
-            (_, Some(raw)) if has_var(raw) => substitute(raw, false, &mut |n| self.get(n)),
-            (_, raw) => Some(raw.as_deref().unwrap_or_default().to_owned()),
+            (Specified::Wide(_), _) => lookup(self.sets, self.parent, name).map(Val::Ref),
+            (_, Some(raw)) if has_var(raw) => {
+                substitute(raw, false, &mut |n| self.get(n), budget).map(|v| Val::Own(v.into()))
+            }
+            (_, raw) => Some(Val::Ref(raw.as_deref().unwrap_or_default())),
         };
         self.stack.pop();
         let v = v.filter(|_| !self.cyclic[i]);
@@ -122,15 +145,49 @@ impl Resolver<'_, '_> {
     }
 }
 
-/// The set an element gets: its parent's when it declares none.
-pub(crate) fn element_set(
+/// What one cascade run keeps from element to element: the sets made
+/// so far, by parent set and declarations, and what is left of `BUDGET`.
+pub(crate) struct Memo {
+    made: HashMap<(u32, Box<[usize]>), u32>,
+    pub budget: Cell<usize>,
+}
+
+impl Memo {
+    pub fn new() -> Self {
+        Memo {
+            made: HashMap::new(),
+            budget: Cell::new(BUDGET),
+        }
+    }
+
+    /// The set an element gets: its parent's when it declares none.
+    pub fn element_set(
+        &mut self,
+        sets: &mut Vec<CustomSet>,
+        parent: u32,
+        declared: &[(&str, &Decl)],
+    ) -> u32 {
+        if declared.is_empty() {
+            return parent;
+        }
+        // declarations live as long as the run, so their addresses name them
+        let ids = declared.iter().map(|(_, d)| *d as *const Decl as usize);
+        let key = (parent, ids.collect());
+        if let Some(&k) = self.made.get(&key) {
+            return k;
+        }
+        let k = make_set(sets, parent, declared, &self.budget);
+        self.made.insert(key, k);
+        k
+    }
+}
+
+fn make_set(
     sets: &mut Vec<CustomSet>,
     parent: u32,
     declared: &[(&str, &Decl)],
+    budget: &Cell<usize>,
 ) -> u32 {
-    if declared.is_empty() {
-        return parent;
-    }
     let mut r = Resolver {
         declared,
         state: declared.iter().map(|_| State::Todo).collect(),
@@ -138,9 +195,10 @@ pub(crate) fn element_set(
         cyclic: vec![false; declared.len()],
         sets,
         parent,
+        budget,
     };
     let mut vars: Vec<Var> = (0..declared.len())
-        .map(|i| (declared[i].0.into(), r.value(i).map(Into::into)))
+        .map(|i| (declared[i].0.into(), r.value(i).map(|v| v.as_ref().into())))
         .collect();
     vars.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     let depth = if parent == NONE {
@@ -170,129 +228,4 @@ pub(crate) fn element_set(
     };
     sets.push(set);
     sets.len() as u32 - 1
-}
-
-pub(crate) fn has_var(src: &str) -> bool {
-    let mut t = Tokenizer::new(src);
-    loop {
-        let tok = t.next_token();
-        match tok.kind {
-            Kind::Eof => return false,
-            Kind::Function if tok.value_is(src, "var") || tok.value_is(src, "env") => {
-                return true;
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Whether every `var()` and `env()` in `src[span]` is well formed: a
-/// declaration with one that is not is invalid when parsed.
-pub(crate) fn vars_valid(src: &str, span: Span) -> bool {
-    let mut t = Tokenizer::in_span(src, span);
-    loop {
-        let tok = t.next_token();
-        let is_var = tok.value_is(src, "var");
-        match tok.kind {
-            Kind::Eof => return true,
-            Kind::Function if is_var || tok.value_is(src, "env") => {
-                match arguments(src, &mut t, is_var) {
-                    Some((_, Some(f))) if !vars_valid(src, f) => return false,
-                    Some(_) => {}
-                    None => return false,
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-/// The environment variables a page sees in a window with no insets.
-fn env(name: &str) -> Option<&'static str> {
-    name.starts_with("safe-area-inset-").then_some("0px")
-}
-
-/// `src` with every `var()` and `env()` replaced; `None` when one has
-/// no value and no fallback, or the result is longer than `MAX_LEN`.
-/// With `separate`, each substituted value is
-/// kept apart from what is around it by empty comments, so that
-/// tokenizing the result gives the tokens substitution gave.
-pub(crate) fn substitute(
-    src: &str,
-    separate: bool,
-    get: &mut dyn FnMut(&str) -> Option<String>,
-) -> Option<String> {
-    let mut out = String::with_capacity(src.len());
-    let mut t = Tokenizer::new(src);
-    loop {
-        let tok = t.next_token();
-        let is_var = tok.value_is(src, "var");
-        match tok.kind {
-            Kind::Eof => return Some(out),
-            Kind::Function if is_var || tok.value_is(src, "env") => {
-                let (name, fallback) = arguments(src, &mut t, is_var)?;
-                let v = if is_var {
-                    get(&name)
-                } else {
-                    env(&name).map(str::to_owned)
-                };
-                let v = match (v, fallback) {
-                    (Some(v), _) => v,
-                    (None, Some(f)) => substitute(f.of(src), separate, get)?,
-                    (None, None) => return None,
-                };
-                if separate {
-                    out.push_str("/**/");
-                }
-                out.push_str(&v);
-                if separate {
-                    out.push_str("/**/");
-                }
-            }
-            _ => out.push_str(tok.span.of(src)),
-        }
-        if out.len() > MAX_LEN {
-            return None;
-        }
-    }
-}
-
-/// After `var(` or `env(`: the name, and the fallback after the comma if
-/// there is one; the tokenizer is left after the closing parenthesis.
-/// `None` when they are not well formed.
-fn arguments(src: &str, t: &mut Tokenizer<'_>, is_var: bool) -> Option<(String, Option<Span>)> {
-    let mut name = None;
-    let mut fallback: Option<Span> = None;
-    let mut depth = 0u32;
-    loop {
-        let tok = t.next_token();
-        match tok.kind {
-            // the end closes what is open, at any depth
-            Kind::Eof => break,
-            Kind::CloseParen if depth == 0 => break,
-            Kind::Function | Kind::OpenParen => depth += 1,
-            Kind::CloseParen => depth -= 1,
-            _ => {}
-        }
-        if let Some(f) = &mut fallback {
-            f.end = tok.span.end;
-            continue;
-        }
-        match tok.kind {
-            Kind::Whitespace => {}
-            Kind::Ident if name.is_none() => {
-                let mut s = String::new();
-                tok.write_value(src, &mut s);
-                if is_var && !s.starts_with("--") {
-                    return None;
-                }
-                name = Some(s);
-            }
-            Kind::Comma if name.is_some() => {
-                fallback = Some(Span::new(tok.span.end as usize, tok.span.end as usize))
-            }
-            _ => return None,
-        }
-    }
-    Some((name?, fallback))
 }

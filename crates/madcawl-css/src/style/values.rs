@@ -1,6 +1,8 @@
 //! The computed values of the properties the cascade computes, and how
 //! `getComputedStyle` writes each.
 
+use super::props::{Prop, Specified};
+
 macro_rules! keywords {
     ($(#[$m:meta])* $ty:ident { $($v:ident = $s:literal),* $(,)? }) => {
         $(#[$m])*
@@ -218,5 +220,28 @@ impl ComputedStyle {
 
     pub(crate) fn set_opacity(&mut self, v: f32) {
         self.opacity = v.clamp(0.0, 1.0).to_bits();
+    }
+
+    pub(super) fn set(&mut self, v: Specified) {
+        match v {
+            Specified::Display(d) => self.display = d,
+            Specified::Visibility(d) => self.visibility = d,
+            Specified::ContentVisibility(d) => self.content_visibility = d,
+            Specified::Opacity(o) => self.set_opacity(o),
+            Specified::Position(d) => self.position = d,
+            Specified::Float(d) => self.float = d,
+            Specified::Wide(_) | Specified::Unresolved => unreachable!("not a value"),
+        }
+    }
+
+    pub(super) fn copy_from(&mut self, from: &ComputedStyle, p: Prop) {
+        match p {
+            Prop::Display => self.display = from.display,
+            Prop::Visibility => self.visibility = from.visibility,
+            Prop::ContentVisibility => self.content_visibility = from.content_visibility,
+            Prop::Opacity => self.set_opacity(from.opacity()),
+            Prop::Position => self.position = from.position,
+            Prop::Float => self.float = from.float,
+        }
     }
 }

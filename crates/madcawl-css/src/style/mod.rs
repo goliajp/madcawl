@@ -27,6 +27,7 @@ mod rules;
 mod sources;
 mod supports;
 mod values;
+mod var;
 
 use std::sync::OnceLock;
 

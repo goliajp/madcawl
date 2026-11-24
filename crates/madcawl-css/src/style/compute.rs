@@ -3,6 +3,7 @@
 //! specificity and order; the winning one per property; and from it,
 //! the parent's values and the initial ones, the computed values.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use madcawl_dom::{Dom, NodeId, NodeKind};
@@ -13,11 +14,12 @@ use crate::parser::{BlockItem, parse_declaration_list};
 
 use super::Styles;
 use super::buckets::Buckets;
-use super::custom::{self, element_set, substitute};
+use super::custom::{self, Memo};
 use super::matching::{Matcher, text};
 use super::props::{self as props, Decl, PROPS, Prop, Specified, What, Wide, parse_block};
 use super::rules::{NONE, Rules};
 use super::values::{ComputedStyle, Display, Float, Position};
+use super::var::substitute;
 
 /// A declared value's place in the cascade, compared as one number:
 /// origin and importance, element-attached, layer, specificity, order.
@@ -82,6 +84,7 @@ pub(crate) struct Run<'r, 'a> {
     inline: HashMap<String, Box<[Decl]>>,
     candidates: Vec<u32>,
     matched: Vec<(Key, bool, Src)>,
+    memo: RefCell<Memo>,
 }
 
 impl<'r, 'a> Run<'r, 'a> {
@@ -99,6 +102,7 @@ impl<'r, 'a> Run<'r, 'a> {
             inline: HashMap::new(),
             candidates: Vec::new(),
             matched: Vec::new(),
+            memo: RefCell::new(Memo::new()),
         }
     }
 
@@ -213,7 +217,8 @@ impl<'r, 'a> Run<'r, 'a> {
     fn element(&self, el: NodeId, parent: Option<NodeId>, out: &mut Styles) -> ComputedStyle {
         let (won, customs) = self.cascade(el);
         let parent_set = parent.map_or(NONE, |p| out.customs[p.index() as usize]);
-        let set = element_set(&mut out.sets, parent_set, &customs);
+        let mut memo = self.memo.borrow_mut();
+        let set = memo.element_set(&mut out.sets, parent_set, &customs);
         out.customs[el.index() as usize] = set;
         let from = parent.and_then(|p| out.get(p)).copied();
         let inherited = from.unwrap_or(ComputedStyle::INITIAL);
@@ -222,9 +227,9 @@ impl<'r, 'a> Run<'r, 'a> {
             let v = match won[p as usize] {
                 Some(d) if d.value == Specified::Unresolved => {
                     let raw = d.raw.as_deref().expect("the text var() is in");
-                    let mut get = |n: &str| custom::lookup(&out.sets, set, n).map(str::to_owned);
+                    let mut get = |n: &str| custom::lookup(&out.sets, set, n);
                     // invalid at computed-value time: as if unset
-                    substitute(raw, true, &mut get)
+                    substitute(raw, true, &mut get, &memo.budget)
                         .and_then(|t| props::parse(p, &t, Span::new(0, t.len())))
                         .filter(|v| *v != Specified::Unresolved)
                 }
@@ -237,12 +242,12 @@ impl<'r, 'a> Run<'r, 'a> {
                 Some(Specified::Wide(Wide::Inherit)) => true,
                 Some(Specified::Wide(Wide::Initial)) => false,
                 Some(v) => {
-                    set_value(&mut s, v);
+                    s.set(v);
                     continue;
                 }
             };
             if inherit {
-                copy(&mut s, &inherited, p);
+                s.copy_from(&inherited, p);
             }
         }
         self.adjust(&mut s, el, out);
@@ -276,28 +281,5 @@ impl<'r, 'a> Run<'r, 'a> {
         if root || out_of_flow || s.float != Float::None || items {
             s.display = s.display.blockified();
         }
-    }
-}
-
-fn set_value(s: &mut ComputedStyle, v: Specified) {
-    match v {
-        Specified::Display(d) => s.display = d,
-        Specified::Visibility(d) => s.visibility = d,
-        Specified::ContentVisibility(d) => s.content_visibility = d,
-        Specified::Opacity(o) => s.set_opacity(o),
-        Specified::Position(d) => s.position = d,
-        Specified::Float(d) => s.float = d,
-        Specified::Wide(_) | Specified::Unresolved => unreachable!("not a value"),
-    }
-}
-
-fn copy(s: &mut ComputedStyle, from: &ComputedStyle, p: Prop) {
-    match p {
-        Prop::Display => s.display = from.display,
-        Prop::Visibility => s.visibility = from.visibility,
-        Prop::ContentVisibility => s.content_visibility = from.content_visibility,
-        Prop::Opacity => s.set_opacity(from.opacity()),
-        Prop::Position => s.position = from.position,
-        Prop::Float => s.float = from.float,
     }
 }

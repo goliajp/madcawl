@@ -180,3 +180,54 @@ fn var_needs_a_custom_property_name() {
     assert_eq!(p.display("b"), Display::Block, "the user agent's");
     assert_eq!(p.display("c"), Display::Grid, "in a fallback too");
 }
+
+#[test]
+fn two_dashes_alone_are_reserved() {
+    let p = page(
+        "<style>#a { display: block; display: var(--, none) }\
+         #b { --: flex; display: var(--m, grid) }</style><p id=a></p><p id=b></p>",
+    );
+    assert_eq!(p.display("a"), Display::Block, "invalid when parsed");
+    assert_eq!(p.display("b"), Display::Grid);
+    assert!(p.styles.custom_properties(p.el("b")).is_empty());
+}
+
+#[test]
+fn a_fallback_loses_the_whitespace_at_its_ends() {
+    let p = page(
+        "<style>#a { --c: var(--a,   ok  ); --d: var(--a,); --e: var(--a, f( x ) );\
+         --f: var(--a,\t1 2\n) }</style><p id=a></p>",
+    );
+    let get = |n: &str| p.styles.custom_property(p.el("a"), n);
+    assert_eq!(get("--c"), Some("ok"));
+    assert_eq!(get("--d"), Some(""));
+    assert_eq!(get("--e"), Some("f( x )"));
+    assert_eq!(get("--f"), Some("1 2"));
+}
+
+#[test]
+fn doubling_values_on_every_element_stay_bounded() {
+    let mut css = String::from("<style>* { --a0: x;");
+    for i in 1..=20 {
+        css.push_str(&format!(" --a{i}: var(--a{j})var(--a{j});", j = i - 1));
+    }
+    css.push_str(" }</style>");
+    let mut html = css;
+    for i in 0..3000 {
+        html.push_str(&format!("<p id=p{i}></p>"));
+    }
+    html.push_str(&"<div>".repeat(200));
+    html.push_str("<i id=deep></i>");
+    let started = std::time::Instant::now();
+    let p = page(&html);
+    let elapsed = started.elapsed();
+    let len = |id: &str| p.styles.custom_property(p.el(id), "--a20").map(str::len);
+    assert_eq!(len("p0"), Some(1 << 20));
+    assert_eq!(len("p2999"), Some(1 << 20), "siblings share one set");
+    assert_eq!(
+        len("deep"),
+        None,
+        "past the run's budget: guaranteed-invalid"
+    );
+    assert!(elapsed.as_secs() < 10, "took {elapsed:?}");
+}
