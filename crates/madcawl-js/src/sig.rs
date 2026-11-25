@@ -22,7 +22,9 @@ pub enum IdlType {
 
 /// Effect bits of a member. A bit that is clear is a promise the
 /// member keeps whenever its receiver passed the brand check; a bit
-/// that is set promises nothing.
+/// that is set promises nothing. RUNS_SCRIPT voids every other
+/// promise: the script it runs (an argument's toString) may change the
+/// DOM or throw whatever the member's own bits say.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Effects(pub u8);
 

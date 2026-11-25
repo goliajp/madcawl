@@ -19,15 +19,16 @@ pub(crate) fn throw<E: Engine>(e: &mut E, kind: ErrorKind, message: &str) -> Thr
 
 /// Throw a `DOMException` named `name`. The host makes the object: a
 /// plain one with the members script reads (`name`, `message`, `code`)
-/// until the interface is bound.
+/// until the interface is bound. The members go in by [[Set]], which a
+/// page's setter on Object.prototype can intercept or refuse; that is
+/// accepted until the interface is bound and they are defined instead.
 pub(crate) fn throw_dom<E: Engine>(e: &mut E, h: &mut DomHost<E>, name: &'static str, message: &str) -> Thrown {
     let ex = e.new_object(h.realm);
     let code = legacy_code(name) as f64;
     let name = e.string(DomString::from_wtf8(name.as_bytes()));
     let message = e.string(DomString::from_wtf8(message.as_bytes()));
     for (key, v) in [("name", name.get()), ("message", message.get()), ("code", E::number(code))] {
-        let set = e.set(h, ex.get(), Key::Str(&DomString::from_wtf8(key.as_bytes())), v);
-        debug_assert!(set, "a plain object takes a property");
+        let _ = e.set(h, ex.get(), Key::Str(&DomString::from_wtf8(key.as_bytes())), v);
     }
     e.release(name);
     e.release(message);

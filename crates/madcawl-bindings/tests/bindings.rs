@@ -256,6 +256,9 @@ fn a_host_closed_gives_back_what_it_held() {
     assert_eq!(e.live_cells(), 0, "no cell outlives its host");
 }
 
+/// Of the non-flat string forms only the substring view can be made on
+/// the stub; short-string immediates and blocks with spare capacity are
+/// the real engine's and get their cases when it is swapped in.
 #[test]
 fn strings_that_are_views_reach_the_dom_as_flat_blocks() {
     let mut js = Js::new();
