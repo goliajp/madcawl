@@ -91,11 +91,11 @@ pub fn list() -> Value {
     let mut all = vec![
         tool(
             "open",
-            "Open a local HTML file as a windowless page (absolute path or file:// URL; web URLs are refused). Returns its page id and outline.",
+            "Open a windowless page: a local HTML file, or an http(s) URL when the host allows the network. Returns its page id and outline.",
             vec![
                 (
                     "path",
-                    prop("string", "Absolute path or file:// URL of the file"),
+                    prop("string", "Absolute path, file:// URL, or http(s) URL"),
                 ),
                 (
                     "width",
@@ -143,7 +143,7 @@ pub fn list() -> Value {
         ],
         &["page", "since"],
     ));
-    Value::Arr(all)
+    Value::Arr(all.into_iter().chain(crate::act::tools(page_prop())).collect())
 }
 
 /// `p3`, `3` or 3 as a page number.
@@ -234,6 +234,9 @@ pub(crate) fn request(name: &str, args: &Value, cwd: &Path) -> Result<Frame, Str
                 .num(tag::SINCE, since))
         }
         "extract" => crate::extract::frame(view_frame("extract", 4, args)?, args),
+        "act" => crate::act::act_frame(page_of(args)?, args),
+        "wait" => crate::act::wait_frame(page_of(args)?, args),
+        "requests" => Ok(crate::act::requests_frame(page_of(args)?, args)),
         _ => match VIEWS.iter().find(|v| v.0 == name) {
             Some(&(n, view, _)) => view_frame(n, view, args),
             None => Err(format!("unknown tool {name:?}")),
@@ -257,6 +260,7 @@ fn render(page: Option<u64>, f: &Frame) -> (String, bool) {
     if let Some(seq) = f.get_num(tag::SEQ) {
         head.push_str(&format!(" · seq {seq}"));
     }
+    head.push_str(&crate::act::timing(f));
     if let Some(t) = f.get_num(tag::TOKENS) {
         head.push_str(&format!(" · ~{t} tokens (estimated)"));
     }

@@ -13,12 +13,15 @@ const MAX_FIELDS: usize = 256;
 pub mod kind {
     pub const READ: u16 = 10;
     pub const DIFF: u16 = 11;
+    pub const ACT: u16 = 12;
+    pub const WAIT: u16 = 13;
     pub const RESULT: u16 = 20;
     pub const ERROR: u16 = 21;
     pub const OPEN: u16 = 30;
     pub const OPENED: u16 = 31;
     pub const CLOSE: u16 = 32;
     pub const PAGES: u16 = 33;
+    pub const REQUESTS: u16 = 34;
 }
 
 pub mod tag {
@@ -43,6 +46,18 @@ pub mod tag {
     pub const WHAT: u8 = 20;
     pub const FORMAT: u8 = 21;
     pub const OFFSET: u8 = 22;
+    pub const ACTION: u8 = 23;
+    pub const VALUE: u8 = 24;
+    pub const FIELD: u8 = 25;
+    pub const TIMEOUT: u8 = 26;
+    pub const UNTIL_REF: u8 = 27;
+    pub const UNTIL_TEXT: u8 = 28;
+    pub const AMOUNT: u8 = 29;
+    pub const ON: u8 = 30;
+    pub const STABLE: u8 = 31;
+    pub const DISPATCH_US: u8 = 32;
+    pub const WAIT_US: u8 = 33;
+    pub const DIFF_US: u8 = 34;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
