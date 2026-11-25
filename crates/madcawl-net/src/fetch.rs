@@ -82,6 +82,9 @@ pub struct Request {
     pub initiator: Option<Url>,
     pub credentials: bool,
     pub redirect: Redirect,
+    /// when not empty, the only origins (as `Url::origin` writes them)
+    /// a redirect may carry the body to
+    pub body_origins: Vec<String>,
     /// ends the request early, its socket operations included
     pub cancel: Option<Arc<Cancel>>,
 }
@@ -97,6 +100,7 @@ impl Request {
             initiator: None,
             credentials: true,
             redirect: Redirect::Follow,
+            body_origins: Vec::new(),
             cancel: None,
         }
     }
@@ -247,6 +251,10 @@ impl Client {
             let loc = String::from_utf8_lossy(raw.head.header("location").unwrap_or_default()).into_owned();
             let next = redirect_url(&url, &loc)?;
             rewrite_for_redirect(raw.head.status, &mut method, &mut body, &mut headers);
+            let to = next.origin().ascii_serialization();
+            if body.is_some() && !req.body_origins.is_empty() && !req.body_origins.contains(&to) {
+                return Err(NetError::Refused(format!("a redirect would send the request body on to {to}, an origin not approved for it")));
+            }
             if next.origin().ascii_serialization() != url.origin().ascii_serialization() {
                 headers.retain(|(n, _)| !n.eq_ignore_ascii_case("authorization"));
             }

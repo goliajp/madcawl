@@ -31,7 +31,7 @@ fn first(dom: &Dom, name: madcawl_str::Atom) -> NodeId {
 
 fn frame(page: &Url, sub: &Submission) -> Frame {
     let method = if sub.method == Method::Get { "GET" } else { "POST" };
-    let nav = Navigation { id: 1, method, url: &sub.url, content_type: sub.content_type.as_deref(), body: sub.body.as_deref(), initiator: Some(page) };
+    let nav = Navigation { id: 1, method, url: &sub.url, content_type: sub.content_type.as_deref(), body: sub.body.as_deref(), initiator: Some(page), body_origins: &[] };
     fetch_frame(&nav)
 }
 
@@ -74,4 +74,24 @@ fn a_get_form_and_a_multipart_upload() {
     );
     assert_eq!((status, echoed), (200, want));
     std::fs::remove_file(&file).unwrap();
+}
+
+#[test]
+fn a_body_is_not_carried_by_a_redirect_to_an_origin_it_was_not_approved_for() {
+    let origin = site();
+    let page = Url::parse(&format!("{origin}/login")).unwrap();
+    let mut netd = guarded(None);
+    let mut s = netd.host();
+    let approved = [Url::parse(&origin).unwrap().origin().ascii_serialization()];
+    let post = |s: &mut UnixStream, path: &str, body_origins: &[String]| {
+        let url = Url::parse(&format!("{origin}{path}")).unwrap();
+        let ct = Some("application/x-www-form-urlencoded");
+        let nav = Navigation { id: 1, method: "POST", url: &url, content_type: ct, body: Some(b"pass=s3cret"), initiator: Some(&page), body_origins };
+        exchange(s, fetch_frame(&nav))
+    };
+    let refused = post(&mut s, "/keep", &approved);
+    let why = refused.iter().find(|f| f.kind == madcawl_net::wire::kind::ERROR).and_then(|f| f.get_str(madcawl_net::wire::tag::MESSAGE)).unwrap_or("");
+    assert!(why.contains("not approved"), "{refused:?}");
+    assert_eq!(status_body(&post(&mut s, "/keep-here", &approved)).0, 200, "a redirect within the approved origin");
+    assert!(status_body(&post(&mut s, "/keep", &[])).1.contains("pass=s3cret"), "no list: followed as before");
 }

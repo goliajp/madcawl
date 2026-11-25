@@ -7,7 +7,9 @@
 //! cookie and redirects to `/home`, which greets only a request carrying
 //! `sid`. `/echo` answers a request's method, query, `Content-Type` and
 //! body. `/attach`, `/doc.pdf`, `/huge` and `/stream` are downloads;
-//! `/away` redirects to `/attach` on `localhost`, another origin, and
+//! `/away` redirects to `/attach` on `localhost`, another origin;
+//! `/keep` answers 307 to `/echo` on `localhost` and `/keep-here` 307 to
+//! its own `/echo`, so a POST body goes along; and
 //! `/slow` is a 300 000-byte attachment of unannounced length whose body
 //! starts 300 ms after its head.
 
@@ -111,6 +113,11 @@ fn handle(mut s: TcpStream) {
             let port = r.header("host").rsplit(':').next().unwrap_or("");
             respond(&mut s, "302 Found", &format!("Location: http://localhost:{port}/attach\r\n"), b"");
         }
+        (_, "/keep") => {
+            let port = r.header("host").rsplit(':').next().unwrap_or("");
+            respond(&mut s, "307 Temporary Redirect", &format!("Location: http://localhost:{port}/echo\r\n"), b"");
+        }
+        (_, "/keep-here") => respond(&mut s, "307 Temporary Redirect", "Location: /echo\r\n", b""),
         ("GET", "/doc.pdf") => respond(&mut s, "200 OK", "Content-Type: application/pdf\r\n", &vec![b'p'; PDF_LEN]),
         ("GET", "/huge") => respond(&mut s, "200 OK", "Content-Disposition: attachment\r\n", &vec![b'h'; 300_000]),
         ("GET", "/slow") => {

@@ -24,6 +24,7 @@ fn request_of(mut frame: Frame) -> Result<Request, String> {
     req.navigation = frame.get_num(tag::NAVIGATION).unwrap_or(0) != 0;
     req.initiator = parse_url(&frame, tag::INITIATOR);
     req.credentials = frame.get_num(tag::CREDENTIALS).unwrap_or(1) != 0;
+    req.body_origins = frame.all(tag::BODY_ORIGIN).map(|o| String::from_utf8_lossy(o).into_owned()).collect();
     req.redirect = match frame.get_num(tag::REDIRECT).unwrap_or(0) {
         1 => Redirect::Manual,
         2 => Redirect::Error,

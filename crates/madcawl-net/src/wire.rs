@@ -70,6 +70,9 @@ pub mod tag {
     pub const BYTES: u8 = 22;
     /// the length the response announced, when it did
     pub const TOTAL: u8 = 23;
+    /// on FETCH, repeated: the origins its body may be sent to; a redirect
+    /// that would carry the body to any other fails
+    pub const BODY_ORIGIN: u8 = 24;
     pub const TOKEN: u8 = 32;
     pub const COUNT: u8 = 33;
     /// on an ERROR: the network process refused what the content process

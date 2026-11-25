@@ -15,6 +15,8 @@ pub struct Navigation<'a> {
     pub content_type: Option<&'a str>,
     pub body: Option<&'a [u8]>,
     pub initiator: Option<&'a Url>,
+    /// When not empty, the only origins a redirect may carry the body to
+    pub body_origins: &'a [String],
 }
 
 pub fn fetch_frame(n: &Navigation) -> Frame {
@@ -27,6 +29,9 @@ pub fn fetch_frame(n: &Navigation) -> Frame {
     }
     if let Some(b) = n.body {
         f = f.bytes(tag::BODY, b);
+    }
+    for o in n.body_origins {
+        f = f.str(tag::BODY_ORIGIN, o);
     }
     f
 }

@@ -95,6 +95,7 @@ fn log_in(s: &mut UnixStream, origin: &str) -> (u64, String) {
         content_type: sub.content_type.as_deref(),
         body: sub.body.as_deref(),
         initiator: Some(&page),
+        body_origins: &[],
     };
     status_body(&exchange(s, fetch_frame(&nav)))
 }
