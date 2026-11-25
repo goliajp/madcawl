@@ -2,7 +2,7 @@
 //! elements the form owns, in tree order, each giving zero or more
 //! name-value entries.
 
-use crate::node::{Owner, attr, input_type, is_disabled, is_html, is_space, option_disabled, root, text_content};
+use crate::node::{FormOwners, attr, input_type, is_disabled, is_html, is_space, option_disabled, root, text_content};
 use crate::value::{directionality, sanitize};
 use crate::{Controls, Entry, FileValue, Value};
 use madcawl_dom::{Dom, NodeId};
@@ -78,12 +78,25 @@ fn is_submittable(dom: &Dom, n: NodeId) -> bool {
     [atom!("button"), atom!("input"), atom!("select"), atom!("textarea")].into_iter().any(|a| is_html(dom, n, a))
 }
 
+/// The submittable elements `form` owns, in tree order: the controls
+/// its entry list is built from.
+pub fn owned_controls(dom: &Dom, form: NodeId) -> Vec<NodeId> {
+    let tree = root(dom, form);
+    let owners = FormOwners::new(dom, tree);
+    dom.descendants(tree).filter(|&n| is_submittable(dom, n) && owners.owner(dom, n) == Some(form)).collect()
+}
+
+/// The password inputs `form` owns: the controls whose values a
+/// submission of it may carry as secrets.
+pub fn password_controls(dom: &Dom, form: NodeId) -> Vec<NodeId> {
+    let is_password = |&n: &NodeId| is_html(dom, n, atom!("input")) && input_type(dom, n) == "password";
+    owned_controls(dom, form).into_iter().filter(is_password).collect()
+}
+
 /// The entry list of `form` submitted by `submitter`, with the controls'
 /// current state from `c`.
 pub fn entry_list(dom: &Dom, form: NodeId, submitter: Option<NodeId>, c: &dyn Controls) -> Vec<Entry> {
-    let owner = Owner::new(dom, form);
-    let fields: Vec<NodeId> =
-        dom.descendants(root(dom, form)).filter(|&n| is_submittable(dom, n) && owner.owns(dom, n)).collect();
+    let fields = owned_controls(dom, form);
     let radios = radio_winners(dom, &fields, c);
     let mut out = Vec::new();
     for n in fields {

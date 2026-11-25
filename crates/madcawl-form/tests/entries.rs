@@ -111,6 +111,24 @@ fn the_form_attribute_moves_controls_between_forms() {
 }
 
 #[test]
+fn a_control_the_parser_associates_outside_its_form_stays_with_it() {
+    let html = r#"<table><form id=f action=//evil/><tr><td><input type=password name=p id=p value=x></table>"#;
+    let dom = parse(html);
+    let (f, pw) = (form(&dom), by_id(&dom, "p"));
+    assert_eq!(dom.children(f).count(), 0, "a form in a table is left empty; the input lands in the cell");
+    assert_eq!(pairs(html), p(&[("p", "x")]));
+    assert_eq!(madcawl_form::form_owner(&dom, pw), Some(f));
+    assert_eq!(madcawl_form::owned_controls(&dom, f), [pw]);
+    assert_eq!(madcawl_form::password_controls(&dom, f), [pw], "the password list is the one the entry list reads");
+    let html = r#"<p id=x></p><form id=x><input name=u id=u></form><input type=password form=x name=p id=p>"#;
+    let dom = parse(html);
+    let f = dom.descendants(dom.document()).find(|&n| dom.local_name(n) == Some(atom!("form"))).unwrap();
+    assert_eq!(madcawl_form::form_owner(&dom, by_id(&dom, "p")), None, "the first element with ID x is not a form");
+    assert_eq!(madcawl_form::owned_controls(&dom, f), [by_id(&dom, "u")]);
+    assert!(madcawl_form::password_controls(&dom, f).is_empty());
+}
+
+#[test]
 fn values_are_sanitized_by_type() {
     let html = r##"<form id=f><input name=n type=number value="1e2"><input name=bad type=number value="1,5">
         <input name=r type=range><input name=r2 type=range min=10 max=20 value=99>

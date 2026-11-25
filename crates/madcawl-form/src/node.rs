@@ -2,6 +2,8 @@
 //! attributes as strings, its text, whether it is disabled, and which
 //! form owns it.
 
+use std::collections::HashMap;
+
 use madcawl_dom::{Dom, NodeId, NodeKind};
 use madcawl_html::Namespace;
 use madcawl_str::{Atom, DomString, atom};
@@ -109,32 +111,39 @@ pub(crate) fn root(dom: &Dom, n: NodeId) -> NodeId {
     ancestors(dom, n).last().unwrap_or(n)
 }
 
-/// Decides for elements of one tree whether `form` owns them: an element
-/// with a `form` attribute belongs to the first element of the tree with
-/// that ID when that is a form; one without, to the form the parser
-/// associated it with, else to its nearest form ancestor.
-pub(crate) struct Owner {
-    form: NodeId,
-    /// the form's ID when the form is the first element with it
-    id: Option<String>,
+/// The form owner of the elements of one tree: an element with a `form`
+/// attribute belongs to the first element of the tree with that ID when
+/// that is a form; one without, to the form the parser associated it
+/// with (kept when the parser moved the element out of the form, as it
+/// does from a table), else to its nearest form ancestor. The IDs are
+/// read once, so finding the owners of many elements takes one walk.
+pub struct FormOwners {
+    /// the first element with each ID, when it is a form
+    ids: HashMap<String, NodeId>,
 }
 
-impl Owner {
-    pub fn new(dom: &Dom, form: NodeId) -> Owner {
-        let id = attr(dom, form, atom!("id")).filter(|v| !v.is_empty());
-        let first = id.as_ref().and_then(|v| {
-            dom.descendants(root(dom, form)).find(|&d| attr(dom, d, atom!("id")).as_deref() == Some(v.as_str()))
-        });
-        Owner { form, id: id.filter(|_| first == Some(form)) }
+impl FormOwners {
+    /// The owners in the tree whose root is `root`.
+    pub fn new(dom: &Dom, root: NodeId) -> FormOwners {
+        let mut first: HashMap<String, NodeId> = HashMap::new();
+        for d in dom.descendants(root) {
+            if let Some(id) = attr(dom, d, atom!("id")).filter(|v| !v.is_empty()) {
+                first.entry(id).or_insert(d);
+            }
+        }
+        first.retain(|_, &mut f| is_html(dom, f, atom!("form")));
+        FormOwners { ids: first }
     }
 
-    pub fn owns(&self, dom: &Dom, n: NodeId) -> bool {
+    pub fn owner(&self, dom: &Dom, n: NodeId) -> Option<NodeId> {
         if let Some(v) = attr(dom, n, atom!("form")) {
-            return self.id.as_deref() == Some(v.as_str());
+            return self.ids.get(&v).copied();
         }
-        if let Some(f) = dom.form_owner(n) {
-            return f == self.form;
-        }
-        ancestors(dom, n).find(|&a| is_html(dom, a, atom!("form"))) == Some(self.form)
+        dom.form_owner(n).or_else(|| ancestors(dom, n).find(|&a| is_html(dom, a, atom!("form"))))
     }
+}
+
+/// The form that owns `n`, by the rule of `FormOwners`.
+pub fn form_owner(dom: &Dom, n: NodeId) -> Option<NodeId> {
+    FormOwners::new(dom, root(dom, n)).owner(dom, n)
 }

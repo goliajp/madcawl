@@ -18,8 +18,8 @@ mod submit;
 mod value;
 
 pub use encode::{Files, boundary, multipart, normalize_newlines, pairs, text_plain, urlencoded};
-pub use entries::{CHARSET, entry_list};
-pub use node::is_submit_button;
+pub use entries::{CHARSET, entry_list, owned_controls, password_controls};
+pub use node::{FormOwners, form_owner, is_submit_button};
 pub use submit::{Context, Enctype, Method, Submission, submission};
 
 use madcawl_dom::NodeId;
