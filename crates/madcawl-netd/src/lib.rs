@@ -17,10 +17,20 @@
 //! Sockets, TLS state and the cookie jar stay here: a response's
 //! `Set-Cookie` fields are stripped before it goes out, and script access
 //! to cookies never reads or writes `HttpOnly` ones.
+//!
+//! Served with a control channel (`serve_guarded`), every connection
+//! speaks for one document its host registered, and what it claims is
+//! checked against that document (`guard`).
 
 mod fetch;
+mod guard;
+mod hello;
+
+pub use guard::{Guard, TOKEN_LEN};
 
 use fetch::run_fetch;
+use guard::{Binding, Screened};
+use hello::read_next;
 use madcawl_net::cookie::{Api, SiteContext, serialize};
 use madcawl_net::fetch::now_secs;
 use madcawl_net::sock::Cancel;
@@ -31,7 +41,7 @@ use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const EMFILE: i32 = 24;
 const ENFILE: i32 = 23;
@@ -57,6 +67,9 @@ pub struct ServerLimits {
     pub body_bytes: usize,
     /// how long a write to a client may block before the client is dropped
     pub write_timeout: Duration,
+    /// how long a client served with a control channel may take, in all,
+    /// to bind itself with HELLO before it is dropped
+    pub hello_timeout: Duration,
 }
 
 impl Default for ServerLimits {
@@ -67,6 +80,7 @@ impl Default for ServerLimits {
             requests: 256,
             body_bytes: 64 << 20,
             write_timeout: Duration::from_secs(30),
+            hello_timeout: Duration::from_secs(10),
         }
     }
 }
@@ -154,6 +168,28 @@ pub fn serve(listener: UnixListener, client: Arc<Client>, limits: ServerLimits) 
 /// Serves each connection `streams` yields until it ends. A failed accept
 /// is logged and the next one tried.
 pub fn serve_streams(streams: impl IntoIterator<Item = io::Result<UnixStream>>, client: Arc<Client>, limits: ServerLimits) {
+    serve_inner(streams, client, limits, None);
+}
+
+/// Serves `listener` with the host's end of the control channel on
+/// `control`: a connection is served only for the document its HELLO
+/// token was registered for. Returns only when the control channel is
+/// not a connected socket or its thread cannot start, since without it
+/// no client could ever be served.
+pub fn serve_guarded(listener: UnixListener, control: UnixStream, client: Arc<Client>, limits: ServerLimits) -> io::Result<()> {
+    control.peer_addr()?;
+    let guard = Arc::new(Guard::new(limits.clients));
+    let g = guard.clone();
+    std::thread::Builder::new().name("netd-control".into()).spawn(move || {
+        if let Err(e) = g.serve_control(control) {
+            eprintln!("madcawl-netd: control channel: {e}");
+        }
+    })?;
+    serve_inner(listener.incoming(), client, limits, Some(guard));
+    Ok(())
+}
+
+fn serve_inner(streams: impl IntoIterator<Item = io::Result<UnixStream>>, client: Arc<Client>, limits: ServerLimits, guard: Option<Arc<Guard>>) {
     let live = Arc::new(AtomicUsize::new(0));
     let shared = Shared::default();
     for stream in streams {
@@ -172,10 +208,9 @@ pub fn serve_streams(streams: impl IntoIterator<Item = io::Result<UnixStream>>, 
             eprintln!("madcawl-netd: client socket: {e}");
             continue;
         }
-        let (client, shared) = (client.clone(), shared.clone());
+        let (client, shared, guard) = (client.clone(), shared.clone(), guard.clone());
         let spawned = std::thread::Builder::new().name("netd-client".into()).spawn(move || {
-            let _slot = slot;
-            let _ = serve_client(stream, &client, &shared, limits);
+            let _ = serve_client(stream, slot, &client, &shared, limits, guard.as_deref());
         });
         if let Err(e) = spawned {
             eprintln!("madcawl-netd: client thread: {e}");
@@ -200,14 +235,32 @@ pub(crate) fn error(id: u64, message: &str) -> Frame {
     Frame::new(kind::ERROR).num(tag::ID, id).str(tag::MESSAGE, message)
 }
 
-fn serve_client(stream: UnixStream, client: &Arc<Client>, shared: &Shared, limits: ServerLimits) -> io::Result<()> {
+fn serve_client(stream: UnixStream, slot: Slot, client: &Arc<Client>, shared: &Shared, limits: ServerLimits, guard: Option<&Guard>) -> io::Result<()> {
     let mut reader = stream.try_clone()?;
     let writer: Writer = Arc::new(Mutex::new(stream));
     let mine = Arc::new(AtomicUsize::new(0));
     // a client that stops sending, by closing or by a bad frame, is gone
     let cancel = CancelOnDrop(Cancel::new());
-    while let Some(frame) = Frame::read_from(&mut reader)? {
+    let mut binding = Binding::default();
+    let deadline = Instant::now() + limits.hello_timeout;
+    // declared last so it is given back before the connection closes
+    let _slot = slot;
+    while let Some(frame) = read_next(&mut reader, guard.is_some() && !binding.is_bound(), deadline)? {
         let id = frame.get_num(tag::ID).unwrap_or(0);
+        let frame = match guard {
+            Some(g) => match g.screen(&mut binding, frame) {
+                Screened::Pass(f) => f,
+                Screened::Reply(r) => {
+                    send(&writer, &r)?;
+                    if binding.is_bound() {
+                        reader.set_read_timeout(None)?;
+                    }
+                    continue;
+                }
+                Screened::Close(r) => return send(&writer, &r),
+            },
+            None => frame,
+        };
         match frame.kind {
             kind::FETCH => {
                 let body = frame.field(tag::BODY).map_or(0, <[u8]>::len);

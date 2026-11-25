@@ -27,6 +27,18 @@ pub mod kind {
     pub const COOKIE_GET: u16 = 6;
     pub const COOKIE_SET: u16 = 7;
     pub const COOKIES: u16 = 8;
+    /// content → network, first on a connection: the token its host got
+    /// for it; answered with HELLO and `OK`
+    pub const HELLO: u16 = 32;
+    /// host → network on the control channel only: a document's URL, with
+    /// `TOKEN` to change an existing registration, or `NAVIGATION` set for
+    /// the host's own connection; answered with REGISTERED
+    pub const REGISTER: u16 = 33;
+    pub const UNREGISTER: u16 = 34;
+    /// host → network: refusals counted, all or for one `TOKEN`; answered
+    /// with STATS and `COUNT`
+    pub const STATS: u16 = 35;
+    pub const REGISTERED: u16 = 36;
 }
 
 pub mod tag {
@@ -45,6 +57,11 @@ pub mod tag {
     pub const MESSAGE: u8 = 12;
     pub const TEXT: u8 = 13;
     pub const OK: u8 = 14;
+    pub const TOKEN: u8 = 32;
+    pub const COUNT: u8 = 33;
+    /// on an ERROR: the network process refused what the content process
+    /// claimed
+    pub const REFUSED: u8 = 34;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -173,6 +190,12 @@ impl Frame {
     /// rather than being reserved up front, and the largest field keeps
     /// that buffer instead of being copied out of it.
     pub fn read_from(r: &mut impl Read) -> io::Result<Option<Frame>> {
+        Self::read_capped(r, MAX_FRAME)
+    }
+
+    /// `read_from` taking frames of at most `max` bytes (and never more
+    /// than `MAX_FRAME`), for a peer not yet trusted with large ones.
+    pub fn read_capped(r: &mut impl Read, max: usize) -> io::Result<Option<Frame>> {
         let mut head = [0u8; 4];
         match r.read_exact(&mut head) {
             Ok(()) => {}
@@ -180,7 +203,7 @@ impl Frame {
             Err(e) => return Err(e),
         }
         let len = u32::from_le_bytes(head) as usize;
-        if !(2..=MAX_FRAME).contains(&len) {
+        if !(2..=max.min(MAX_FRAME)).contains(&len) {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "frame length out of range"));
         }
         let mut body = Vec::new();
@@ -297,6 +320,10 @@ mod tests {
         assert!(Frame::read_from(&mut &[0xffu8, 0xff, 0xff, 0x7f][..]).is_err());
         let short = Frame::read_from(&mut &[0x00u8, 0x00, 0x00, 0x01, 1, 0, 9][..]).unwrap_err();
         assert_eq!(short.kind(), io::ErrorKind::UnexpectedEof, "a frame claiming 16 MiB that stops short");
+        let mut b = Vec::new();
+        Frame::new(kind::HELLO).bytes(tag::TOKEN, &[0; 64]).encode(&mut b);
+        assert!(Frame::read_capped(&mut &b[..], 64).is_err(), "a frame over the cap");
+        assert!(Frame::read_capped(&mut &b[..], 4096).unwrap().is_some());
         let mut seed = 0x9e37_79b9u32;
         for n in 0..2000usize {
             let junk: Vec<u8> = (0..n % 64)
