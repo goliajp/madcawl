@@ -38,6 +38,32 @@ fn selects_installed_faces() {
 }
 
 #[test]
+fn the_system_font_takes_weights_and_has_a_monospaced_design() {
+    let mut sh = Shaper::default();
+    let regular = sh.fonts.select(&["system-ui"], 400.0, false);
+    assert_eq!(regular, sh.fonts.system());
+    let semibold = sh.fonts.select(&["system-ui"], 600.0, false);
+    let bold = sh.fonts.select(&["system-ui"], 700.0, false);
+    assert!(regular != semibold && semibold != bold && regular != bold);
+    let mono = sh.fonts.select(&["ui-monospace"], 400.0, false);
+    let width = |sh: &mut Shaper, face, t: &str| {
+        let st = Style {
+            face,
+            size: 12.0,
+            features: 0,
+        };
+        sh.shape_word(&u16s(t), &st, false).advance
+    };
+    // every glyph as wide as every other, and not Menlo's width
+    let (i, m) = (width(&mut sh, mono, "iiii"), width(&mut sh, mono, "mmmm"));
+    assert!(
+        (i - m).abs() < 0.01 && (i - 4.0 * 7.418).abs() < 0.05,
+        "{i} {m}"
+    );
+    assert!(width(&mut sh, bold, "abc") > width(&mut sh, regular, "abc"));
+}
+
+#[test]
 fn shapes_and_caches_words() {
     let mut shaper = Shaper::default();
     let st = style(&mut shaper, "Helvetica");

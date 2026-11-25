@@ -73,7 +73,10 @@ impl Fonts {
 
     fn match_family(&mut self, family: &str, weight: f32, italic: bool) -> Option<FaceId> {
         if family.eq_ignore_ascii_case("system-ui") {
-            return Some(self.system());
+            return self.ui_face(None, weight, italic);
+        }
+        if family.eq_ignore_ascii_case("ui-monospace") {
+            return self.ui_face(Some(".AppleSystemUIFontMonospaced-Regular"), weight, italic);
         }
         let lower = family.to_ascii_lowercase();
         let name = generic(&lower).unwrap_or(family);
@@ -105,5 +108,49 @@ impl Fonts {
         let got = Cf::new(unsafe { ffi::CTFontCopyFamilyName(font.get()) })
             .map(|s| ffi::to_string(&s))?;
         got.eq_ignore_ascii_case(name).then(|| self.intern(font))
+    }
+
+    // the system font, or its monospaced design, at a weight and slant: the system faces are found by
+    // their traits, not by family name
+    fn ui_face(&mut self, name: Option<&str>, weight: f32, italic: bool) -> Option<FaceId> {
+        let base = match name {
+            None if weight == 400.0 && !italic => return Some(self.system()),
+            None => {
+                // SAFETY: the null language selects the user's
+                Cf::new(unsafe {
+                    ffi::CTFontCreateUIFontForLanguage(
+                        ffi::kCTFontUIFontSystem,
+                        REF_SIZE,
+                        std::ptr::null(),
+                    )
+                })?
+            }
+            Some(n) => {
+                let s = ffi::string(n)?;
+                // SAFETY: `s` is a live CFString
+                Cf::new(unsafe { ffi::CTFontCreateWithName(s.get(), REF_SIZE, std::ptr::null()) })?
+            }
+        };
+        if weight == 400.0 && !italic {
+            return Some(self.intern(base));
+        }
+        let w = ffi::number_f64(weight_trait(weight))?;
+        let slant = ffi::number_f64(if italic { 0.07 } else { 0.0 })?;
+        // SAFETY: the attribute keys are CoreText's constants and the values live CF objects
+        let font = unsafe {
+            let traits = ffi::dictionary(
+                &[ffi::kCTFontWeightTrait, ffi::kCTFontSlantTrait],
+                &[w.get(), slant.get()],
+            )?;
+            let attrs = ffi::dictionary(&[ffi::kCTFontTraitsAttribute], &[traits.get()])?;
+            let desc = Cf::new(ffi::CTFontDescriptorCreateWithAttributes(attrs.get()))?;
+            Cf::new(ffi::CTFontCreateCopyWithAttributes(
+                base.get(),
+                REF_SIZE,
+                std::ptr::null(),
+                desc.get(),
+            ))?
+        };
+        Some(self.intern(font))
     }
 }
