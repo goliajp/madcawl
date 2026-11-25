@@ -23,6 +23,11 @@ pub struct Config {
     /// at once after a quiet spell
     pub rate: f64,
     pub burst: f64,
+    /// An inherited, already listening socket to accept on instead of
+    /// binding the socket path
+    pub listen_fd: Option<i32>,
+    /// With no session open for this long, the process exits
+    pub exit_idle: Option<Duration>,
 }
 
 impl Config {
@@ -43,13 +48,17 @@ impl Config {
             max_reply: 4 << 20,
             rate: 50.0,
             burst: 100.0,
+            listen_fd: None,
+            exit_idle: None,
         }
     }
 }
 
-pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds>]
+pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds>] [--listen-fd N] [--exit-idle <seconds>]
          pages and their stylesheets open only from below the --allow directories;
-         without --allow, only from below the current directory";
+         without --allow, only from below the current directory;
+         --listen-fd accepts on an inherited listening socket instead of binding <socket>;
+         --exit-idle exits once no session has been open for that long";
 
 /// The configuration the `--serve` command line gives.
 pub fn parse_args(args: &[&str]) -> Option<Config> {
@@ -72,6 +81,8 @@ pub fn parse_args(args: &[&str]) -> Option<Config> {
             "--pages" => c.max_pages = n()?,
             "--total-pages" => c.max_total_pages = n()?,
             "--idle" => c.idle = Duration::from_secs(n()? as u64),
+            "--listen-fd" => c.listen_fd = Some(v.parse::<i32>().ok().filter(|&fd| fd > 2)?),
+            "--exit-idle" => c.exit_idle = Some(Duration::from_secs(n()? as u64)),
             _ => return None,
         }
     }

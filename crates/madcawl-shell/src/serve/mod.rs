@@ -9,6 +9,7 @@
 //! anything of for the idle time is closed, and a session's pages close
 //! with it.
 
+mod activation;
 mod config;
 mod conn;
 mod limit;
@@ -20,6 +21,7 @@ mod wire;
 
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Instant;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -52,6 +54,8 @@ pub(crate) struct Shared {
     pub active: AtomicUsize,
     /// Pages open across every session
     pub pages: AtomicUsize,
+    /// When the last session ended, or the host started
+    pub quiet_since: Mutex<Instant>,
 }
 
 pub struct Server {
@@ -75,10 +79,14 @@ fn refuse(stream: &mut std::os::unix::net::UnixStream, f: &Frame) {
 }
 
 impl Server {
-    /// Binds the socket (only the user may connect, see `socket::bind`)
-    /// and opens the audit log.
+    /// Binds the socket (only the user may connect, see `socket::bind`),
+    /// or takes the inherited one `listen_fd` names, and opens the audit
+    /// log.
     pub fn bind(config: Config) -> std::io::Result<Server> {
-        let listener = socket::bind(&config.socket)?;
+        let listener = match config.listen_fd {
+            Some(fd) => activation::inherited(fd)?,
+            None => socket::bind(&config.socket)?,
+        };
         let log = AuditLog::open(&config.audit)?;
         let shared = Arc::new(Shared {
             config,
@@ -86,27 +94,55 @@ impl Server {
             next_session: AtomicU32::new(1),
             active: AtomicUsize::new(0),
             pages: AtomicUsize::new(0),
+            quiet_since: Mutex::new(Instant::now()),
         });
         Ok(Server { listener, shared })
     }
 
     /// Accepts sessions, each on a thread of its own, for as long as the
-    /// process lives; a failed accept or spawn is reported and passed
+    /// process lives, or with `exit_idle` until no session has been open
+    /// for that long; a failed accept or spawn is reported and passed
     /// over.
     pub fn run(self) -> std::io::Result<()> {
-        for stream in self.listener.incoming() {
-            match stream {
-                Ok(s) => self.start(s),
-                Err(e) => {
-                    eprintln!("madcawl-shell: accept: {e}");
-                    // out of descriptors: give sessions a moment to end
-                    if matches!(e.raw_os_error(), Some(23 | 24)) {
-                        std::thread::sleep(Duration::from_millis(100));
-                    }
+        let Some(idle) = self.shared.config.exit_idle else {
+            for stream in self.listener.incoming() {
+                self.take(stream);
+            }
+            return Ok(());
+        };
+        let fd = std::os::fd::AsRawFd::as_raw_fd(&self.listener);
+        loop {
+            // while sessions are open, wake once an idle period to look
+            // again: nothing is waited on in between
+            let wait = if self.shared.active.load(Ordering::SeqCst) == 0 {
+                let quiet = self.shared.quiet_since.lock().unwrap_or_else(|e| e.into_inner()).elapsed();
+                match idle.checked_sub(quiet) {
+                    Some(w) if !w.is_zero() => w,
+                    _ => return Ok(()),
+                }
+            } else {
+                idle
+            };
+            if activation::readable(fd, wait)? {
+                match self.listener.accept() {
+                    Err(e) if activation::fatal(&e) => return Err(e),
+                    r => self.take(r.map(|(s, _)| s)),
                 }
             }
         }
-        Ok(())
+    }
+
+    fn take(&self, stream: std::io::Result<std::os::unix::net::UnixStream>) {
+        match stream {
+            Ok(s) => self.start(s),
+            Err(e) => {
+                eprintln!("madcawl-shell: accept: {e}");
+                // out of descriptors: give sessions a moment to end
+                if matches!(e.raw_os_error(), Some(23 | 24)) {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
+        }
     }
 
     fn start(&self, mut stream: std::os::unix::net::UnixStream) {
@@ -132,6 +168,8 @@ impl Server {
                 if let Some(s) = s {
                     conn::Conn::new(id, &shared).run(s);
                 }
+                // the time first: a host counting no sessions must find it set
+                *shared.quiet_since.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
                 shared.active.fetch_sub(1, Ordering::SeqCst);
             });
         if let Err(e) = spawned {
