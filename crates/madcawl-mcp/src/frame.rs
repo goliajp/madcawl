@@ -40,6 +40,9 @@ pub mod tag {
     pub const WIDTH: u8 = 17;
     pub const HEIGHT: u8 = 18;
     pub const CHARSET: u8 = 19;
+    pub const WHAT: u8 = 20;
+    pub const FORMAT: u8 = 21;
+    pub const OFFSET: u8 = 22;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

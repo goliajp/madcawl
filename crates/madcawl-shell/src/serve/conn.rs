@@ -16,7 +16,7 @@ use super::{Shared, code, error_frame};
 
 mod open;
 
-const VIEWS: [&str; 4] = ["outline", "snapshot", "markdown", "find"];
+const VIEWS: [&str; 5] = ["outline", "snapshot", "markdown", "find", "extract"];
 
 pub(crate) struct Conn<'a> {
     id: u32,

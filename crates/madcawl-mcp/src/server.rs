@@ -155,7 +155,7 @@ mod tests {
         assert_eq!(
             names,
             [
-                "open", "close", "pages", "outline", "snapshot", "read", "find", "diff"
+                "open", "close", "pages", "outline", "snapshot", "read", "find", "extract", "diff"
             ]
         );
         let call = lines[2].get("result").unwrap();

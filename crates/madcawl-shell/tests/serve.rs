@@ -41,6 +41,26 @@ fn an_agent_reads_a_page_over_the_socket() {
 }
 
 #[test]
+fn an_agent_extracts_records_in_an_envelope_and_the_audit_names_it() {
+    let f = Fixture::new();
+    f.start();
+    let mut m = f.mcp();
+    m.ok("open", &path_arg(&f.page()));
+    let links = m.ok("extract", r#"{"page":"p1","what":"links"}"#);
+    assert!(links.contains("<<page-content-"), "{links}");
+    assert!(
+        links.contains(r#""text":"Other page","url":"other.html""#),
+        "{links}"
+    );
+    assert!(!links.contains("folded"), "{links}");
+    let (bad, err) = m.call("extract", r#"{"page":"p1","what":"cells"}"#);
+    assert!(err && bad.contains("`what`"), "{bad}");
+    drop(m);
+    let audit = f.audit();
+    assert!(audit.lines().any(|l| l.contains("extract")), "{audit}");
+}
+
+#[test]
 fn page_content_comes_in_an_envelope_that_the_page_cannot_close() {
     let f = Fixture::new();
     f.start();

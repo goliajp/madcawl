@@ -38,7 +38,7 @@ fn prop(ty: &str, desc: &str) -> Value {
     obj([("type", s(ty)), ("description", s(desc))])
 }
 
-fn tool(name: &str, desc: &str, props: Vec<(&str, Value)>, required: &[&str]) -> Value {
+pub(crate) fn tool(name: &str, desc: &str, props: Vec<(&str, Value)>, required: &[&str]) -> Value {
     let props = Value::Obj(props.into_iter().map(|(k, v)| (k.to_owned(), v)).collect());
     let required = Value::Arr(required.iter().map(|r| s(r)).collect());
     let schema = obj([
@@ -57,7 +57,7 @@ fn page_prop() -> (&'static str, Value) {
     ("page", prop("string", "Page id from open, e.g. p1"))
 }
 
-fn view_props(name: &str) -> Vec<(&'static str, Value)> {
+pub(crate) fn view_props(name: &str) -> Vec<(&'static str, Value)> {
     let budget = if matches!(name, "snapshot" | "read") {
         "Most estimated tokens to return (default 6000); the rest is folded into lines with a [ref] to expand"
     } else {
@@ -133,6 +133,7 @@ pub fn list() -> Value {
         }
         all.push(tool(name, desc, props, &["page"]));
     }
+    all.push(crate::extract::tool(view_props("extract")));
     all.push(tool(
         "diff",
         "What changed on the page since the reply numbered `since` (every reply gives its seq).",
@@ -219,7 +220,7 @@ fn view_frame(name: &str, view: u64, args: &Value) -> Result<Frame, String> {
     Ok(f)
 }
 
-fn request(name: &str, args: &Value, cwd: &Path) -> Result<Frame, String> {
+pub(crate) fn request(name: &str, args: &Value, cwd: &Path) -> Result<Frame, String> {
     match name {
         "open" => open_frame(args, cwd),
         "close" => Ok(Frame::new(kind::CLOSE).num(tag::PAGE, page_of(args)?)),
@@ -232,6 +233,7 @@ fn request(name: &str, args: &Value, cwd: &Path) -> Result<Frame, String> {
                 .num(tag::PAGE, page_of(args)?)
                 .num(tag::SINCE, since))
         }
+        "extract" => crate::extract::frame(view_frame("extract", 4, args)?, args),
         _ => match VIEWS.iter().find(|v| v.0 == name) {
             Some(&(n, view, _)) => view_frame(n, view, args),
             None => Err(format!("unknown tool {name:?}")),
@@ -277,6 +279,8 @@ pub fn call(client: &mut Client, name: &str, args: &Value, cwd: &Path) -> (Strin
     };
     let page = page_of(args).ok().filter(|_| name != "open");
     match client.call(&f) {
+        // the extraction's own first line says where more records start
+        Ok(reply) if name == "extract" => render(page, &crate::extract::without_folded(reply)),
         Ok(reply) => render(page, &reply),
         Err(e) => (format!("error: {e}"), true),
     }

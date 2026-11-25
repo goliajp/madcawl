@@ -6,6 +6,7 @@
 //! its own JSON and frames.
 
 pub mod client;
+mod extract;
 pub mod frame;
 pub mod json;
 mod json_number;
