@@ -71,11 +71,16 @@ fn an_activated_host_serves_leaves_when_idle_and_the_queue_waits_for_the_next() 
     assert!(status.success(), "{status}");
     assert!(f.config.socket.exists(), "the parent's socket stays");
 
-    // nobody accepts now; the connection waits in the queue
-    let mut m = f.mcp();
+    // nobody accepts now: a request made before the next host starts
+    // waits in the queue and is answered by it
+    let mut early = std::os::unix::net::UnixStream::connect(&f.config.socket).unwrap();
+    let ask = madcawl_agent::Frame::new(madcawl_agent::kind::PAGES);
+    std::io::Write::write_all(&mut early, &serve_fixture::EncodeVec::encode_vec(&ask)).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
     let mut second = host(&f, &listener, 1);
-    assert!(m.ok("open", &path_arg(&f.page())).starts_with("opened p1"));
-    drop(m);
+    let reply = serve_fixture::exchange(&mut early, &[]);
+    assert_ne!(reply.kind, madcawl_agent::kind::ERROR, "{reply:?}");
+    drop(early);
     assert!(exits_within(&mut second, Duration::from_secs(5)).is_some_and(|s| s.success()));
 }
 

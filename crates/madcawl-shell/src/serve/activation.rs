@@ -26,6 +26,12 @@ type NFds = u64;
 const POLLIN: i16 = 1;
 const F_SETFD: i32 = 2;
 const FD_CLOEXEC: i32 = 1;
+const F_GETFL: i32 = 3;
+const F_SETFL: i32 = 4;
+#[cfg(target_os = "macos")]
+const O_NONBLOCK: i32 = 0x4;
+#[cfg(not(target_os = "macos"))]
+const O_NONBLOCK: i32 = 0o4000;
 
 unsafe extern "C" {
     fn poll(fds: *mut PollFd, n: NFds, timeout_ms: i32) -> i32;
@@ -45,6 +51,14 @@ pub(crate) fn inherited(fd: i32) -> std::io::Result<UnixListener> {
     // SAFETY: fcntl on a descriptor we checked is open; sessions the
     // host starts never run a program, but nothing it starts gets it
     if unsafe { fcntl(fd, F_SETFD, FD_CLOEXEC) } != 0 {
+        return Err(Error::last_os_error());
+    }
+    // the flags are shared with the parent's copy: a parent that set
+    // O_NONBLOCK would make accept spin and, on macOS, hand the flag to
+    // every accepted connection
+    // SAFETY: as above
+    let flags = unsafe { fcntl(fd, F_GETFL) };
+    if flags < 0 || (flags & O_NONBLOCK != 0 && unsafe { fcntl(fd, F_SETFL, flags & !O_NONBLOCK) } != 0) {
         return Err(Error::last_os_error());
     }
     // SAFETY: the fd is the parent's gift to this process, owned from here on
@@ -71,6 +85,9 @@ pub(crate) fn readable(fd: i32, wait: Duration) -> std::io::Result<bool> {
 /// An accept error that every later accept would repeat: the inherited
 /// socket is not one to accept on.
 pub(crate) fn fatal(e: &Error) -> bool {
-    // EINVAL not listening, ENOTSOCK, EOPNOTSUPP, EBADF
-    matches!(e.raw_os_error(), Some(22 | 38 | 45 | 102 | 95 | 9))
+    // EINVAL not listening, EBADF, ENOTSOCK, ENOTSUP / EOPNOTSUPP
+    #[cfg(target_os = "macos")]
+    return matches!(e.raw_os_error(), Some(22 | 9 | 38 | 45 | 102));
+    #[cfg(not(target_os = "macos"))]
+    return matches!(e.raw_os_error(), Some(22 | 9 | 88 | 95));
 }

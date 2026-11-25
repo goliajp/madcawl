@@ -106,7 +106,11 @@ impl Server {
     pub fn run(self) -> std::io::Result<()> {
         let Some(idle) = self.shared.config.exit_idle else {
             for stream in self.listener.incoming() {
-                self.take(stream);
+                match stream {
+                    // an inherited socket that cannot be accepted on
+                    Err(e) if self.shared.config.listen_fd.is_some() && activation::fatal(&e) => return Err(e),
+                    s => self.take(s),
+                }
             }
             return Ok(());
         };

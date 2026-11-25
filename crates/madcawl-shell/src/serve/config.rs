@@ -58,7 +58,8 @@ pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--au
          pages and their stylesheets open only from below the --allow directories;
          without --allow, only from below the current directory;
          --listen-fd accepts on an inherited listening socket instead of binding <socket>;
-         --exit-idle exits once no session has been open for that long";
+         --exit-idle exits once no session has been open for that long (checked once a period
+         while sessions are open, so up to twice that after the last one ends)";
 
 /// The configuration the `--serve` command line gives.
 pub fn parse_args(args: &[&str]) -> Option<Config> {
