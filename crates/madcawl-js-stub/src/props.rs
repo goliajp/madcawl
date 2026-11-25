@@ -1,7 +1,7 @@
 //! Properties, calls, realms and errors.
 //!
-//! The stub has no prototype objects: a wrapper's class members are
-//! found in its static class table, after its own properties.
+//! A name is looked up along the prototype chain (`proto.rs`): own
+//! properties, then the members each host class on the chain declares.
 
 use std::any::TypeId;
 
@@ -10,6 +10,7 @@ use madcawl_str::DomString;
 
 use crate::cell::{Body, Call, Cell, ErasedClass, PropKey};
 use crate::isolate::{Realm, RealmData, Stub, name_bytes};
+use crate::proto::Link;
 use crate::value::{THROWN, UNDEFINED, Value};
 
 /// A test's script function: `fn(engine, host, captures, this, args)`.
@@ -30,22 +31,17 @@ pub(crate) fn class_as<H: 'static>(c: &ErasedClass) -> &'static ClassDef<Stub, H
     unsafe { &*(c.def as *const ClassDef<Stub, H>) }
 }
 
-/// The class member named `name`, for a read or for a write.
-fn member<H: 'static>(
-    def: &'static ClassDef<Stub, H>,
-    name: &[u8],
-    write: bool,
-) -> Option<Member> {
-    for c in def.chain() {
-        if let Some(a) = c.attributes.iter().find(|a| a.name.as_bytes() == name) {
-            return Some(if write { Member::Set(a.set.map(|f| f.get())) } else { Member::Get(a.get.get()) });
-        }
-        if let Some(i) = c.operations.iter().position(|o| o.name.as_bytes() == name) {
-            return (!write).then_some(Member::Method(std::ptr::from_ref(c) as usize, i as u16));
-        }
-        if let Some(k) = c.constants.iter().find(|k| k.name.as_bytes() == name) {
-            return (!write).then_some(Member::Constant(k.value));
-        }
+/// The member named `name` that class `c` itself declares, for a read
+/// or for a write.
+fn member<H: 'static>(c: &'static ClassDef<Stub, H>, name: &[u8], write: bool) -> Option<Member> {
+    if let Some(a) = c.attributes.iter().find(|a| a.name.as_bytes() == name) {
+        return Some(if write { Member::Set(a.set.map(|f| f.get())) } else { Member::Get(a.get.get()) });
+    }
+    if let Some(i) = c.operations.iter().position(|o| o.name.as_bytes() == name) {
+        return (!write).then_some(Member::Method(std::ptr::from_ref(c) as usize, i as u16));
+    }
+    if let Some(k) = c.constants.iter().find(|k| k.name.as_bytes() == name) {
+        return (!write).then_some(Member::Constant(k.value));
     }
     None
 }
@@ -59,46 +55,57 @@ impl Stub {
             }
             return Stub::owned(UNDEFINED);
         }
+        // SAFETY: a live cell, read only
+        self.own(unsafe { Cell::at(obj) });
         let k = self.key(key);
-        // SAFETY: a live cell, borrowed for this read only
+        if let PropKey::Index(i) = k {
+            return self.get_index(host, obj, k, i);
+        }
+        let PropKey::Name(a) = k else { unreachable!() };
+        let name = name_bytes(a);
+        for link in self.chain::<H>(obj) {
+            match link {
+                Link::Own(o) => {
+                    // SAFETY: a live cell on the chain, read only
+                    let c = unsafe { Cell::at(o) };
+                    if let Some(&(_, v)) = c.props.iter().find(|(pk, _)| *pk == k) {
+                        self.retain_value(v);
+                        return Stub::owned(v);
+                    }
+                    if let Some(v) = self.virtual_prop::<H>(o, &name) {
+                        return v;
+                    }
+                }
+                Link::Class(def, realm) => match member(def, &name, false) {
+                    Some(Member::Get(get)) => return Stub::owned(self.invoke(host, get, obj, &[], 0)),
+                    Some(Member::Method(table, i)) => return self.method::<H>(realm, table, i),
+                    Some(Member::Constant(n)) => return Stub::owned(Value::number(n)),
+                    _ => {}
+                },
+            }
+        }
+        Stub::owned(UNDEFINED)
+    }
+
+    /// An index: an own property, then the receiver's index getter.
+    fn get_index<H: Host<Stub>>(&mut self, host: &mut H, obj: Value, k: PropKey, i: u32) -> Owned<Value> {
+        // SAFETY: a live cell, read only
         let c = unsafe { Cell::at(obj) };
-        self.own(c);
         if let Some(&(_, v)) = c.props.iter().find(|(pk, _)| *pk == k) {
             self.retain_value(v);
             return Stub::owned(v);
         }
-        if let (Body::Function { name, length, .. }, PropKey::Name(a)) = (&c.body, k) {
-            let (name, length) = (*name, *length);
-            return match name_bytes(a).as_slice() {
-                b"name" => self.string(DomString::from_wtf8(name.as_bytes())),
-                b"length" => Stub::owned(Value::number(length as f64)),
-                _ => Stub::owned(UNDEFINED),
-            };
-        }
-        let (Body::Wrapper { class, .. }, realm) = (&c.body, c.realm) else {
+        let Body::Wrapper { class, .. } = &c.body else { return Stub::owned(UNDEFINED) };
+        let def = class_as::<H>(class);
+        let Some(f) = def.chain().find_map(|c| c.interceptors.and_then(|x| x.index)).map(|f| f.get()) else {
             return Stub::owned(UNDEFINED);
         };
-        let def = class_as::<H>(class);
-        let name = match k {
-            PropKey::Name(a) => name_bytes(a),
-            PropKey::Index(i) => {
-                if let Some(f) = def.chain().find_map(|c| c.interceptors.and_then(|x| x.index)).map(|f| f.get()) {
-                    let r = self.host_call(host, |ctx| {
-                        // SAFETY: a table entry of host type H, called with a
-                        // context for H
-                        unsafe { f(ctx, obj.0, i) }
-                    });
-                    return Stub::owned(if r == crate::value::ABSENT { UNDEFINED } else { r });
-                }
-                return Stub::owned(UNDEFINED);
-            }
-        };
-        match member(def, &name, false) {
-            Some(Member::Get(get)) => Stub::owned(self.invoke(host, get, obj, &[])),
-            Some(Member::Method(table, i)) => self.method::<H>(realm, table, i),
-            Some(Member::Constant(n)) => Stub::owned(Value::number(n)),
-            _ => Stub::owned(UNDEFINED),
-        }
+        let r = self.host_call(host, 0, |ctx| {
+            // SAFETY: a table entry of host type H, called with a context
+            // for H
+            unsafe { f(ctx, obj.0, i) }
+        });
+        Stub::owned(if r == crate::value::ABSENT { UNDEFINED } else { r })
     }
 
     pub(crate) fn set_prop<H: Host<Stub>>(&mut self, host: &mut H, obj: Value, key: Key<'_>, v: Value) -> bool {
@@ -111,14 +118,18 @@ impl Stub {
             }
             return true;
         }
+        // SAFETY: a live cell, read only
+        self.own(unsafe { Cell::at(obj) });
         let k = self.key(key);
-        // SAFETY: a live cell
-        let c = unsafe { Cell::at(obj) };
-        self.own(c);
-        if let (Body::Wrapper { class, .. }, PropKey::Name(a)) = (&c.body, k) {
-            match member(class_as::<H>(class), &name_bytes(a), true) {
+        if let PropKey::Name(a) = k {
+            let name = name_bytes(a);
+            let setter = self.chain::<H>(obj).into_iter().find_map(|l| match l {
+                Link::Class(def, _) => member(def, &name, true),
+                Link::Own(_) => None,
+            });
+            match setter {
                 Some(Member::Set(Some(set))) => {
-                    let r = self.invoke(host, set, obj, &[v]);
+                    let r = self.invoke(host, set, obj, &[v], 0);
                     let ok = r != THROWN;
                     self.release_value(r);
                     return ok;
@@ -128,22 +139,25 @@ impl Stub {
                 _ => {}
             }
         }
+        // SAFETY: a live cell
+        let c = unsafe { Cell::at(obj) };
+        let slot = c.props.iter().position(|(pk, _)| *pk == k);
+        // a frozen object takes no write, a non-extensible one no new
+        // property: ignored, as outside strict mode
+        if c.frozen || (slot.is_none() && !c.extensible) {
+            return true;
+        }
         self.retain_value(v);
         // SAFETY: as above; retain_value touched only `v`
         let c = unsafe { Cell::at(obj) };
-        let old = match c.props.iter_mut().find(|(pk, _)| *pk == k) {
-            Some(slot) => Some(std::mem::replace(&mut slot.1, v)),
+        let old = match slot {
+            Some(i) => Some(std::mem::replace(&mut c.props[i].1, v)),
             None => {
                 c.props.push((k, v));
                 None
             }
         };
-        if let Body::Wrapper { preserved: p @ false, class, obj: node, .. } = &mut c.body {
-            *p = true;
-            let (class, node) = (*class, *node);
-            c.set_count(c.count() + 1);
-            (class_as::<H>(&class).host_ops().wrapper_needs_preserve)(host, node);
-        }
+        self.preserve(host, obj);
         if let Some(old) = old {
             self.release_value(old);
         }
@@ -158,6 +172,9 @@ impl Stub {
         let k = self.key(key);
         // SAFETY: a live cell
         let c = unsafe { Cell::at(obj) };
+        if c.frozen {
+            return true;
+        }
         if let Some(i) = c.props.iter().position(|(pk, _)| *pk == k) {
             let (_, v) = c.props.remove(i);
             self.release_value(v);
@@ -165,16 +182,32 @@ impl Stub {
         true
     }
 
+    /// The wrapper `obj` gained state script can observe: the engine
+    /// counts the edge from its host object, and tells the host.
+    pub(crate) fn preserve<H: Host<Stub>>(&mut self, host: &mut H, obj: Value) {
+        if !obj.is_cell() {
+            return;
+        }
+        // SAFETY: a live cell
+        let c = unsafe { Cell::at(obj) };
+        if let Body::Wrapper { preserved: p @ false, class, obj: node, .. } = &mut c.body {
+            *p = true;
+            let (class, node) = (*class, *node);
+            c.set_count(c.count() + 1);
+            (class_as::<H>(&class).host_ops().wrapper_needs_preserve)(host, node);
+        }
+    }
+
     fn method<H: Host<Stub>>(&mut self, realm: u32, table: usize, i: u16) -> Owned<Value> {
-        let f = match self.realm_data(realm).methods.get(&(table, i)) {
+        // SAFETY: the address of a static class table of host type H,
+        // taken in `member`
+        let def = unsafe { &*(table as *const ClassDef<Stub, H>) };
+        let f = match self.realm_data(realm).methods.get(&(def.id.0, i)) {
             Some(&f) => f,
             None => {
-                // SAFETY: the address of a static class table of host
-                // type H, taken in `member`
-                let def = unsafe { &*(table as *const ClassDef<Stub, H>) };
                 let op = &def.operations[i as usize];
-                let f = self.function::<H>(realm, op.name, op.length, op.call).into_raw();
-                self.realm_data(realm).methods.insert((table, i), f);
+                let f = self.function::<H>(realm, op.name, op.length, op.call, 0).into_raw();
+                self.realm_data(realm).methods.insert((def.id.0, i), f);
                 f
             }
         };
@@ -182,9 +215,9 @@ impl Stub {
         Stub::owned(f)
     }
 
-    pub(crate) fn function<H: Host<Stub>>(&mut self, realm: u32, name: &'static str, length: u8, f: Bound<HostFn, Stub, H>) -> Owned<Value> {
+    pub(crate) fn function<H: Host<Stub>>(&mut self, realm: u32, name: &'static str, length: u8, f: Bound<HostFn, Stub, H>, data: u64) -> Owned<Value> {
         // the binding to H is checked again at each call, by the type id
-        let call = Call::Host { f: f.get(), host: TypeId::of::<H>() };
+        let call = Call::Host { f: f.get(), host: TypeId::of::<H>(), data };
         Stub::owned(self.alloc(realm, Body::Function { name, length, call }))
     }
 
@@ -200,6 +233,7 @@ impl Stub {
     }
 
     pub(crate) fn call_value<H: Host<Stub>>(&mut self, host: &mut H, f: Value, this: Value, args: &[Value]) -> Owned<Value> {
+        self.deliver(host);
         if !self.is_callable(f) {
             return self.throw_error(ErrorKind::Type, "not a function");
         }
@@ -209,11 +243,12 @@ impl Stub {
         let saved = std::mem::replace(&mut self.current, c.realm);
         let Body::Function { call, .. } = &c.body else { unreachable!("callable") };
         let r = match call {
-            Call::Host { f, host: t } => {
+            Call::Host { f, host: t, data } => {
                 assert_eq!(*t, TypeId::of::<H>(), "one host type per isolate");
-                let f = *f;
-                Stub::owned(self.invoke(host, f, this, args))
+                let (f, data) = (*f, *data);
+                Stub::owned(self.invoke(host, f, this, args, data))
             }
+            Call::Interface { .. } => self.throw_error(ErrorKind::Type, "illegal constructor"),
             Call::Closure { body, host: t, captures } => {
                 assert_eq!(*t, TypeId::of::<H>(), "one host type per isolate");
                 // SAFETY: erased from this type, checked above
@@ -232,8 +267,8 @@ impl Stub {
     }
 
     /// Call a host function from a class table or a function cell.
-    fn invoke<H: Host<Stub>>(&mut self, host: &mut H, f: HostFn, this: Value, args: &[Value]) -> Value {
-        self.host_call(host, |ctx| {
+    pub(crate) fn invoke<H: Host<Stub>>(&mut self, host: &mut H, f: HostFn, this: Value, args: &[Value], data: u64) -> Value {
+        self.host_call(host, data, |ctx| {
             // SAFETY: a host function of host type H, called with a context
             // for H; `Value` is a transparent word
             unsafe { f(ctx, this.0, args.as_ptr().cast(), args.len()) }
@@ -241,11 +276,11 @@ impl Stub {
     }
 
     /// Enter host code through `call`, counted in the script depth.
-    fn host_call<H: Host<Stub>>(&mut self, host: &mut H, call: impl FnOnce(*mut Ctx) -> u64) -> Value {
+    fn host_call<H: Host<Stub>>(&mut self, host: &mut H, data: u64, call: impl FnOnce(*mut Ctx) -> u64) -> Value {
         if !self.enter() {
             return crate::value::THROWN;
         }
-        let mut ctx = Ctx::new(self, host);
+        let mut ctx = Ctx::new(self, host, data);
         let r = Value(call(&mut ctx));
         self.leave(r)
     }
@@ -256,7 +291,6 @@ impl Stub {
             ErrorKind::Range => "RangeError",
             ErrorKind::Syntax => "SyntaxError",
             ErrorKind::Reference => "ReferenceError",
-            ErrorKind::Dom(name) => name,
         };
         let e = self.alloc(self.current, Body::Object);
         for (k, s) in [(b"name".as_slice(), name), (b"message", message)] {
@@ -271,7 +305,7 @@ impl Stub {
     pub(crate) fn make_realm(&mut self) -> Realm {
         let r = self.realms.len() as u32;
         let global = self.alloc(r, Body::Object);
-        self.realms.push(RealmData { global, detached: false, methods: Default::default() });
+        self.realms.push(RealmData { global, detached: false, methods: Default::default(), protos: Default::default() });
         Realm(r, self.id)
     }
 }
@@ -284,6 +318,7 @@ pub(crate) fn detach(e: &mut Stub, realm: Realm) {
     }
     d.detached = true;
     let mut held: Vec<Value> = d.methods.drain().map(|(_, f)| f).collect();
+    held.extend(d.protos.drain().flat_map(|(_, (i, p))| [i, p]));
     held.push(d.global);
     for v in held {
         e.release_value(v);

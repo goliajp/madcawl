@@ -1,8 +1,8 @@
 use madcawl_dom::{NodeId, NodeKind};
-use madcawl_js::{Engine, ErrorKind};
+use madcawl_js::Engine;
 use madcawl_str::{Atom, DomString};
 
-use crate::convert::{Thrown, throw};
+use crate::convert::{Thrown, throw_dom};
 use crate::host::DomHost;
 
 pub(crate) fn document_element<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<Option<NodeId>, Thrown> {
@@ -19,18 +19,27 @@ pub(crate) fn create_element<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: No
     let mut b = Vec::new();
     local.write_wtf8(&mut b);
     if bad_name(&b) {
-        return Err(throw(e, ErrorKind::Dom("InvalidCharacterError"), "not a valid element name"));
+        return Err(throw_dom(e, h, "InvalidCharacterError", "not a valid element name"));
     }
     b.make_ascii_lowercase();
-    h.dom.new_element(&b).ok_or_else(|| full(e))
+    match h.dom.new_element(&b) {
+        Some(n) => Ok(n),
+        None => Err(full(e, h)),
+    }
 }
 
 pub(crate) fn create_text_node<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: NodeId, data: DomString) -> Result<NodeId, Thrown> {
-    h.dom.new_text(data).ok_or_else(|| full(e))
+    match h.dom.new_text(data) {
+        Some(n) => Ok(n),
+        None => Err(full(e, h)),
+    }
 }
 
 pub(crate) fn create_comment<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: NodeId, data: DomString) -> Result<NodeId, Thrown> {
-    h.dom.new_comment(data).ok_or_else(|| full(e))
+    match h.dom.new_comment(data) {
+        Some(n) => Ok(n),
+        None => Err(full(e, h)),
+    }
 }
 
 pub(crate) fn get_element_by_id<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId, id: DomString) -> Result<Option<NodeId>, Thrown> {
@@ -44,6 +53,6 @@ pub(crate) fn get_element_by_id<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: 
         .find(|&n| dom.kind(n) == NodeKind::Element && dom.element_id(n) == Some(id)))
 }
 
-fn full<E: Engine>(e: &mut E) -> Thrown {
-    throw(e, ErrorKind::Dom("QuotaExceededError"), "the document holds all the nodes it may")
+fn full<E: Engine>(e: &mut E, h: &mut DomHost<E>) -> Thrown {
+    throw_dom(e, h, "QuotaExceededError", "the document holds all the nodes it may")
 }

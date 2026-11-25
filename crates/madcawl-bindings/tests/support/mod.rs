@@ -6,7 +6,7 @@
 use madcawl_bindings::DomHost;
 use madcawl_dom::{Dom, NodeId};
 use madcawl_js::{Deadline, Engine, Key, Owned, Step};
-use madcawl_js_stub::{CollectStats, Stub, Value};
+use madcawl_js_stub::{ClosureFn, CollectStats, Stub, Value};
 use madcawl_str::DomString;
 
 pub type V = Owned<Value>;
@@ -168,4 +168,56 @@ impl Js {
         let a = self.h.dom.audit();
         assert_eq!(a.mismatches(), 0, "{a:?}");
     }
+
+    /// `document.createElement(name)`.
+    pub fn element(&mut self, name: &str) -> V {
+        let doc = self.doc();
+        let n = self.str(name);
+        let el = self.call(doc.get(), "createElement", &[n.get()]);
+        assert!(!Stub::is_thrown(el.get()), "createElement threw");
+        self.drop(n);
+        self.drop(doc);
+        el
+    }
+
+    /// An `<html>` in the document, the parent connected nodes go under.
+    pub fn connected_root(&mut self) -> V {
+        let doc = self.doc();
+        let html = self.element("html");
+        self.run(doc.get(), "appendChild", &[html.get()]);
+        self.drop(doc);
+        html
+    }
+
+    /// A script function with body `body` that closes over `captures`.
+    pub fn function(&mut self, body: ClosureFn<DomHost<Stub>>, captures: Vec<V>) -> V {
+        self.e.new_closure::<DomHost<Stub>>(self.h.realm, body, captures)
+    }
+
+    /// The number `obj.name` holds, or 0.
+    pub fn number(&mut self, obj: Value, name: &str) -> f64 {
+        let v = self.get(obj, name);
+        let n = self.e.as_number(v.get()).unwrap_or(0.0);
+        self.e.release(v);
+        n
+    }
+}
+
+pub fn key(name: &str) -> DomString {
+    DomString::from_wtf8(name.as_bytes())
+}
+
+/// `obj.name(...args)` from inside a script function; the result is
+/// dropped, and whether it threw is returned.
+pub fn call_in(e: &mut Stub, h: &mut DomHost<Stub>, obj: Value, name: &str, args: &[Value]) -> bool {
+    let f = e.get(h, obj, Key::Str(&key(name)));
+    let r = e.call(h, f.get(), obj, args);
+    e.release(f);
+    let threw = Stub::is_thrown(r.get());
+    if threw {
+        let _sentinel = r.into_raw();
+    } else {
+        e.release(r);
+    }
+    threw
 }

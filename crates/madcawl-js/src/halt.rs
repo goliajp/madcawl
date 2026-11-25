@@ -4,8 +4,8 @@
 pub trait Control {
     type Interrupt: Interrupt;
     fn interrupt_handle(&self) -> Self::Interrupt;
-    /// Past `soft` the engine calls back the host; past `hard` it ends
-    /// the running script uncatchably.
+    /// Past `soft` the engine calls [`crate::Host::memory_pressure`];
+    /// past `hard` it ends the running script uncatchably.
     fn set_memory_limits(&mut self, soft: usize, hard: usize);
     /// Memory host objects keep alive (nodes, attributes, decoded
     /// images), counted against the limits.
@@ -38,9 +38,13 @@ pub trait Interrupt: Send + Sync + Clone {
     fn terminate(&self);
     /// Stop the script running when the request is seen (a script that
     /// runs too long) and keep the isolate for later tasks once the host
-    /// resumes it. A request seen while no script runs is dropped, so it
-    /// never ends the next task. Optional for an engine; nothing before
-    /// J2 depends on it.
+    /// resumes it. A request seen while no script runs is dropped. One
+    /// sent between two tasks may still be seen early in the next, so a
+    /// watchdog that aborts a task may end the one after it. Optional
+    /// for an engine; nothing before J2 depends on it.
     fn abort(&self) -> Result<(), Unsupported>;
+    /// Have the isolate call [`crate::Host::interrupt_callback`] on its
+    /// own thread, the next time it is entered or reaches a point where
+    /// it checks for interrupts.
     fn request_callback(&self);
 }

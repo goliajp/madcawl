@@ -7,7 +7,7 @@ use madcawl_str::{Atom, DomString, HeldAtoms};
 
 use crate::class::{Bound, ClassDef, HostFn};
 use crate::graph::{Deadline, Step, Tracer, Unlinker};
-use crate::halt::{Halt, Unsupported};
+use crate::halt::{Control, Halt, Unsupported};
 use crate::script::{ModuleRequest, ScriptOrigin};
 use crate::value::{ErrorKind, HostRef, Key, Owned, ValueKind};
 
@@ -22,7 +22,10 @@ use crate::value::{ErrorKind, HostRef, Key, Owned, ValueKind};
 /// heap, cycle candidates, microtask queue, pending exception, whether
 /// the host is inside a call, and halt state, and no value, realm or
 /// handle passes from one to another.
-pub trait Engine: Sized + 'static {
+///
+/// [`Control`] is what the host does from other threads (interrupts)
+/// and the memory limits; every engine has it.
+pub trait Engine: Control + Sized + 'static {
     /// A script value: 8 bytes, copied by its bits, opaque to the host.
     type Value: Copy + Eq + Debug;
     type Realm: Copy + Eq + Debug;
@@ -141,12 +144,33 @@ pub trait Engine: Sized + 'static {
         this: Self::Value,
         args: &[Self::Value],
     ) -> Owned<Self::Value>;
+    /// A function object that calls `f`, which gets `data` in its
+    /// [`crate::Ctx`] on every call: the state of a host function made at
+    /// run time (a host microtask's record, a promise reaction). The
+    /// engine neither counts nor traces `data`; a host that puts an
+    /// address there keeps what it points to alive itself, for as long
+    /// as the function may be called.
     fn new_function<H: Host<Self>>(
         &mut self,
         realm: Self::Realm,
         name: &'static str,
         length: u8,
         f: Bound<HostFn, Self, H>,
+        data: u64,
+    ) -> Owned<Self::Value>;
+    /// The interface object of `class` in `realm` (`Node` for the
+    /// table of Node): a function whose `prototype` is the prototype
+    /// object that the realm's wrappers of `class` inherit from, and
+    /// that holds the class's attributes, operations and constants. One
+    /// per class and realm, the same object every time; the prototype
+    /// objects of a realm chain as the classes do, so that `instanceof`
+    /// and a member taken from a prototype work as the web expects.
+    /// Calling or constructing it throws a TypeError while the class has
+    /// no constructor. The host puts the ones it exposes on the global.
+    fn interface_object<H: Host<Self>>(
+        &mut self,
+        realm: Self::Realm,
+        class: &'static ClassDef<Self, H>,
     ) -> Owned<Self::Value>;
 
     /// Register `exception`; returns [`Engine::thrown`].
@@ -244,8 +268,10 @@ pub trait Engine: Sized + 'static {
     fn collect_cycles<H: Host<Self>>(&mut self, host: &mut H, deadline: Deadline) -> Step;
 
     /// Queue `job(arg)`; `job` is callable (a host function for a host
-    /// microtask). A job whose realm is detached by the time it would
-    /// run is dropped unrun.
+    /// microtask, its record in the function's data word or in `arg`).
+    /// The job's realm is the realm of its function, as a promise job's
+    /// is its handler's; a job whose realm is detached by the time it
+    /// would run is dropped unrun.
     fn enqueue_microtask(&mut self, job: Owned<Self::Value>, arg: Owned<Self::Value>);
     /// Run microtasks until the queue is empty. The host calls it at
     /// each checkpoint: after a call into script returns with
@@ -283,15 +309,17 @@ pub trait Engine: Sized + 'static {
     /// and stays, for [`Engine::take_exception`].
     fn halt(&self) -> Halt;
     /// Let script run again after an abort; only while not
-    /// [`Engine::in_script`]. A no-op when running, and when terminated:
-    /// a termination another thread sends may be seen by this very
-    /// call, so the host cannot rule it out, and [`Engine::halt`] stays
-    /// `Terminated` after it. `Err` when the engine has no recoverable
-    /// abort.
-    fn resume(&mut self) -> Result<(), Unsupported>;
+    /// [`Engine::in_script`]. What [`Engine::halt`] reads after it:
+    /// `Running`, or `Terminated` when the isolate was terminated, which
+    /// it stays. A termination another thread sends may be seen by this
+    /// very call, so the host cannot rule it out and goes by the result,
+    /// not by having called it. A no-op when running. `Err` when the
+    /// engine has no recoverable abort.
+    fn resume(&mut self) -> Result<Halt, Unsupported>;
     /// Drop the queued microtasks without running them: the host's
-    /// choice after an abort, before it resumes. `Err` when the engine
-    /// has no recoverable abort.
+    /// choice after an abort, before it resumes. Does nothing once
+    /// terminated: the termination dropped the queue already. `Err` when
+    /// the engine has no recoverable abort.
     fn discard_microtasks(&mut self) -> Result<(), Unsupported>;
 
     /// Compile and run a classic script.
@@ -352,5 +380,29 @@ pub trait Host<E: Engine>: Sized + 'static {
     /// true for "handle".
     fn promise_rejection(&mut self, e: &mut E, promise: E::Value, handled: bool) {
         let _ = (e, promise, handled);
+    }
+
+    /// An [`crate::Interrupt::request_callback`] request, seen on the
+    /// isolate's thread; script may be on the stack. It may read and
+    /// change host state and make values, and runs no script.
+    fn interrupt_callback(&mut self, e: &mut E) {
+        let _ = e;
+    }
+
+    /// Memory use went past the soft limit
+    /// ([`Control::set_memory_limits`]): the host frees what it can
+    /// (caches, a collection soon). Called once each time use crosses
+    /// the limit going up, on the isolate's thread; it runs no script.
+    fn memory_pressure(&mut self, e: &mut E) {
+        let _ = e;
+    }
+
+    /// The host's monotonic clock in nanoseconds, which
+    /// [`crate::Deadline::At`] is read against: the engine reads no
+    /// clock of its own. The default counts from the first call in the
+    /// process.
+    fn now(&self) -> u64 {
+        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        START.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
     }
 }

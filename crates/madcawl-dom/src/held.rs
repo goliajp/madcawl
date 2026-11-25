@@ -1,6 +1,8 @@
 //! Counted node handles: how the host keeps a node across calls (an
 //! event's path, a range's boundary points, a mutation record).
 
+use std::marker::PhantomData;
+
 use crate::dom::{Dom, NodeId};
 
 /// A node held by a count of its own, as a wrapper holds its node. The
@@ -8,9 +10,27 @@ use crate::dom::{Dom, NodeId};
 /// the node, and every node it reaches, stays out of the garbage set.
 /// Taken with [`Dom::hold`] and given back with [`Dom::let_go`]; not
 /// `Clone`, so each count is given back once.
+///
+/// Dropping one instead of giving it back leaks its count: the node
+/// and what it reaches are never freed. A debug build panics on such a
+/// drop. Not `Send`: counts change only on the DOM's thread.
+///
+/// ```compile_fail
+/// fn send<T: Send>(_: T) {}
+/// let mut dom = madcawl_dom::Dom::new();
+/// let doc = dom.document();
+/// send(dom.hold(doc));
+/// ```
 #[must_use = "a held node carries a count: give it back with Dom::let_go"]
 #[derive(Debug, PartialEq, Eq)]
-pub struct HeldNode(NodeId);
+pub struct HeldNode(NodeId, PhantomData<*const ()>);
+
+impl Drop for HeldNode {
+    fn drop(&mut self) {
+        // not while unwinding: a second panic would abort
+        debug_assert!(std::thread::panicking(), "a held node dropped without Dom::let_go: its count leaks");
+    }
+}
 
 impl HeldNode {
     pub fn id(&self) -> NodeId {
@@ -26,7 +46,7 @@ impl Dom {
         self.by_count = true;
         self.inc(i);
         *self.held.entry(i).or_insert(0) += 1;
-        HeldNode(n)
+        HeldNode(n, PhantomData)
     }
 
     /// Give back the count of `h`. The node may be freed at the next
@@ -34,6 +54,7 @@ impl Dom {
     /// document and still counted.
     pub fn let_go(&mut self, h: HeldNode) {
         let i = h.0.index();
+        std::mem::forget(h);
         let k = self.held.get_mut(&i).expect("a node this DOM holds");
         *k -= 1;
         if *k == 0 {
@@ -73,6 +94,15 @@ mod tests {
         dom.free_dead(&mut freed);
         assert_eq!(freed, vec![c]);
         assert_eq!(dom.audit().mismatches(), 0);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "a held node dropped without Dom::let_go")]
+    fn a_held_node_dropped_without_being_given_back_panics_in_a_debug_build() {
+        let mut dom = Dom::new();
+        let el = dom.new_element(b"div").unwrap();
+        drop(dom.hold(el));
     }
 
     #[test]

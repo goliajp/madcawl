@@ -1,7 +1,5 @@
 //! The engine interface on the stub.
 
-use std::any::TypeId;
-
 use madcawl_js::{
     Bound, ClassDef, Deadline, Engine, ErrorKind, Halt, Host, HostFn, HostRef, Key, Owned,
     ScriptOrigin, Step, Unsupported, ValueKind,
@@ -75,6 +73,7 @@ impl Engine for Stub {
             TRUE | FALSE => ValueKind::Boolean,
             _ if v.as_number().is_some() => ValueKind::Number,
             _ if v.is_string() || self.is_view(v) => ValueKind::String,
+            _ if self.is_symbol(v) => ValueKind::Symbol,
             _ if self.is_callable(v) => ValueKind::Function,
             _ => ValueKind::Object,
         }
@@ -111,35 +110,12 @@ impl Engine for Stub {
         Some(held.hold(&b))
     }
 
-    fn to_string<H: Host<Stub>>(&mut self, _host: &mut H, v: Value) -> Option<DomString> {
-        if let Some(s) = self.as_string(v) {
-            return Some(s);
-        }
-        let text = match self.kind(v) {
-            ValueKind::Undefined => "undefined".to_owned(),
-            ValueKind::Null => "null".to_owned(),
-            ValueKind::Boolean => (v == TRUE).to_string(),
-            ValueKind::Number => number_text(v.as_number().expect("a number")),
-            ValueKind::Function => "function () { [native code] }".to_owned(),
-            _ => "[object Object]".to_owned(),
-        };
-        Some(DomString::from_wtf8(text.as_bytes()))
+    fn to_string<H: Host<Stub>>(&mut self, host: &mut H, v: Value) -> Option<DomString> {
+        self.string_of(host, v)
     }
 
-    fn to_number<H: Host<Stub>>(&mut self, _host: &mut H, v: Value) -> Option<f64> {
-        Some(match self.kind(v) {
-            ValueKind::Number => v.as_number().expect("a number"),
-            ValueKind::Boolean => (v == TRUE) as u8 as f64,
-            ValueKind::Null => 0.0,
-            ValueKind::String => {
-                let mut b = Vec::new();
-                self.as_string(v).expect("a string").write_wtf8(&mut b);
-                let t = String::from_utf8_lossy(&b);
-                let t = t.trim();
-                if t.is_empty() { 0.0 } else { t.parse().unwrap_or(f64::NAN) }
-            }
-            _ => f64::NAN,
-        })
+    fn to_number<H: Host<Stub>>(&mut self, host: &mut H, v: Value) -> Option<f64> {
+        self.number_of(host, v)
     }
 
     fn to_boolean(&self, v: Value) -> bool {
@@ -202,8 +178,13 @@ impl Engine for Stub {
         self.call_value(host, f, this, args)
     }
 
-    fn new_function<H: Host<Stub>>(&mut self, realm: Realm, name: &'static str, length: u8, f: Bound<HostFn, Stub, H>) -> Owned<Value> {
-        self.function::<H>(self.index(realm), name, length, f)
+    fn new_function<H: Host<Stub>>(&mut self, realm: Realm, name: &'static str, length: u8, f: Bound<HostFn, Stub, H>, data: u64) -> Owned<Value> {
+        self.function::<H>(self.index(realm), name, length, f, data)
+    }
+
+    fn interface_object<H: Host<Stub>>(&mut self, realm: Realm, class: &'static ClassDef<Stub, H>) -> Owned<Value> {
+        let (iface, _) = self.class_objects(self.index(realm), class);
+        self.retain(iface)
     }
 
     fn throw(&mut self, exception: Owned<Value>) -> Owned<Value> {
@@ -233,11 +214,7 @@ impl Engine for Stub {
         if let Phase::Unlink { garbage, .. } = &self.collector.phase {
             assert!(!garbage.contains(&Vertex::Host(obj)), "a wrapper for a host object found to be garbage");
         }
-        let class = ErasedClass {
-            def: std::ptr::from_ref(class).cast(),
-            host: TypeId::of::<H>(),
-            id: class.id,
-        };
+        let class = ErasedClass::of(class);
         let body = Body::Wrapper { class, obj, preserved: false, dead: false, condemned: false, orphan: false };
         Stub::owned(self.alloc(self.index(realm), body))
     }
@@ -274,7 +251,7 @@ impl Engine for Stub {
         // SAFETY: a live cell, read only
         match unsafe { Cell::at(v) }.body {
             Body::Wrapper { class: c, obj, .. } => {
-                (c.host == TypeId::of::<H>() && class.contains(c.id)).then_some(obj)
+                (c.host == std::any::TypeId::of::<H>() && class.contains(c.id)).then_some(obj)
             }
             _ => None,
         }
@@ -296,19 +273,7 @@ impl Engine for Stub {
     }
 
     fn weak(&mut self, v: Value) -> u32 {
-        assert!(v.is_cell(), "a weak handle to an object");
-        let slot = match self.weak_free.pop() {
-            Some(s) => {
-                self.weak[s as usize] = Some(v);
-                s
-            }
-            None => {
-                self.weak.push(Some(v));
-                (self.weak.len() - 1) as u32
-            }
-        };
-        self.weak_of.entry(v).or_default().push(slot);
-        slot
+        self.weak_slot(v)
     }
 
     fn weak_get(&mut self, w: &u32) -> Option<Owned<Value>> {
@@ -317,12 +282,7 @@ impl Engine for Stub {
     }
 
     fn weak_drop(&mut self, w: u32) {
-        if let Some(v) = self.weak[w as usize].take()
-            && let Some(slots) = self.weak_of.get_mut(&v)
-        {
-            slots.retain(|&s| s != w);
-        }
-        self.weak_free.push(w);
+        self.weak_slot_drop(w);
     }
 
     fn suspect(&mut self, obj: HostRef) {
@@ -342,7 +302,7 @@ impl Engine for Stub {
     }
 
     fn run_microtasks<H: Host<Stub>>(&mut self, host: &mut H) {
-        self.poll_interrupt();
+        self.deliver(host);
         if std::mem::replace(&mut self.in_checkpoint, true) {
             return;
         }
@@ -369,13 +329,16 @@ impl Engine for Stub {
         self.halt
     }
 
-    fn resume(&mut self) -> Result<(), Unsupported> {
+    fn resume(&mut self) -> Result<Halt, Unsupported> {
         self.resume_script();
-        Ok(())
+        Ok(self.halt)
     }
 
     fn discard_microtasks(&mut self) -> Result<(), Unsupported> {
-        self.drop_microtasks();
+        // a termination emptied the queue and keeps it empty
+        if self.halt != Halt::Terminated {
+            self.drop_microtasks();
+        }
         Ok(())
     }
 
@@ -407,16 +370,3 @@ impl Engine for Stub {
         self.release(result);
     }
 }
-
-fn number_text(n: f64) -> String {
-    if n.is_nan() {
-        "NaN".to_owned()
-    } else if n.is_infinite() {
-        if n > 0.0 { "Infinity" } else { "-Infinity" }.to_owned()
-    } else if n == n.trunc() && n.abs() < 1e21 {
-        format!("{}", n as i64)
-    } else {
-        format!("{n}")
-    }
-}
-

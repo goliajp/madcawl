@@ -6,7 +6,10 @@
 //! collector driven by the host's `traverse`, `unlink` and `can_skip`
 //! by deadline in batches. Tests drive it as script would: read a
 //! wrapper, read and write properties, call host functions, add own
-//! properties, add listeners, drop references, collect. Bindings that
+//! properties, add listeners, drop references, collect; and through
+//! stand-ins for a few builtins (weak references and maps, freezing,
+//! prototypes, symbols, `instanceof`), what makes a wrapper observable
+//! or reads the prototype chain. Bindings that
 //! are only right under a tracing collector (an edge reported too few
 //! or too many times) fail here.
 //!
@@ -23,12 +26,15 @@
 //! send(madcawl_js::Root::<madcawl_js_stub::Stub>::new(madcawl_js::Engine::retain(&mut e, <madcawl_js_stub::Stub as madcawl_js::Engine>::null())));
 //! ```
 
+mod builtins;
 mod cell;
 mod collect;
+mod convert;
 mod engine;
 mod halt;
 mod isolate;
 mod props;
+mod proto;
 mod strings;
 mod value;
 mod window;

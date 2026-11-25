@@ -8,6 +8,7 @@ use std::ffi::c_void;
 use std::marker::PhantomData;
 
 use crate::engine::Engine;
+use crate::sig::{AttributeSig, Signature};
 use crate::value::HostRef;
 
 /// A class id. Ids are given in preorder over the inheritance tree, so
@@ -18,23 +19,31 @@ pub struct ClassId(pub u16);
 
 /// What a host function gets besides `this` and its arguments: the
 /// isolate and the host it was called with, as the engine passed them
-/// down. Made by the engine for one call, valid for that call.
+/// down, and the called function's data word. Made by the engine for
+/// one call, valid for that call.
 ///
 /// The engine owns it, and the host keeps no pointer to it past the
 /// call. Its fields are only ever added to, never changed or reordered,
-/// so that what a host function needs later (the callee, a data word)
-/// comes here without touching [`HostFn`] or the generated shells.
+/// so that what a host function needs later (the callee) comes here
+/// without touching [`HostFn`] or the generated shells; outside this
+/// crate it is made only by [`Ctx::new`], so adding a field breaks no
+/// one.
 #[repr(C)]
+#[non_exhaustive]
 pub struct Ctx {
     pub engine: *mut c_void,
     pub host: *mut c_void,
+    /// The word given to [`Engine::new_function`] for the function
+    /// called; 0 for a class table's members.
+    pub data: u64,
 }
 
 impl Ctx {
-    pub fn new<E: Engine, H: 'static>(e: &mut E, h: &mut H) -> Ctx {
+    pub fn new<E: Engine, H: 'static>(e: &mut E, h: &mut H, data: u64) -> Ctx {
         Ctx {
             engine: std::ptr::from_mut(e).cast(),
             host: std::ptr::from_mut(h).cast(),
+            data,
         }
     }
 
@@ -59,6 +68,10 @@ impl Ctx {
 /// no arguments and a setter one. The result carries a count, or is
 /// the bits of [`Engine::thrown`] with the exception registered in the
 /// engine.
+///
+/// A panic that reaches the end of one of these functions aborts the
+/// process, as for any `extern "C"` function: it cannot unwind into the
+/// engine, and a test's `should_panic` does not catch it.
 ///
 /// # Safety
 /// Called with a `ctx` made from the engine and host types it was
@@ -88,29 +101,31 @@ pub type Length = unsafe extern "C" fn(ctx: *mut Ctx, this: u64) -> u32;
 /// another.
 ///
 /// ```
-/// use madcawl_js::{Bound, Ctx, HostFn, Operation};
+/// use madcawl_js::{Bound, Ctx, Effects, HostFn, IdlType, Operation, Signature};
 /// struct Engine;
 /// struct HostX;
 /// unsafe extern "C" fn f(_: *mut Ctx, _: u64, _: *const u64, _: usize) -> u64 {
 ///     0
 /// }
+/// const SIG: Signature = Signature { args: &[], result: IdlType::Undefined, effects: Effects::NONE };
 /// // SAFETY: f reads nothing from its context
 /// let b: Bound<HostFn, Engine, HostX> = unsafe { Bound::host_fn(f) };
-/// let _op: Operation<Engine, HostX> = Operation { name: "f", length: 0, call: b };
+/// let _op: Operation<Engine, HostX> = Operation { name: "f", length: 0, call: b, sig: SIG };
 /// ```
 ///
 /// A function bound to one host type does not fit a table of another:
 ///
 /// ```compile_fail
-/// use madcawl_js::{Bound, Ctx, HostFn, Operation};
+/// use madcawl_js::{Bound, Ctx, Effects, HostFn, IdlType, Operation, Signature};
 /// struct Engine;
 /// struct HostX;
 /// struct HostY;
 /// unsafe extern "C" fn f(_: *mut Ctx, _: u64, _: *const u64, _: usize) -> u64 {
 ///     0
 /// }
+/// const SIG: Signature = Signature { args: &[], result: IdlType::Undefined, effects: Effects::NONE };
 /// let b: Bound<HostFn, Engine, HostX> = unsafe { Bound::host_fn(f) };
-/// let _op: Operation<Engine, HostY> = Operation { name: "f", length: 0, call: b };
+/// let _op: Operation<Engine, HostY> = Operation { name: "f", length: 0, call: b, sig: SIG };
 /// ```
 ///
 /// and binding is unsafe:
@@ -172,6 +187,7 @@ pub struct Attribute<E: 'static, H: 'static> {
     pub get: Bound<Getter, E, H>,
     /// `None` for a readonly attribute.
     pub set: Option<Bound<Setter, E, H>>,
+    pub sig: AttributeSig,
 }
 
 pub struct Operation<E: 'static, H: 'static> {
@@ -179,6 +195,7 @@ pub struct Operation<E: 'static, H: 'static> {
     /// The function's `length`: its required arguments.
     pub length: u8,
     pub call: Bound<HostFn, E, H>,
+    pub sig: Signature,
 }
 
 pub struct Constant {

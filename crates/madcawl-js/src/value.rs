@@ -61,19 +61,20 @@ pub enum ValueKind {
     Boolean,
     Number,
     String,
+    Symbol,
     Object,
     Function,
 }
 
-/// The errors a host function throws.
+/// The ECMAScript errors a host function throws. A `DOMException` is a
+/// host class: the host makes the object and throws it with
+/// [`crate::Engine::throw`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ErrorKind {
     Type,
     Range,
     Syntax,
     Reference,
-    /// A `DOMException` with this name.
-    Dom(&'static str),
 }
 
 /// A host object: the address of its engine object header. A node's

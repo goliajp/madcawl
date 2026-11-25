@@ -21,8 +21,13 @@ pub(crate) struct RealmData {
     pub global: Value,
     pub detached: bool,
     /// The function objects of host operations, one per class table
-    /// entry, so that reading a method twice gives the same function.
-    pub methods: HashMap<(usize, u16), Value>,
+    /// entry (class id, entry), so that reading a method twice gives the
+    /// same function. Class tables are keyed by id, not address: a table
+    /// that is a constant may have several addresses.
+    pub methods: HashMap<(u16, u16), Value>,
+    /// Each host class's interface object and prototype object, by
+    /// class id, made when first asked for.
+    pub protos: HashMap<u16, (Value, Value)>,
 }
 
 /// One isolate. It runs no script: tests do through the engine
@@ -54,6 +59,10 @@ pub struct Stub {
     pub(crate) weak_free: Vec<u32>,
     pub(crate) weak_of: HashMap<Value, Vec<u32>>,
     pub(crate) interrupt: Arc<AtomicU8>,
+    /// A callback request seen and not yet delivered to the host.
+    pub(crate) callback_due: bool,
+    /// Use is past the soft limit and the host was told.
+    pub(crate) pressure_told: bool,
     pub(crate) external: isize,
     pub(crate) limits: (usize, usize),
 }
@@ -81,6 +90,8 @@ impl Stub {
             weak_free: Vec::new(),
             weak_of: HashMap::new(),
             interrupt: Arc::new(AtomicU8::new(0)),
+            callback_due: false,
+            pressure_told: false,
             external: 0,
             limits: (usize::MAX, usize::MAX),
         }
@@ -219,6 +230,16 @@ impl Stub {
     pub(crate) fn free_cell(&mut self, v: Value) {
         self.unbuffer(Vertex::Cell(v));
         self.clear_weak(v);
+        // SAFETY: a live cell
+        match &unsafe { Cell::at(v) }.body {
+            Body::WeakRef { slot } => self.weak_slot_drop(*slot),
+            Body::WeakMap { entries } => {
+                for s in entries.iter().map(|&(s, _)| s).collect::<Vec<_>>() {
+                    self.weak_slot_drop(s);
+                }
+            }
+            _ => {}
+        }
         self.live -= 1;
         // SAFETY: a cell whose count is 0 and that nothing refers to
         unsafe { Cell::free(v) };

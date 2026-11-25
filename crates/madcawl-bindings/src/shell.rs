@@ -1,5 +1,7 @@
 //! The C-ABI side of the class tables: each generated `_abi` shell
 //! hands its words to one of these, which call the member's Rust glue.
+//! They are always inlined into the shell, so that the glue they are
+//! passed is a direct call there, not one through a pointer.
 
 use madcawl_js::{Ctx, Engine, Owned};
 
@@ -15,6 +17,7 @@ pub(crate) type Set<E> = fn(&mut E, &mut DomHost<E>, Value<E>, Value<E>) -> Owne
 /// # Safety
 /// As for a `HostFn`: `ctx` was made for `E` and `DomHost<E>`, and
 /// `argc` words are readable at `argv`.
+#[inline(always)]
 pub(crate) unsafe fn op<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize, f: Op<E>) -> u64 {
     // SAFETY: the caller's
     let ((e, h), args) = unsafe { (Ctx::parts::<E, DomHost<E>>(ctx), E::values(argv, argc)) };
@@ -23,6 +26,7 @@ pub(crate) unsafe fn op<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, a
 
 /// # Safety
 /// As for [`op`].
+#[inline(always)]
 pub(crate) unsafe fn get<E: Engine>(ctx: *mut Ctx, this: u64, f: Get<E>) -> u64 {
     // SAFETY: the caller's
     let (e, h) = unsafe { Ctx::parts::<E, DomHost<E>>(ctx) };
@@ -33,6 +37,7 @@ pub(crate) unsafe fn get<E: Engine>(ctx: *mut Ctx, this: u64, f: Get<E>) -> u64 
 ///
 /// # Safety
 /// As for [`op`].
+#[inline(always)]
 pub(crate) unsafe fn set<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize, f: Set<E>) -> u64 {
     // SAFETY: the caller's
     let ((e, h), args) = unsafe { (Ctx::parts::<E, DomHost<E>>(ctx), E::values(argv, argc)) };

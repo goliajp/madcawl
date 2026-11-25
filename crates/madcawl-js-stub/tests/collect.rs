@@ -401,7 +401,7 @@ fn values_borrowed_into_a_call_and_returned_with_a_count() {
     let realm = e.new_realm();
     let arg = e.new_object(realm);
     // SAFETY: identity reads its context as Stub and Objs
-    let f = e.new_function::<Objs>(realm, "id", 1, unsafe { Bound::host_fn(identity) });
+    let f = e.new_function::<Objs>(realm, "id", 1, unsafe { Bound::host_fn(identity) }, 0);
     let before = e.count_of(arg.get());
     let r = e.call(&mut host, f.get(), Stub::undefined(), &[arg.get()]);
     assert_eq!(r.get(), arg.get());

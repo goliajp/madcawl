@@ -85,12 +85,14 @@ fn a_resume_that_meets_a_termination_leaves_the_isolate_terminated() {
     assert_eq!(e.halt(), Halt::Aborted);
     // another thread terminates just before the host resumes
     e.interrupt_handle().terminate();
-    e.resume().expect("the stub can resume");
+    assert_eq!(e.resume(), Ok(Halt::Terminated), "the result says it did not resume");
     assert_eq!(e.halt(), Halt::Terminated);
     assert_eq!(e.queued_microtasks(), 0);
     assert!(!next_task(&mut e, &mut h, realm, log.get()));
-    e.resume().expect("the stub can resume");
-    assert_eq!(e.halt(), Halt::Terminated, "a resume never ends a termination");
+    assert_eq!(e.resume(), Ok(Halt::Terminated), "a resume never ends a termination");
+    // nothing to discard: the termination dropped the queue
+    e.discard_microtasks().expect("the stub can discard");
+    assert_eq!(e.queued_microtasks(), 0);
     e.release(log);
 }
 
@@ -106,8 +108,7 @@ fn an_abort_keeps_the_queue_and_runs_nothing_until_resumed() {
     assert!(!next_task(&mut e, &mut h, realm, log.get()));
     assert_eq!(e.halt(), Halt::Aborted);
     assert_eq!(e.queued_microtasks(), 1, "the queue is kept as it was");
-    e.resume().expect("the stub can resume");
-    assert_eq!(e.halt(), Halt::Running);
+    assert_eq!(e.resume(), Ok(Halt::Running));
     assert!(next_task(&mut e, &mut h, realm, log.get()));
     assert_eq!(num(&mut e, &mut h, log.get(), "left"), 1.0, "the kept job ran at the checkpoint");
     assert_eq!(num(&mut e, &mut h, log.get(), "after"), 0.0);
@@ -122,7 +123,7 @@ fn after_an_abort_the_host_may_drop_the_queue_before_resuming() {
     halt_in_a_drain(&mut e, &mut h, realm, log.get(), aborts);
     e.discard_microtasks().expect("the stub can discard");
     assert_eq!(e.queued_microtasks(), 0);
-    e.resume().expect("the stub can resume");
+    assert_eq!(e.resume(), Ok(Halt::Running));
     assert!(next_task(&mut e, &mut h, realm, log.get()));
     assert_eq!(num(&mut e, &mut h, log.get(), "left"), 0.0, "the dropped job never ran");
     e.release(log);
@@ -206,4 +207,44 @@ fn a_job_of_a_detached_realm_is_dropped_unrun() {
     assert_eq!(num(&mut e, &mut h, log.get(), "ours"), 1.0);
     assert_eq!(e.queued_microtasks(), 0);
     e.release(log);
+}
+
+#[test]
+fn a_handler_compiled_while_halted_is_thrown_with_nothing_registered() {
+    let (mut e, mut h) = (Stub::new(), Log::default());
+    let realm = e.new_realm();
+    e.interrupt_handle().terminate();
+    let (body, url) = (key("return 1"), key("about:blank"));
+    let origin = madcawl_js::ScriptOrigin { url: &url, line: 1, column: 1 };
+    let f = e.compile_handler(&mut h, realm, &["event"], &body, &[], &origin);
+    assert!(Stub::is_thrown(f.into_raw()));
+    assert_eq!(e.halt(), Halt::Terminated);
+    assert!(e.take_exception().is_none(), "a halt is no exception");
+}
+
+#[test]
+fn a_termination_inside_a_class_table_host_function_ends_the_call_and_the_isolate() {
+    let (mut e, mut h) = (Stub::new(), Log::default());
+    let realm = e.new_realm();
+    let log = e.new_object(realm);
+    let obj = Box::new(0u64);
+    let w = e.new_wrapper(realm, &CLASS, madcawl_js::HostRef::new(std::ptr::from_ref(&*obj) as usize).unwrap());
+    // the setter terminates, then throws: the throw is dropped
+    assert!(!e.set(&mut h, w.get(), madcawl_js::Key::Str(&key("stop")), Stub::number(1.0)));
+    assert_eq!(e.halt(), Halt::Terminated);
+    assert!(e.take_exception().is_none(), "the setter's exception went with the termination");
+    assert!(!e.in_script());
+    // another member of the table runs no more
+    put_nothing(&mut e, &mut h, w.get());
+    assert_eq!(h.size, 0.0);
+    assert!(!next_task(&mut e, &mut h, realm, log.get()));
+    e.release(w);
+    e.release(log);
+    e.drain_host(&mut h);
+}
+
+/// Writes `size` through its setter, which does not run once halted.
+fn put_nothing(e: &mut Stub, h: &mut Log, w: Value) {
+    assert!(!e.set(h, w, madcawl_js::Key::Str(&key("size")), Stub::number(5.0)));
+    assert!(e.take_exception().is_none());
 }

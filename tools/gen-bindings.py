@@ -18,10 +18,20 @@ glue (`shell.rs`).
 The parser reads the subset of Web IDL the files use: interfaces with
 a parent, constants, attributes, operations with optional arguments and
 defaults, nullable types, and extended attribute lists (only
-`[HostOps]` on an interface and `[Atom]` on an argument are acted on).
+`[HostOps]` on an interface, `[Atom]` on an argument, and
+`[CEReactions]` and `[NewObject]` on a member are acted on).
 A `[Atom] DOMString` argument is a name, such as an event type: the
 implementation gets an atom made from the value, with no string block
 for a short string.
+
+Each table entry carries the member's signature (`Signature`,
+`AttributeSig`): the IDL types of its arguments and result, and its
+effects. An argument converted by ToString may run script; a member
+with arguments may throw (too few, wrong type), as may a setter and a
+`[NewObject]` operation (the node limit); `[CEReactions]` marks a member
+that changes the tree and may run custom element reactions. Getters
+take no arguments and do not throw once the receiver passed its brand
+check.
 """
 import re
 import sys
@@ -53,6 +63,8 @@ def parse(text):
         iface = {'name': name, 'parent': parent, 'host_ops': bool(ext and re.search(r'\bHostOps\b', ext)),
                  'consts': [], 'attrs': [], 'ops': []}
         for member in body.split(';'):
+            ext = re.match(r'^\s*\[([^\]]*)\]', member)
+            flags = set(re.findall(r'\w+', ext.group(1))) if ext else set()
             member = re.sub(r'^\s*\[[^\]]*\]', '', member).strip()
             if not member:
                 continue
@@ -61,7 +73,8 @@ def parse(text):
                 iface['consts'].append((c.group(2), c.group(3)))
             elif re.match(r'(readonly\s+)?attribute\s', member):
                 a = re.fullmatch(r'(readonly\s+)?attribute\s+(.+?)\s+(\w+)', member)
-                iface['attrs'].append({'name': a.group(3), 'type': a.group(2), 'readonly': bool(a.group(1))})
+                iface['attrs'].append({'name': a.group(3), 'type': a.group(2), 'readonly': bool(a.group(1)),
+                                       'flags': flags})
             else:
                 o = re.fullmatch(r'(.+?)\s+(\w+)\s*\((.*)\)', member, re.S)
                 args = []
@@ -69,7 +82,7 @@ def parse(text):
                     a = re.fullmatch(r'(\[\s*Atom\s*\]\s*)?(optional\s+)?(.+?)\s+(\w+)(?:\s*=\s*(\S+))?', arg)
                     args.append({'type': ('[Atom] ' if a.group(1) else '') + a.group(3), 'name': a.group(4),
                                  'optional': bool(a.group(2)), 'default': a.group(5)})
-                iface['ops'].append({'name': o.group(2), 'ret': o.group(1), 'args': args})
+                iface['ops'].append({'name': o.group(2), 'ret': o.group(1), 'args': args, 'flags': flags})
         out.append(iface)
     return out
 
@@ -105,6 +118,54 @@ def convert(t, v, names):
     sys.exit(f'unsupported IDL type: {t}')
 
 
+STRINGS = ('DOMString', 'DOMString?', '[Atom] DOMString')
+
+
+def idl_type(t, names):
+    if t in STRINGS:
+        return 'NullableString' if t.endswith('?') else 'String'
+    if t in ('undefined', 'boolean', 'any'):
+        return t.capitalize()
+    if t in ('unsigned short', 'short', 'unsigned long', 'long', 'double'):
+        return 'Number'
+    if t == 'EventListener?':
+        return 'Callback'
+    if t.rstrip('?') in names:
+        return 'NullableObject' if t.endswith('?') else 'Object'
+    sys.exit(f'unsupported IDL type: {t}')
+
+
+def effects(bits):
+    if not bits:
+        return 'Effects::NONE'
+    out = 'Effects::' + bits[0]
+    for b in bits[1:]:
+        out += f'.with(Effects::{b})'
+    return out
+
+
+def setter_effects(a):
+    bits = ['THROWS', 'WRITES']
+    if a['type'] in STRINGS or 'CEReactions' in a['flags']:
+        bits.insert(0, 'RUNS_SCRIPT')
+    return effects(bits)
+
+
+def op_sig(o, names):
+    bits = []
+    if any(a['type'] in STRINGS for a in o['args']) or 'CEReactions' in o['flags']:
+        bits.append('RUNS_SCRIPT')
+    if o['args'] or 'NewObject' in o['flags']:
+        bits.append('THROWS')
+    if 'NewObject' in o['flags']:
+        bits.append('NEW_OBJECT')
+    if 'CEReactions' in o['flags']:
+        bits.append('WRITES')
+    args = ', '.join(f"IdlType::{idl_type(a['type'], names)}" for a in o['args'])
+    return (f"Signature {{ args: &[{args}], result: IdlType::{idl_type(o['ret'], names)}, "
+            f"effects: {effects(bits)} }}")
+
+
 def glue(fn, iface, body, kind, uses_args=True):
     head = {
         'op': f'fn {fn}<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, {"args" if uses_args else "_args"}: &[E::Value]) -> Owned<E::Value> {{',
@@ -133,7 +194,8 @@ def emit(ifaces, sources):
            '//! The class tables of the bound interfaces, and the glue between',
            '//! script values and the implementations in `impls`.', '',
            'use std::marker::PhantomData;', '',
-           'use madcawl_js::{Attribute, Bound, ClassDef, ClassId, Constant, Ctx, Engine, Operation, Owned};', '',
+           'use madcawl_js::{', '    Attribute, AttributeSig, Bound, ClassDef, ClassId, Constant, Ctx, Effects, Engine, IdlType, Operation, Owned,',
+           '    Signature,', '};', '',
            'use crate::convert as cv;', 'use crate::gc::NodeOps;', 'use crate::host::DomHost;', 'use crate::impls;',
            'use crate::shell;', '']
     for i in sorted(ifaces, key=lambda i: i['id']):
@@ -147,11 +209,13 @@ def emit(ifaces, sources):
         attrs = []
         for a in i['attrs']:
             s = 'None' if a['readonly'] else f"Some(unsafe {{ Bound::host_fn({m}_set_{snake(a['name'])}_abi::<E>) }})"
-            attrs.append(f"Attribute {{ name: \"{a['name']}\", get: unsafe {{ Bound::host_fn({m}_get_{snake(a['name'])}_abi::<E>) }}, set: {s} }},")
+            set = 'Effects::NONE' if a['readonly'] else setter_effects(a)
+            sig = f"AttributeSig {{ ty: IdlType::{idl_type(a['type'], names)}, get: Effects::NONE, set: {set} }}"
+            attrs.append(f"Attribute {{ name: \"{a['name']}\", get: unsafe {{ Bound::host_fn({m}_get_{snake(a['name'])}_abi::<E>) }}, set: {s}, sig: {sig} }},")
         ops = []
         for o in i['ops']:
             length = sum(1 for a in o['args'] if not a['optional'])
-            ops.append(f"Operation {{ name: \"{o['name']}\", length: {length}, call: unsafe {{ Bound::host_fn({m}_{snake(o['name'])}_abi::<E>) }} }},")
+            ops.append(f"Operation {{ name: \"{o['name']}\", length: {length}, call: unsafe {{ Bound::host_fn({m}_{snake(o['name'])}_abi::<E>) }}, sig: {op_sig(o, names)} }},")
         consts = [f'Constant {{ name: "{c}", value: {float(int(v, 0))!r} }},' for c, v in i['consts']]
         for field, items in (('attributes', attrs), ('operations', ops), ('constants', consts)):
             if items:

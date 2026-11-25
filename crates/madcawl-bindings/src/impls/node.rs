@@ -1,8 +1,8 @@
 use madcawl_dom::{Dom, NodeId, NodeKind};
-use madcawl_js::{Engine, ErrorKind};
+use madcawl_js::Engine;
 use madcawl_str::DomString;
 
-use crate::convert::{Thrown, throw};
+use crate::convert::{Thrown, throw_dom};
 use crate::host::DomHost;
 
 pub(crate) fn node_type<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<u16, Thrown> {
@@ -94,7 +94,7 @@ pub(crate) fn set_text_content<E: Engine>(
     match dom.kind(this) {
         NodeKind::Document | NodeKind::Doctype => Ok(()),
         k if k.is_char_data() => {
-            if dom.set_text(this, value) { Ok(()) } else { Err(full(e)) }
+            if dom.set_text(this, value) { Ok(()) } else { Err(full(e, h)) }
         }
         _ => {
             while let Some(c) = dom.first_child(this) {
@@ -103,7 +103,7 @@ pub(crate) fn set_text_content<E: Engine>(
             if value.is_empty() {
                 return Ok(());
             }
-            let t = dom.new_text(value).ok_or_else(|| full(e))?;
+            let Some(t) = dom.new_text(value) else { return Err(full(e, h)) };
             dom.insert_node(this, t, None);
             Ok(())
         }
@@ -121,7 +121,9 @@ pub(crate) fn insert_before<E: Engine>(
     node: NodeId,
     child: Option<NodeId>,
 ) -> Result<NodeId, Thrown> {
-    pre_insert_check(e, &h.dom, this, node, child)?;
+    if let Err((name, why)) = pre_insert_check(&h.dom, this, node, child) {
+        return Err(throw_dom(e, h, name, why));
+    }
     let dom = &mut h.dom;
     let before = if child == Some(node) { dom.next_sibling(node) } else { child };
     if dom.kind(node) == NodeKind::Fragment {
@@ -140,42 +142,36 @@ pub(crate) fn append_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeI
 
 pub(crate) fn remove_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, child: NodeId) -> Result<NodeId, Thrown> {
     if h.dom.parent(child) != Some(this) {
-        return Err(throw(e, ErrorKind::Dom("NotFoundError"), "the node is not a child of this node"));
+        return Err(throw_dom(e, h, "NotFoundError", "the node is not a child of this node"));
     }
     h.dom.remove_node(child);
     Ok(child)
 }
 
-fn full<E: Engine>(e: &mut E) -> Thrown {
-    throw(e, ErrorKind::Dom("QuotaExceededError"), "the document holds all the nodes it may")
+fn full<E: Engine>(e: &mut E, h: &mut DomHost<E>) -> Thrown {
+    throw_dom(e, h, "QuotaExceededError", "the document holds all the nodes it may")
 }
 
 /// The DOM Standard's pre-insertion validity, for the node kinds there
-/// are so far.
-fn pre_insert_check<E: Engine>(
-    e: &mut E,
-    dom: &Dom,
-    parent: NodeId,
-    node: NodeId,
-    child: Option<NodeId>,
-) -> Result<(), Thrown> {
-    let hierarchy = |e: &mut E, why: &str| Err(throw(e, ErrorKind::Dom("HierarchyRequestError"), why));
+/// are so far: the exception's name and message when it fails.
+fn pre_insert_check(dom: &Dom, parent: NodeId, node: NodeId, child: Option<NodeId>) -> Result<(), (&'static str, &'static str)> {
+    let hierarchy = |why| Err(("HierarchyRequestError", why));
     let pk = dom.kind(parent);
     if !pk.is_container() {
-        return hierarchy(e, "the parent cannot have children");
+        return hierarchy("the parent cannot have children");
     }
     if dom.is_inclusive_ancestor_of(node, parent) {
-        return hierarchy(e, "the node is an ancestor of the parent");
+        return hierarchy("the node is an ancestor of the parent");
     }
     if child.is_some_and(|c| dom.parent(c) != Some(parent)) {
-        return Err(throw(e, ErrorKind::Dom("NotFoundError"), "the child is not a child of the parent"));
+        return Err(("NotFoundError", "the child is not a child of the parent"));
     }
     let nk = dom.kind(node);
     if nk == NodeKind::Document
         || (nk == NodeKind::Text && pk == NodeKind::Document)
         || (nk == NodeKind::Doctype && pk != NodeKind::Document)
     {
-        return hierarchy(e, "the node cannot go there");
+        return hierarchy("the node cannot go there");
     }
     if pk == NodeKind::Document {
         let elements = |n: NodeId| {
@@ -187,7 +183,7 @@ fn pre_insert_check<E: Engine>(
         };
         let has = dom.children(parent).any(|c| c != node && dom.kind(c) == NodeKind::Element);
         if elements(node) > 1 || (elements(node) == 1 && has) {
-            return hierarchy(e, "a document has one element child");
+            return hierarchy("a document has one element child");
         }
     }
     Ok(())

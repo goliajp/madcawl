@@ -3,7 +3,7 @@
 //! these.
 
 use madcawl_dom::NodeId;
-use madcawl_js::{ClassDef, Engine, ErrorKind, Owned, ValueKind};
+use madcawl_js::{ClassDef, Engine, ErrorKind, Key, Owned, ValueKind};
 use madcawl_str::{Atom, DomString};
 
 use crate::host::DomHost;
@@ -15,6 +15,36 @@ pub struct Thrown;
 pub(crate) fn throw<E: Engine>(e: &mut E, kind: ErrorKind, message: &str) -> Thrown {
     let _sentinel = e.throw_error(kind, message).into_raw();
     Thrown
+}
+
+/// Throw a `DOMException` named `name`. The host makes the object: a
+/// plain one with the members script reads (`name`, `message`, `code`)
+/// until the interface is bound.
+pub(crate) fn throw_dom<E: Engine>(e: &mut E, h: &mut DomHost<E>, name: &'static str, message: &str) -> Thrown {
+    let ex = e.new_object(h.realm);
+    let code = legacy_code(name) as f64;
+    let name = e.string(DomString::from_wtf8(name.as_bytes()));
+    let message = e.string(DomString::from_wtf8(message.as_bytes()));
+    for (key, v) in [("name", name.get()), ("message", message.get()), ("code", E::number(code))] {
+        let set = e.set(h, ex.get(), Key::Str(&DomString::from_wtf8(key.as_bytes())), v);
+        debug_assert!(set, "a plain object takes a property");
+    }
+    e.release(name);
+    e.release(message);
+    let _sentinel = e.throw(ex).into_raw();
+    Thrown
+}
+
+/// The legacy `code` of the exception names thrown so far; 0 for the
+/// names that have none.
+fn legacy_code(name: &str) -> u16 {
+    match name {
+        "HierarchyRequestError" => 3,
+        "InvalidCharacterError" => 5,
+        "NotFoundError" => 8,
+        "QuotaExceededError" => 22,
+        _ => 0,
+    }
 }
 
 pub(crate) trait IntoJs<E: Engine> {

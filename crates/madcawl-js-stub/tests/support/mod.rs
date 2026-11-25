@@ -3,7 +3,8 @@
 #![allow(dead_code)]
 
 use madcawl_js::{
-    Attribute, Bound, ClassDef, ClassId, Ctx, Engine, Host, HostOps, HostRef, Interceptors, Key, Owned,
+    Attribute, AttributeSig, Bound, ClassDef, ClassId, Control, Ctx, Effects, Engine, ErrorKind, Host, HostOps,
+    HostRef, IdlType, Interceptors, Interrupt, Key, Owned,
 };
 use madcawl_js_stub::{Stub, Value};
 use madcawl_str::DomString;
@@ -13,6 +14,12 @@ use madcawl_str::DomString;
 pub struct Log {
     pub reported: u32,
     pub size: f64,
+    pub callbacks: u32,
+    pub pressure: u32,
+    /// What `now` reads, in nanoseconds.
+    pub clock: u64,
+    /// The data word the last call of `data_word` got.
+    pub data: u64,
 }
 
 pub static OPS: HostOps<Stub, Log> = HostOps {
@@ -32,7 +39,10 @@ pub static CLASS: ClassDef<Stub, Log> = ClassDef {
     last: ClassId(1),
     parent: None,
     // SAFETY: as for INTERCEPTORS
-    attributes: &[Attribute { name: "size", get: unsafe { Bound::host_fn(size) }, set: Some(unsafe { Bound::host_fn(set_size) }) }],
+    attributes: &[
+        Attribute { name: "size", get: unsafe { Bound::host_fn(size) }, set: Some(unsafe { Bound::host_fn(set_size) }), sig: NUMBER },
+        Attribute { name: "stop", get: unsafe { Bound::host_fn(size) }, set: Some(unsafe { Bound::host_fn(set_stop) }), sig: NUMBER },
+    ],
     operations: &[],
     constants: &[],
     interceptors: Some(&INTERCEPTORS),
@@ -50,6 +60,39 @@ impl Host<Stub> for Log {
     }
 
     fn load_imported_module(&mut self, _: &mut Stub, _: &madcawl_js::ModuleRequest<'_>, _: ()) {}
+
+    fn interrupt_callback(&mut self, _: &mut Stub) {
+        self.callbacks += 1;
+    }
+
+    fn memory_pressure(&mut self, _: &mut Stub) {
+        self.pressure += 1;
+    }
+
+    fn now(&self) -> u64 {
+        self.clock
+    }
+}
+
+const NUMBER: AttributeSig = AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE };
+
+/// A setter that terminates the isolate, as another thread would while
+/// the host function runs, then tries to throw.
+pub unsafe extern "C" fn set_stop(ctx: *mut Ctx, _this: u64, _argv: *const u64, _argc: usize) -> u64 {
+    // SAFETY: called with a context for Log
+    let (e, _) = unsafe { Ctx::parts::<Stub, Log>(ctx) };
+    e.interrupt_handle().terminate();
+    Stub::to_bits(e.throw_error(ErrorKind::Range, "too late").into_raw())
+}
+
+/// Records the data word of the function called.
+pub unsafe extern "C" fn data_word(ctx: *mut Ctx, _this: u64, _argv: *const u64, _argc: usize) -> u64 {
+    // SAFETY: called with a context for Log
+    let data = unsafe { (*ctx).data };
+    // SAFETY: as above
+    let (_, h) = unsafe { Ctx::parts::<Stub, Log>(ctx) };
+    h.data = data;
+    Stub::to_bits(Stub::undefined())
 }
 
 /// Two items, 10 and 11.

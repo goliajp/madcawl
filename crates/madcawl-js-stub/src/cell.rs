@@ -4,7 +4,7 @@
 use std::any::TypeId;
 
 use madcawl_str::abi;
-use madcawl_js::{ClassId, HostFn, HostRef};
+use madcawl_js::{ClassDef, ClassId, HostFn, HostRef};
 use madcawl_str::Atom;
 
 use crate::value::Value;
@@ -29,8 +29,16 @@ pub(crate) struct ErasedClass {
     pub id: ClassId,
 }
 
+impl ErasedClass {
+    pub(crate) fn of<H: 'static>(def: &'static ClassDef<crate::Stub, H>) -> ErasedClass {
+        ErasedClass { def: std::ptr::from_ref(def).cast(), host: TypeId::of::<H>(), id: def.id }
+    }
+}
+
 pub(crate) enum Call {
-    Host { f: HostFn, host: TypeId },
+    Host { f: HostFn, host: TypeId, data: u64 },
+    /// An interface object: calling it throws.
+    Interface { class: ErasedClass },
     /// A test's stand-in for a script function: a Rust body and the
     /// values it closes over, which the cell holds.
     Closure {
@@ -53,6 +61,14 @@ pub(crate) enum Body {
         global: Value,
         realm: u32,
     },
+    /// The prototype object of a host class in its realm.
+    Prototype { class: ErasedClass },
+    /// A script `WeakRef`: its target is in weak handle slot `slot`.
+    WeakRef { slot: u32 },
+    /// A script `WeakMap`: each key in a weak handle slot, each value
+    /// held. An entry whose key died is dropped at the next use.
+    WeakMap { entries: Vec<(u32, Value)> },
+    Symbol,
     Function {
         name: &'static str,
         length: u8,
@@ -85,6 +101,11 @@ pub(crate) struct Cell {
     /// The isolate that made it: a value never crosses to another.
     pub isolate: u32,
     pub props: Props,
+    /// A prototype script set, held (null included); `None` for the
+    /// one the cell's kind gives it.
+    pub proto: Option<Value>,
+    pub extensible: bool,
+    pub frozen: bool,
     pub body: Body,
 }
 
@@ -95,6 +116,9 @@ impl Cell {
             realm,
             isolate,
             props: Vec::new(),
+            proto: None,
+            extensible: true,
+            frozen: false,
             body,
         }));
         Value(p as u64)
@@ -127,7 +151,9 @@ impl Cell {
     /// The values this cell holds a count on.
     pub(crate) fn held(&self, out: &mut Vec<Value>) {
         out.extend(self.props.iter().map(|&(_, v)| v));
+        out.extend(self.proto);
         match &self.body {
+            Body::WeakMap { entries } => out.extend(entries.iter().map(|&(_, v)| v)),
             Body::Function {
                 call: Call::Closure { captures, .. },
                 ..
@@ -140,7 +166,9 @@ impl Cell {
     /// Give up every value this cell holds, into `out`.
     pub(crate) fn take_held(&mut self, out: &mut Vec<Value>) {
         out.extend(self.props.drain(..).map(|(_, v)| v));
+        out.extend(self.proto.take());
         match &mut self.body {
+            Body::WeakMap { entries } => out.extend(entries.iter_mut().map(|(_, v)| std::mem::replace(v, crate::value::UNDEFINED))),
             Body::Function {
                 call: Call::Closure { captures, .. },
                 ..

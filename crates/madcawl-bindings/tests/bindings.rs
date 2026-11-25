@@ -337,3 +337,19 @@ fn a_dispatch_script_started_runs_no_checkpoint_between_its_listeners() {
         js.drop(v);
     }
 }
+
+#[test]
+fn a_dom_exception_is_an_object_the_host_made_with_name_message_and_code() {
+    let mut js = Js::new();
+    let doc = js.doc();
+    let bad = js.str("a b");
+    let r = js.call(doc.get(), "createElement", &[bad.get()]);
+    assert!(Stub::is_thrown(r.into_raw()));
+    let ex = js.e.take_exception().expect("a DOMException");
+    assert_eq!(js.read(ex.get(), "name"), "InvalidCharacterError");
+    assert_eq!(js.read(ex.get(), "code"), "5");
+    assert_eq!(js.read(ex.get(), "message"), "not a valid element name");
+    for v in [ex, bad, doc] {
+        js.drop(v);
+    }
+}

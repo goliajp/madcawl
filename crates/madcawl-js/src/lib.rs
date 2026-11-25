@@ -15,8 +15,14 @@
 //!   `can_skip`, `wrapper_needs_preserve`, `wrapper_died`).
 //! - Host functions borrow their arguments and transfer their result.
 //!   On error they register the exception in the context and return the
-//!   sentinel [`Engine::thrown`]. In the tables they are C-ABI functions
-//!   of words ([`HostFn`]), given the isolate and the host in a [`Ctx`].
+//!   sentinel [`Engine::thrown`]; exceptions of the host's own classes
+//!   (`DOMException`) are objects the host makes. In the tables they are
+//!   C-ABI functions of words ([`HostFn`]), given the isolate and the
+//!   host in a [`Ctx`], and each member carries its Web IDL signature
+//!   for a fast path ([`Signature`]).
+//! - Each realm has an interface object and a prototype object per host
+//!   class ([`Engine::interface_object`]); a wrapper inherits from its
+//!   class's prototype object.
 //! - The host holds script values through member handles (reported by
 //!   `traverse`), root handles (never reported) and weak handles.
 //! - A node has at most one wrapper, made lazily; its pointer is the
@@ -28,8 +34,8 @@
 //!   is not a flat block is flattened by [`Engine::as_string`]. Property
 //!   names are atoms.
 //! - The host drives collection by deadline, in batches
-//!   ([`Engine::collect_cycles`]), and decides microtask checkpoints by
-//!   [`Engine::in_script`].
+//!   ([`Engine::collect_cycles`]), on its own clock ([`Host::now`]), and
+//!   decides microtask checkpoints by [`Engine::in_script`].
 //! - A browsing context's window is a WindowProxy whose target realm
 //!   changes on navigation. An isolate is an agent cluster; several may
 //!   share a thread.
@@ -55,6 +61,7 @@ mod graph;
 mod halt;
 mod handle;
 mod script;
+mod sig;
 mod value;
 
 pub mod trial;
@@ -68,4 +75,5 @@ pub use graph::{Deadline, Step, Tracer, Unlinker};
 pub use halt::{Control, Halt, Interrupt, Unsupported};
 pub use handle::{Member, Root};
 pub use script::{ModuleRequest, ScriptOrigin};
+pub use sig::{AttributeSig, Effects, IdlType, Signature};
 pub use value::{ErrorKind, HostRef, Key, Owned, ValueKind};

@@ -1,8 +1,6 @@
 //! What the cycle collector's callbacks report to, and how far a
 //! collection step goes.
 
-use std::time::Instant;
-
 use crate::engine::Engine;
 use crate::value::{HostRef, Owned};
 
@@ -26,7 +24,10 @@ pub enum Deadline {
     /// Stop after this many units of work (an object visited or
     /// unlinked): deterministic, for tests and for budgets.
     Work(u32),
-    At(Instant),
+    /// Stop once the host's clock ([`crate::Host::now`]) reads this
+    /// many nanoseconds or more. The engine reads no clock of its own;
+    /// it asks the host every so many units of work.
+    At(u64),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

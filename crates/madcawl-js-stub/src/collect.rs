@@ -17,7 +17,6 @@
 //! batches cannot make a live object look dead.
 
 use std::collections::HashSet;
-use std::time::Instant;
 
 use madcawl_str::abi;
 use madcawl_js::trial::SideGraph;
@@ -134,11 +133,12 @@ struct Budget {
 }
 
 impl Budget {
-    fn spent(&mut self) -> bool {
+    fn spent<H: Host<Stub>>(&mut self, host: &H) -> bool {
         self.used += 1;
         match self.deadline {
             Deadline::Work(n) => self.used > n,
-            Deadline::At(t) => self.used.is_multiple_of(64) && Instant::now() >= t,
+            // the host's clock, read every so many units
+            Deadline::At(t) => self.used.is_multiple_of(64) && host.now() >= t,
         }
     }
 }
@@ -223,7 +223,7 @@ impl Stub {
                                 todo.push(e);
                             }
                         }
-                        if budget.spent() && !todo.is_empty() {
+                        if budget.spent(host) && !todo.is_empty() {
                             self.collector.phase = Phase::Build { graph, todo };
                             return Step::More;
                         }
@@ -241,7 +241,7 @@ impl Stub {
                     while next < garbage.len() {
                         self.unlink(host, garbage[next]);
                         next += 1;
-                        if budget.spent() && next < garbage.len() {
+                        if budget.spent(host) && next < garbage.len() {
                             self.flush();
                             self.collector.phase = Phase::Unlink { garbage, next };
                             return Step::More;

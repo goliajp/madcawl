@@ -3,13 +3,14 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use madcawl_js::{Control, Halt, Interrupt, Unsupported};
+use madcawl_js::{Control, Halt, Host, Interrupt, Unsupported};
 
 use crate::cell::Cell;
 use crate::isolate::Stub;
 use crate::value::Value;
 
 pub(crate) const TERMINATE: u8 = 1;
+pub(crate) const CALLBACK: u8 = 2;
 pub(crate) const ABORT: u8 = 4;
 
 impl Stub {
@@ -17,13 +18,30 @@ impl Stub {
     /// microtasks, and wins over an abort; an abort seen while no script
     /// runs is dropped.
     pub(crate) fn poll_interrupt(&mut self) {
-        let bits = self.interrupt.fetch_and(!(TERMINATE | ABORT), Ordering::Relaxed);
+        let bits = self.interrupt.fetch_and(!(TERMINATE | ABORT | CALLBACK), Ordering::Relaxed);
+        self.callback_due |= bits & CALLBACK != 0;
         if bits & TERMINATE != 0 && self.halt != Halt::Terminated {
             self.halt = Halt::Terminated;
             self.drop_microtasks();
         } else if bits & ABORT != 0 && self.halt == Halt::Running && self.depth != 0 {
             self.halt = Halt::Aborted;
         }
+    }
+
+    /// Tell the host what it asked to hear of: a callback request seen,
+    /// use gone past the soft limit. Done where the isolate is entered
+    /// with the host at hand.
+    pub(crate) fn deliver<H: Host<Stub>>(&mut self, host: &mut H) {
+        self.poll_interrupt();
+        if std::mem::take(&mut self.callback_due) {
+            host.interrupt_callback(self);
+        }
+        let over = self.memory_usage() > self.limits.0;
+        if over && !self.pressure_told {
+            self.pressure_told = true;
+            host.memory_pressure(self);
+        }
+        self.pressure_told &= over;
     }
 
     pub(crate) fn halted(&self) -> bool {
@@ -76,7 +94,7 @@ impl Interrupt for StubInterrupt {
     }
 
     fn request_callback(&self) {
-        self.0.fetch_or(2, Ordering::Relaxed);
+        self.0.fetch_or(CALLBACK, Ordering::Relaxed);
     }
 }
 
