@@ -1,9 +1,11 @@
 //! A bounded cookie jar after RFC 6265bis: domain and path matching,
 //! `Secure`, `HttpOnly`, `SameSite` (absent means `Lax`), expiry, the
-//! `__Secure-` and `__Host-` prefixes. There is no public suffix list: a
-//! `Domain` attribute naming a single label is refused, and IP and
-//! single-label hosts only get host-only cookies.
+//! `__Secure-` and `__Host-` prefixes. A `Domain` attribute naming a
+//! public suffix (the built-in list) is refused unless it is the host
+//! itself, which then gets a host-only cookie; IP hosts only get
+//! host-only cookies.
 
+mod domain;
 mod parse;
 
 pub use parse::{SameSite, SetCookie, parse, parse_date};
@@ -77,17 +79,14 @@ fn is_secure(url: &Url) -> bool {
     matches!(url.scheme(), "https" | "wss")
 }
 
-/// The site of a host, approximated without a public suffix list as its
-/// last two labels.
-pub fn site_of(host: &str) -> String {
+/// The site of a host: its registrable domain, or the host itself when
+/// it is an IP address or a public suffix.
+pub fn site_of(host: &str) -> &str {
+    let host = host.strip_suffix('.').unwrap_or(host);
     if host.starts_with('[') || host.parse::<std::net::Ipv4Addr>().is_ok() {
-        return host.to_owned();
+        return host;
     }
-    let labels: Vec<&str> = host.trim_end_matches('.').rsplitn(3, '.').collect();
-    match labels.as_slice() {
-        [last, second, ..] => format!("{second}.{last}"),
-        _ => host.to_owned(),
-    }
+    crate::psl::registrable_domain(host).unwrap_or(host)
 }
 
 fn default_path(url: &Url) -> String {
@@ -128,9 +127,7 @@ fn admit(sc: &SetCookie, url: &Url, api: Api, now: i64) -> Option<Admitted> {
     }
     let (domain, host_only) = match sc.domain.as_deref() {
         None => (host, true),
-        Some(d) if d == host && (ip || !d.contains('.')) => (host, true), // single label: a public suffix
-        Some(d) if ip || !d.contains('.') || !domain_matches(&host, d, false) => return None,
-        Some(d) => (d.to_owned(), false),
+        Some(d) => domain::admit(d, &host, ip)?,
     };
     let path = sc.path.clone().unwrap_or_else(|| default_path(url));
     let lower = sc.name.to_ascii_lowercase();
