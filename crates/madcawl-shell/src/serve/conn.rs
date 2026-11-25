@@ -92,6 +92,7 @@ impl<'a> Conn<'a> {
             self.log(&p.url, "close-session", ("", ""), &Frame::new(kind::RESULT));
             self.drop_page(p);
         }
+        super::doc::forget_session(self.id);
         if let Some(net) = &self.shared.net
             && let Err(e) = net.end_session(self.id)
         {

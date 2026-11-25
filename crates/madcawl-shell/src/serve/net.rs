@@ -102,7 +102,7 @@ fn read_frame(s: &mut UnixStream, buf: &mut Vec<u8>, deadline: Instant) -> io::R
 }
 
 /// A session's cookie partition; never 0, which is the profile's.
-fn partition_of(session: u32) -> u64 {
+pub(crate) fn partition_of(session: u32) -> u64 {
     u64::from(session) + 1
 }
 

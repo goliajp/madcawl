@@ -104,7 +104,7 @@ impl Conn<'_> {
         charset: Option<Encoding>,
     ) -> Result<(Page, Option<String>), Frame> {
         let id = self.shared.next_page.fetch_add(1, Ordering::SeqCst);
-        let mut page = Page::blank(id, size, self.shared.net.as_ref());
+        let mut page = Page::blank(id, size, self.shared.net.as_ref(), self.id);
         let Some(u) = (match file {
             Some((path, url)) => {
                 let r = page.load_file(&path, url, charset, &self.shared.config.allow);

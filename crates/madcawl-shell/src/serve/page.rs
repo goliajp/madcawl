@@ -65,6 +65,7 @@ pub struct Page {
     pub url: String,
     pub width: f32,
     pub height: f32,
+    owner: u32,
     pub last_used: Instant,
     pub(crate) doc: Doc,
     pub(crate) agents: Agents,
@@ -83,14 +84,15 @@ pub struct Page {
 impl Page {
     /// A page on a blank document; `goto` loads what it is for. The
     /// agent session starts on the first document it loads.
-    pub(crate) fn blank(id: u32, size: (f32, f32), net: Option<&Arc<Net>>) -> Page {
+    pub(crate) fn blank(id: u32, size: (f32, f32), net: Option<&Arc<Net>>, owner: u32) -> Page {
         let (dom, encoding) = load::parse(b"", Some(Encoding::Utf8));
-        let doc = Doc::new(dom, encoding, size, &mut |_| None);
+        let doc = Doc::new(dom, encoding, size, (owner, "about:blank"), &mut |_| None);
         Page {
             id,
             url: "about:blank".into(),
             width: size.0,
             height: size.1,
+            owner,
             last_used: Instant::now(),
             doc,
             agents: Agents::sharing_generations(&PAGE_GENS),
@@ -123,7 +125,7 @@ impl Page {
         let bytes = load::read_file(path, load::MAX_FILE)?;
         let (dom, encoding) = load::parse(&bytes, charset);
         let base = path.parent().map(Path::to_path_buf);
-        let doc = Doc::new(dom, encoding, (self.width, self.height), &mut |href| {
+        let doc = Doc::new(dom, encoding, (self.width, self.height), (self.owner, &url), &mut |href| {
             base.as_deref().and_then(|b| load::sheet_file(b, href, Some(allow)))
         });
         self.log.push(Entry {
@@ -192,7 +194,7 @@ impl Page {
             Loaded::Failed(why) => Some(format!("the load failed: {why}")),
             Loaded::Downloaded { file, bytes } => Some(self.downloaded(&file, bytes, env)),
             Loaded::Committed(p, sheets) => {
-                let doc = Doc::new(p.dom, p.encoding, (self.width, self.height), &mut |href| sheets.get(href).cloned());
+                let doc = Doc::new(p.dom, p.encoding, (self.width, self.height), (self.owner, &p.url), &mut |href| sheets.get(href).cloned());
                 let status = p.status;
                 self.commit(doc, p.url, p.masked);
                 Some(format!("navigated to {} (status {status})", self.url))
