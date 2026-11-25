@@ -30,6 +30,12 @@ impl NodeId {
         NodeId(NonZeroU32::new(i).expect("a node index is never 0"))
     }
 
+    /// The node of slot `i`, 0 being none; whether the slot holds a live
+    /// node is for `Dom::node_at` to say.
+    pub fn from_index(i: u32) -> Option<NodeId> {
+        NodeId::of(i)
+    }
+
     /// The slot index, dense from 1: what side tables are indexed by.
     pub fn index(self) -> u32 {
         self.0.get()
@@ -80,6 +86,8 @@ pub struct Dom {
     /// Script or the host has held nodes by count: `reclaim`, which frees
     /// by reach and tells no one, may no longer run.
     pub(crate) by_count: bool,
+    /// The change record of an observer, when one asked (`observe.rs`)
+    pub(crate) observer: Option<Box<crate::observe::Observer>>,
 }
 
 /// An attribute as stored.
@@ -125,6 +133,7 @@ impl Dom {
             suspects: Vec::new(),
             held: HashMap::new(),
             by_count: false,
+            observer: None,
         };
         dom.doc = dom.new_document(false).expect("room for the document");
         dom

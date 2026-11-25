@@ -7,9 +7,14 @@ use crate::node::{IN_DOCUMENT, INERT, Node, NodeKind, STYLE_DIRTY, SUSPECTED};
 /// What changed, as styles and later observers need to know.
 pub(crate) enum Change {
     Inserted(u32),
-    Removed { parent: u32 },
+    Removed {
+        parent: u32,
+        child: u32,
+    },
     Attributes(u32),
     Text(u32),
+    /// The slot was freed
+    Freed(u32),
 }
 
 impl Dom {
@@ -41,9 +46,14 @@ impl Dom {
     }
 
     pub(crate) fn notify(&mut self, change: Change) {
+        // one predictable branch while nothing observes
+        if self.observer.is_some() {
+            self.record(&change);
+        }
         let node = match change {
             Change::Inserted(n) | Change::Attributes(n) | Change::Text(n) => n,
-            Change::Removed { parent } => parent,
+            Change::Removed { parent, .. } => parent,
+            Change::Freed(_) => return,
         };
         self.m(node).flags |= STYLE_DIRTY;
     }
@@ -158,7 +168,7 @@ impl Dom {
         (n.parent, n.prev, n.next) = (0, 0, 0);
         self.dec(c);
         self.dec(parent);
-        self.notify(Change::Removed { parent });
+        self.notify(Change::Removed { parent, child: c });
         parent
     }
 

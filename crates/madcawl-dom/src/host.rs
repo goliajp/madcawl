@@ -227,6 +227,7 @@ impl Dom {
             }
             stale |= self.n(i).flags & SUSPECTED != 0;
             self.arena.free(i);
+            self.notify(crate::tree::Change::Freed(i));
             freed.push(NodeId::at(i));
         }
         // the suspects stay live nodes, each once: the list is never

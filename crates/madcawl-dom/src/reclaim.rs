@@ -75,6 +75,7 @@ impl Dom {
                 self.rare_free.push(rare);
             }
             self.arena.free(i);
+            self.notify(crate::tree::Change::Freed(i));
             freed += 1;
         }
         for r in self.rare.iter_mut() {
