@@ -24,22 +24,16 @@ impl Run<'_, '_> {
             return;
         }
         let mut content = std::mem::take(&mut self.pseudo_candidates);
-        self.prep
-            .content_buckets
-            .candidates(self.m.dom, el, &mut content);
+        self.bucket(&self.prep.content_buckets, el, &mut content);
         let mut more = Vec::new();
-        self.prep
-            .reval_content_buckets
-            .candidates(self.m.dom, el, &mut more);
+        self.bucket(&self.prep.reval_content_buckets, el, &mut more);
         content.extend_from_slice(&more);
         if content.is_empty() {
             self.pseudo_candidates = content;
             return;
         }
         let mut all = Vec::new();
-        self.prep
-            .pseudo_buckets
-            .candidates(self.m.dom, el, &mut all);
+        self.bucket(&self.prep.pseudo_buckets, el, &mut all);
         let saved = std::mem::take(&mut self.candidates);
         for (k, pe) in PSEUDOS.into_iter().enumerate() {
             // `content` is not inherited: no rule giving it, no box
@@ -58,7 +52,7 @@ impl Run<'_, '_> {
             return false;
         }
         let mut pc = std::mem::take(&mut self.pseudo_candidates);
-        b.candidates(self.m.dom, el, &mut pc);
+        self.bucket(b, el, &mut pc);
         let kinds = &self.prep.pseudo_buckets.kinds;
         let rules = self.m.rules;
         let any = pc.iter().any(|&c| {

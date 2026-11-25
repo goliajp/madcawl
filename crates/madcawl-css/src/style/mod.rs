@@ -62,6 +62,7 @@ pub mod grid;
 mod grid_parse;
 mod hints;
 mod initial;
+mod keys;
 mod kw;
 mod layers;
 mod length;
@@ -155,6 +156,7 @@ pub struct Cascade<'a> {
     path_key: bool,
     verify: bool,
     ancestor_filter: bool,
+    buckets: bool,
 }
 
 fn is_quirks(dom: &Dom) -> bool {
@@ -186,6 +188,7 @@ impl<'a> Cascade<'a> {
             path_key: true,
             verify: cfg!(debug_assertions),
             ancestor_filter: true,
+            buckets: true,
         }
     }
 
@@ -221,6 +224,13 @@ impl<'a> Cascade<'a> {
         self.ancestor_filter = on;
     }
 
+    /// Whether an element is tried against the rules of its buckets only (on by default); off, against every
+    /// rule, which tests compare against.
+    #[doc(hidden)]
+    pub fn set_buckets(&mut self, on: bool) {
+        self.buckets = on;
+    }
+
     pub fn rule_stats(&self) -> RuleStats {
         RuleStats {
             selectors: self.rules.entries.len(),
@@ -244,6 +254,7 @@ impl<'a> Cascade<'a> {
         r.path_key = self.path_key;
         r.verify = self.verify;
         r.ancestors.off = !self.ancestor_filter;
+        r.every_rule = !self.buckets;
         r
     }
 

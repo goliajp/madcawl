@@ -1,17 +1,20 @@
 //! Rules by the most particular simple selector of their rightmost
-//! compound: an id, a class, a local name, or none. An element is
-//! tried against the buckets of its id, its classes and its name, and
-//! the rules in none.
+//! compound: an id, a class, a local name, `:root`, an attribute name,
+//! or none. An element is tried against the buckets of its id, its
+//! classes, its name, `:root` if it is the root, and the names of its
+//! attributes, and the rules in none.
 
 use std::collections::HashMap;
 
-use madcawl_dom::{Dom, NodeId};
+use madcawl_dom::{Dom, NodeId, NodeKind};
 use madcawl_str::atom;
 
 use crate::selector::{Component, PseudoElement};
 
 use super::caseless::{caseless_hash, words};
+use super::compute::Run;
 use super::decls::What;
+use super::keys::{Key, Namer};
 use super::props::Prop;
 use super::rules::{Rules, Sel};
 
@@ -24,18 +27,14 @@ pub(crate) struct Buckets {
     id: HashMap<u64, Vec<u32>>,
     class: HashMap<u64, Vec<u32>>,
     local: HashMap<u32, Vec<u32>>,
+    /// Rules with `:root` and no id, class or name: they match the root element only
+    root: Vec<u32>,
+    /// Rules with an attribute selector and no id, class, name or `:root`, by the attribute's name as
+    /// written and lowercase: an element they match has an attribute of one of the two names
+    attr: HashMap<u32, Vec<u32>>,
     any: Vec<u32>,
     /// By rule, for the pseudo-element buckets, 1 for a `::before` rule and 2 for an `::after` one
     pub kinds: Vec<u8>,
-}
-
-enum Key {
-    Id(u64),
-    Class(u64),
-    Local(u32, u32),
-    Any,
-    /// A pseudo-element: it matches no element
-    Never,
 }
 
 /// Whether the block of rule `i` declares `content`.
@@ -50,74 +49,99 @@ pub fn declares_content(rules: &Rules<'_>, i: usize) -> bool {
 impl Buckets {
     /// The buckets of the rules for elements, or with `pseudo` of those for `::before` and `::after`; of
     /// those `keep` gives true for.
-    pub fn build(rules: &Rules<'_>, quirks: bool, pseudo: bool, keep: impl Fn(usize) -> bool) -> Buckets {
+    pub fn build(
+        rules: &Rules<'_>,
+        quirks: bool,
+        pseudo: bool,
+        keep: impl Fn(usize) -> bool,
+    ) -> Buckets {
         let mut b = Buckets {
             quirks,
             ..Buckets::default()
         };
         for (i, e) in rules.entries.iter().enumerate() {
-            let data = &rules.sheets[e.sheet as usize];
-            let atom = |n: crate::Name| data.atoms[n.index()].index();
-            let key_of = |n: crate::Name| {
-                if quirks {
-                    caseless_hash(data.sheet.names().get(n).encode_utf16())
-                } else {
-                    u64::from(atom(n))
-                }
+            let n = Namer {
+                data: &rules.sheets[e.sheet as usize],
+                quirks,
             };
-            let mut key = Key::Any;
-            let mut generated = false;
-            if let Sel::Complex(c) = e.sel {
-                for comp in c.comps {
-                    let k = match comp {
-                        Component::Combinator(_) => break,
-                        Component::PseudoElement(
-                            e @ (PseudoElement::Before | PseudoElement::After),
-                        ) if pseudo => {
-                            generated = true;
-                            b.kinds.resize(rules.entries.len(), 0);
-                            b.kinds[i] = 1 + u8::from(*e == PseudoElement::After);
-                            continue;
-                        }
-                        Component::PseudoElement(_) => Key::Never,
-                        Component::Id(n) => Key::Id(key_of(*n)),
-                        Component::Class(n) if !matches!(key, Key::Id(_)) => Key::Class(key_of(*n)),
-                        Component::Type { name, lower, .. } if matches!(key, Key::Any) => {
-                            Key::Local(atom(*name), atom(*lower))
-                        }
-                        _ => continue,
-                    };
-                    if matches!(key, Key::Never) {
-                        break;
-                    }
-                    key = k;
-                }
+            let comps = match e.sel {
+                Sel::Complex(c) => c.comps,
+                Sel::Parent => &[],
+            };
+            let generated = comps
+                .iter()
+                .take_while(|c| !matches!(c, Component::Combinator(_)))
+                .find_map(|c| match c {
+                    Component::PseudoElement(
+                        e @ (PseudoElement::Before | PseudoElement::After),
+                    ) => Some(*e),
+                    _ => None,
+                });
+            if pseudo && let Some(g) = generated {
+                b.kinds.resize(rules.entries.len(), 0);
+                b.kinds[i] = 1 + u8::from(g == PseudoElement::After);
             }
-            let i = i as u32;
-            if pseudo && !generated || !keep(i as usize) {
-                key = Key::Never;
+            if pseudo && generated.is_none() || !keep(i) {
+                continue;
             }
-            match key {
-                Key::Id(a) => b.id.entry(a).or_default().push(i),
-                Key::Class(a) => b.class.entry(a).or_default().push(i),
-                Key::Local(a, l) => {
-                    b.local.entry(a).or_default().push(i);
-                    if l != a {
-                        b.local.entry(l).or_default().push(i);
-                    }
-                }
-                Key::Any => b.any.push(i),
-                Key::Never => {}
+            match (n.compound(comps, pseudo), n.lists(comps)) {
+                (Key::Any, Some(keys)) => keys.into_iter().for_each(|k| b.place(k, i as u32)),
+                (k, _) => b.place(k, i as u32),
             }
         }
         b
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.id.is_empty() && self.class.is_empty() && self.local.is_empty() && self.any.is_empty()
+    fn place(&mut self, key: Key, i: u32) {
+        match key {
+            Key::Id(a) => self.id.entry(a).or_default().push(i),
+            Key::Class(a) => self.class.entry(a).or_default().push(i),
+            Key::Local(a, l) | Key::Attr(a, l) => {
+                let map = if matches!(key, Key::Local(..)) {
+                    &mut self.local
+                } else {
+                    &mut self.attr
+                };
+                map.entry(a).or_default().push(i);
+                if l != a {
+                    map.entry(l).or_default().push(i);
+                }
+            }
+            Key::Root => self.root.push(i),
+            Key::Any => self.any.push(i),
+            Key::Never => {}
+        }
     }
 
-    /// The rules `el` may match, each once, in no particular order.
+    pub fn is_empty(&self) -> bool {
+        self.id.is_empty()
+            && self.class.is_empty()
+            && self.local.is_empty()
+            && self.root.is_empty()
+            && self.attr.is_empty()
+            && self.any.is_empty()
+    }
+
+    /// Every rule of these buckets, each once.
+    pub fn all(&self, out: &mut Vec<u32>) {
+        out.clear();
+        let maps = [&self.id, &self.class].into_iter().flat_map(|m| m.values());
+        let names = [&self.local, &self.attr]
+            .into_iter()
+            .flat_map(|m| m.values());
+        for v in maps.chain(names) {
+            out.extend_from_slice(v);
+        }
+        out.extend_from_slice(&self.root);
+        out.extend_from_slice(&self.any);
+        out.sort_unstable();
+        out.dedup();
+    }
+
+    /// The rules `el` may match, each once, in no particular order. Only
+    /// the keyed ones are sorted to drop repeats (two classes or two
+    /// attributes of one name, a rule under two names): those in none are
+    /// most of them on a large stylesheet, and an unbucketed rule is in no bucket.
     pub fn candidates(&self, dom: &Dom, el: NodeId, out: &mut Vec<u32>) {
         out.clear();
         let mut add = |map: &HashMap<u64, Vec<u32>>, k: u64| {
@@ -151,8 +175,45 @@ impl Buckets {
         {
             out.extend_from_slice(v);
         }
-        out.extend_from_slice(&self.any);
+        self.root_and_attributes(dom, el, out);
         out.sort_unstable();
         out.dedup();
+        out.extend_from_slice(&self.any);
+    }
+
+    // the rules of `:root` when `el` is the root, and of each of its attributes' names
+    fn root_and_attributes(&self, dom: &Dom, el: NodeId, out: &mut Vec<u32>) {
+        if !self.root.is_empty()
+            && dom
+                .parent(el)
+                .is_some_and(|p| dom.kind(p) == NodeKind::Document)
+        {
+            out.extend_from_slice(&self.root);
+        }
+        if !self.attr.is_empty() {
+            for a in dom.attributes(el) {
+                if let Some(v) = self.attr.get(&a.local.index()) {
+                    out.extend_from_slice(v);
+                }
+            }
+        }
+    }
+}
+
+impl Run<'_, '_> {
+    /// The rules that may match `el`, for `collect` and its signature.
+    pub(crate) fn candidates(&mut self, el: NodeId) {
+        let mut c = std::mem::take(&mut self.candidates);
+        self.bucket(&self.prep.buckets, el, &mut c);
+        self.candidates = c;
+    }
+
+    /// The rules of `b` that `el` may match.
+    pub(crate) fn bucket(&self, b: &Buckets, el: NodeId, out: &mut Vec<u32>) {
+        if self.every_rule {
+            b.all(out);
+        } else {
+            b.candidates(self.m.dom, el, out);
+        }
     }
 }

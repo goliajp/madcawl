@@ -72,6 +72,8 @@ pub(crate) struct Run<'r, 'a> {
     pub named: HashMap<u32, Vec<u64>>,
     /// What the ancestors of the element being styled have
     pub ancestors: Ancestors,
+    /// Every rule of a bucket set is a candidate for every element
+    pub every_rule: bool,
 }
 
 impl<'r, 'a> Run<'r, 'a> {
@@ -104,6 +106,7 @@ impl<'r, 'a> Run<'r, 'a> {
             sig: Vec::new(),
             named: HashMap::new(),
             ancestors: Ancestors::default(),
+            every_rule: false,
         }
     }
 
@@ -115,13 +118,6 @@ impl<'r, 'a> Run<'r, 'a> {
                 self.style_one(el, out);
             }
         }
-    }
-
-    /// The rules that may match `el`, for `collect` and its signature.
-    pub(crate) fn candidates(&mut self, el: NodeId) {
-        self.prep
-            .buckets
-            .candidates(self.m.dom, el, &mut self.candidates);
     }
 
     /// The declarations that apply to `el`, from `candidates`, sorted
