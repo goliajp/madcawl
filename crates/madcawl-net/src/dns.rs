@@ -141,6 +141,9 @@ pub struct Resolved {
 pub fn resolve(host: &str, timeout: Duration) -> Result<Resolved, NetError> {
     let name = CString::new(host).map_err(|_| NetError::Dns("nul in host".into()))?;
     let mut answers = Answers::default();
+    // the callback writes through this pointer while dnssd runs it, so
+    // until the ref is deallocated nothing else touches `answers`
+    let ctx: *mut Answers = &raw mut answers;
     let mut sd: ServiceRef = std::ptr::null_mut();
     // SAFETY: valid out pointer, nul-terminated name, the callback matches
     // the C signature and the context lives until the ref is deallocated
@@ -152,13 +155,13 @@ pub fn resolve(host: &str, timeout: Duration) -> Result<Resolved, NetError> {
             PROTO_V4 | PROTO_V6,
             name.as_ptr(),
             on_reply,
-            (&mut answers as *mut Answers).cast(),
+            ctx.cast(),
         )
     };
     if err != 0 {
         return Err(NetError::Dns(format!("dnssd error {err}")));
     }
-    let result = drive(sd, &mut answers, timeout);
+    let result = drive(sd, ctx, timeout);
     // SAFETY: `sd` came from a successful DNSServiceGetAddrInfo
     unsafe { DNSServiceRefDeallocate(sd) };
     result?;
@@ -175,22 +178,37 @@ pub fn resolve(host: &str, timeout: Duration) -> Result<Resolved, NetError> {
     })
 }
 
-fn drive(sd: ServiceRef, a: &mut Answers, timeout: Duration) -> Result<(), NetError> {
+/// What the loop needs to know, read through `ctx` between callbacks.
+struct Seen {
+    done: bool,
+    failed: bool,
+    more_coming: bool,
+    any: bool,
+}
+
+fn seen(ctx: *const Answers) -> Seen {
+    // SAFETY: `ctx` points at live answers and no callback runs while this
+    // shared borrow exists
+    let a = unsafe { &*ctx };
+    Seen { done: a.v4_done && a.v6_done, failed: a.error.is_some(), more_coming: a.more_coming, any: !a.addrs.is_empty() }
+}
+
+fn drive(sd: ServiceRef, ctx: *mut Answers, timeout: Duration) -> Result<(), NetError> {
     let start = Instant::now();
     let mut deadline = start + timeout;
     // SAFETY: `sd` is a live service ref
     let fd = unsafe { DNSServiceRefSockFD(sd) };
     loop {
-        let done = a.v4_done && a.v6_done;
-        if (done || a.error.is_some()) && !a.more_coming {
+        let a = seen(ctx);
+        if (a.done || a.failed) && !a.more_coming {
             return Ok(());
         }
-        if !a.addrs.is_empty() && !a.more_coming {
+        if a.any && !a.more_coming {
             deadline = deadline.min(Instant::now() + SECOND_FAMILY_WAIT);
         }
         let now = Instant::now();
         if now >= deadline {
-            return if a.addrs.is_empty() { Err(NetError::DnsTimeout) } else { Ok(()) };
+            return if a.any { Ok(()) } else { Err(NetError::DnsTimeout) };
         }
         let ms = (deadline - now).as_millis().clamp(1, i32::MAX as u128) as c_int;
         let mut p = PollFd { fd, events: POLLIN, revents: 0 };

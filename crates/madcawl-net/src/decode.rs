@@ -32,60 +32,201 @@ pub fn codings(value: &[u8]) -> Result<Vec<Coding>, NetError> {
     Ok(out)
 }
 
-/// Undoes `codings` (last applied first) on `body`; no stage may produce
-/// more than `cap` bytes.
-pub fn decode(body: Vec<u8>, codings: &[Coding], cap: usize) -> Result<Vec<u8>, NetError> {
-    let mut cur = body;
-    for c in codings.iter().rev() {
-        cur = match c {
-            Coding::Identity => cur,
-            Coding::Gzip => inflate(&cur, Format::Gzip, cap)?,
-            Coding::Deflate => {
-                // "deflate" means zlib, but some servers send raw deflate
-                let zlib = cur.len() >= 2 && cur[0] & 0x0f == 8 && (u16::from(cur[0]) << 8 | u16::from(cur[1])) % 31 == 0;
-                inflate(&cur, if zlib { Format::Zlib } else { Format::Raw }, cap)?
-            }
-        };
-    }
-    Ok(cur)
+/// Undoes `codings` (last applied first) on a whole `body`; the output
+/// may be at most `cap` bytes.
+pub fn decode(body: &[u8], codings: &[Coding], cap: usize) -> Result<Vec<u8>, NetError> {
+    let mut d = Decoder::new(codings, cap);
+    let mut out = Vec::new();
+    d.push(body, &mut |b| {
+        out.extend_from_slice(b);
+        Ok(())
+    })?;
+    d.finish(&mut |b| {
+        out.extend_from_slice(b);
+        Ok(())
+    })?;
+    Ok(out)
 }
 
-/// The state is 8-byte aligned memory the decoder borrows.
-struct State(Vec<u64>);
+pub type Emit<'a> = dyn FnMut(&[u8]) -> Result<(), NetError> + 'a;
+
+/// Undoes `codings` on a body that arrives in pieces, handing the output
+/// on as it is produced; at most `cap` bytes of it in all.
+pub struct Decoder {
+    stages: Vec<Stage>,
+    cap: usize,
+    produced: usize,
+}
+
+impl Decoder {
+    pub fn new(codings: &[Coding], cap: usize) -> Self {
+        let stages = codings
+            .iter()
+            .rev()
+            .filter_map(|c| match c {
+                Coding::Identity => None,
+                Coding::Gzip => Some(Stage::new(Some(Format::Gzip))),
+                Coding::Deflate => Some(Stage::new(None)),
+            })
+            .collect();
+        Decoder { stages, cap, produced: 0 }
+    }
+
+    pub fn push(&mut self, input: &[u8], out: &mut Emit<'_>) -> Result<(), NetError> {
+        self.run(input, false, out)
+    }
+
+    /// No more input: a stream that has not ended is an error.
+    pub fn finish(&mut self, out: &mut Emit<'_>) -> Result<(), NetError> {
+        self.run(&[], true, out)
+    }
+
+    fn run(&mut self, input: &[u8], finish: bool, out: &mut Emit<'_>) -> Result<(), NetError> {
+        let (cap, produced) = (self.cap, &mut self.produced);
+        let mut counted = |b: &[u8]| {
+            *produced += b.len();
+            if *produced > cap {
+                return Err(NetError::TooLarge("decoded body"));
+            }
+            out(b)
+        };
+        if self.stages.is_empty() {
+            return if input.is_empty() { Ok(()) } else { out(input) };
+        }
+        feed(&mut self.stages, input, finish, &mut counted)
+    }
+}
+
+fn feed(stages: &mut [Stage], input: &[u8], finish: bool, out: &mut Emit<'_>) -> Result<(), NetError> {
+    let Some((first, rest)) = stages.split_first_mut() else {
+        return if input.is_empty() { Ok(()) } else { out(input) };
+    };
+    first.run(input, finish, &mut |b| feed(rest, b, false, out))?;
+    if finish {
+        feed(rest, &[], true, out)?;
+    }
+    Ok(())
+}
+
+/// The state is 8-byte aligned memory the decoder borrows, zeroed until
+/// the first borrow.
+struct State {
+    mem: Vec<u64>,
+    borrowed: bool,
+}
 
 impl State {
     fn new() -> Self {
-        State(vec![0u64; Inflate::SIZE.div_ceil(8)])
+        State { mem: vec![0u64; Inflate::SIZE.div_ceil(8)], borrowed: false }
     }
 
     fn inflate(&mut self) -> &mut Inflate {
         // SAFETY: a u64 buffer viewed as bytes of the same length
-        let bytes = unsafe { std::slice::from_raw_parts_mut(self.0.as_mut_ptr().cast::<u8>(), self.0.len() * 8) };
-        // SAFETY: zeroed, 8-byte aligned and SIZE bytes long
-        unsafe { Inflate::from_zeroed(bytes) }
+        let bytes = unsafe { std::slice::from_raw_parts_mut(self.mem.as_mut_ptr().cast::<u8>(), self.mem.len() * 8) };
+        if std::mem::replace(&mut self.borrowed, true) {
+            // SAFETY: written only through the Inflate handed out before
+            unsafe { Inflate::from_bytes_mut(bytes) }.expect("the layout was checked on the first borrow")
+        } else {
+            // SAFETY: zeroed, 8-byte aligned and SIZE bytes long
+            unsafe { Inflate::from_zeroed(bytes) }
+        }
     }
 }
 
-fn inflate(input: &[u8], format: Format, cap: usize) -> Result<Vec<u8>, NetError> {
-    let mut state = State::new();
-    let d = state.inflate();
-    d.reset(format, CpuFeatures::compile_time());
-    let mut out = Vec::new();
-    let mut chunk = vec![0u8; 64 * 1024];
-    let mut at = 0;
-    loop {
-        let p = d
-            .inflate(&input[at..], &mut chunk, Flush::Finish)
-            .map_err(|e| NetError::Decode(format!("{e:?}")))?;
-        at += p.consumed;
-        if out.len() + p.produced > cap {
-            return Err(NetError::TooLarge("decoded body"));
+/// One inflate pass. `format` is `None` for "deflate" until its first two
+/// bytes say whether it is zlib or, as some servers send, raw deflate.
+struct Stage {
+    state: State,
+    format: Option<Format>,
+    pending: Vec<u8>,
+    done: bool,
+    chunk: Vec<u8>,
+}
+
+fn is_zlib(b: &[u8]) -> bool {
+    b.len() >= 2 && b[0] & 0x0f == 8 && (u16::from(b[0]) << 8 | u16::from(b[1])) % 31 == 0
+}
+
+impl Stage {
+    fn new(format: Option<Format>) -> Self {
+        let mut s = Stage { state: State::new(), format, pending: Vec::new(), done: false, chunk: vec![0u8; 32 * 1024] };
+        if let Some(f) = format {
+            s.state.inflate().reset(f, CpuFeatures::compile_time());
         }
-        out.extend_from_slice(&chunk[..p.produced]);
-        match p.status {
-            Status::Done => return Ok(out),
-            Status::NeedOutput => {}
-            Status::NeedInput => return Err(NetError::Decode("truncated stream".into())),
+        s
+    }
+
+    fn run(&mut self, input: &[u8], finish: bool, emit: &mut Emit<'_>) -> Result<(), NetError> {
+        // bytes after the end of the stream are ignored
+        if self.done {
+            return Ok(());
         }
+        let sniffed;
+        let mut input = input;
+        if self.format.is_none() {
+            self.pending.extend_from_slice(input);
+            if self.pending.len() < 2 && !finish {
+                return Ok(());
+            }
+            let f = if is_zlib(&self.pending) { Format::Zlib } else { Format::Raw };
+            self.state.inflate().reset(f, CpuFeatures::compile_time());
+            self.format = Some(f);
+            sniffed = std::mem::take(&mut self.pending);
+            input = &sniffed;
+        }
+        let flush = if finish { Flush::Finish } else { Flush::More };
+        let mut at = 0;
+        loop {
+            let p = self
+                .state
+                .inflate()
+                .inflate(&input[at..], &mut self.chunk, flush)
+                .map_err(|e| NetError::Decode(format!("{e:?}")))?;
+            at += p.consumed;
+            if p.produced > 0 {
+                emit(&self.chunk[..p.produced])?;
+            }
+            match p.status {
+                Status::Done => {
+                    self.done = true;
+                    return Ok(());
+                }
+                Status::NeedOutput => {}
+                Status::NeedInput if finish => return Err(NetError::Decode("truncated stream".into())),
+                Status::NeedInput => return Ok(()),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_body_in_one_byte_pieces_decodes_like_a_whole_one() {
+        // "hello" as zlib, then as raw deflate
+        let zlib = [0x78, 0x9c, 0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00, 0x06, 0x2c, 0x02, 0x15];
+        let raw = &zlib[2..zlib.len() - 4];
+        for body in [&zlib[..], raw] {
+            assert_eq!(decode(body, &[Coding::Deflate], 100).unwrap(), b"hello");
+            let mut d = Decoder::new(&[Coding::Deflate], 100);
+            let mut out = Vec::new();
+            for b in body {
+                d.push(std::slice::from_ref(b), &mut |x| {
+                    out.extend_from_slice(x);
+                    Ok(())
+                })
+                .unwrap();
+            }
+            d.finish(&mut |x| {
+                out.extend_from_slice(x);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(out, b"hello");
+        }
+        assert_eq!(decode(&zlib, &[Coding::Deflate], 4), Err(NetError::TooLarge("decoded body")));
+        assert!(matches!(decode(&zlib[..6], &[Coding::Deflate], 100), Err(NetError::Decode(_))));
     }
 }

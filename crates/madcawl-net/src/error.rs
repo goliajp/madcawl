@@ -14,6 +14,8 @@ pub enum NetError {
     Untrusted(String),
     Io(String),
     ReadTimeout,
+    /// the whole request, redirects included, ran past its time
+    Deadline,
     Http(String),
     /// the response head, body or decoded body passed its cap
     TooLarge(&'static str),
@@ -36,6 +38,7 @@ impl fmt::Display for NetError {
             NetError::Untrusted(s) => write!(f, "certificate not trusted: {s}"),
             NetError::Io(s) => write!(f, "io: {s}"),
             NetError::ReadTimeout => f.write_str("read: timed out"),
+            NetError::Deadline => f.write_str("request: timed out"),
             NetError::Http(s) => write!(f, "http: {s}"),
             NetError::TooLarge(what) => write!(f, "{what} over its size cap"),
             NetError::Decode(s) => write!(f, "content decoding: {s}"),

@@ -2,7 +2,7 @@
 //! a blocking `TcpStream`.
 
 use crate::error::NetError;
-use crate::trust::Trust;
+use crate::trust::{Trust, take_rejection_reason};
 use std::io::{self, Read, Write};
 use std::mem::ManuallyDrop;
 use std::net::{IpAddr, TcpStream};
@@ -65,7 +65,10 @@ impl Drop for TlsStream {
 pub fn tls_error(e: Error) -> NetError {
     match e {
         Error::Certificate(c) => NetError::Untrusted(format!("{c:?}")),
-        Error::CertificateRejected(a) => NetError::Untrusted(format!("{a:?}")),
+        Error::CertificateRejected(a) => NetError::Untrusted(match take_rejection_reason() {
+            Some(reason) => format!("{reason} ({a:?})"),
+            None => format!("{a:?}"),
+        }),
         e => NetError::Tls(format!("{e:?}")),
     }
 }
@@ -82,6 +85,7 @@ impl TlsStream {
     /// Runs the handshake for `host` over `tcp`, which carries the timeouts
     /// the caller set.
     pub fn handshake(tcp: TcpStream, host: &str, trust: Arc<Trust>) -> Result<Self, NetError> {
+        take_rejection_reason();
         let host: *mut str = Box::into_raw(host.to_owned().into_boxed_str());
         let recv: *mut [u8] = Box::into_raw(vec![0u8; RECOMMENDED_BUFFER_LEN].into_boxed_slice());
         let send: *mut [u8] = Box::into_raw(vec![0u8; MIN_BUFFER_LEN].into_boxed_slice());

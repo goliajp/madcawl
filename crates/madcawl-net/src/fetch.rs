@@ -1,19 +1,25 @@
 //! Fetch's main flow for network requests: one HTTP/1.1 exchange per hop
 //! over the pool, cookies read and stored at each hop, redirects followed
 //! with the method rewriting the Fetch standard asks for, and the body
-//! decoded.
+//! decoded as it arrives.
 
 mod exchange;
+mod forbidden;
+mod hop;
 
-use crate::cookie::{Api, CookieJar, JarLimits, SiteContext, site_of};
+pub use forbidden::{is_forbidden, is_forbidden_method, normalize_method};
+pub use hop::Sink;
+
+use hop::Hop;
+
+use crate::cookie::{CookieJar, JarLimits, SiteContext, site_of};
 use crate::dns::DnsCache;
 use crate::error::NetError;
 use crate::pool::{Pool, PoolLimits};
 use crate::trust::{Trust, TrustSource};
-use crate::{decode, http1};
 use alt_url::Url;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -21,6 +27,8 @@ pub struct Config {
     pub connect_timeout: Duration,
     /// how long one read or write may block
     pub io_timeout: Duration,
+    /// how long a whole request may take, redirects included
+    pub request_timeout: Duration,
     pub max_redirects: usize,
     /// the body as sent, and after content decoding
     pub max_body: usize,
@@ -38,6 +46,7 @@ impl Default for Config {
             dns_timeout: Duration::from_secs(10),
             connect_timeout: Duration::from_secs(15),
             io_timeout: Duration::from_secs(30),
+            request_timeout: Duration::from_secs(300),
             max_redirects: 20,
             max_body: 64 << 20,
             max_decoded: 128 << 20,
@@ -109,19 +118,6 @@ impl Response {
     }
 }
 
-/// Request headers a requester may not set (Fetch's forbidden request
-/// header names, and the ones this stack writes itself).
-pub fn is_forbidden(name: &str) -> bool {
-    const NAMES: &[&str] = &[
-        "accept-charset", "accept-encoding", "access-control-request-headers",
-        "access-control-request-method", "connection", "content-length", "cookie", "cookie2",
-        "date", "dnt", "expect", "host", "keep-alive", "origin", "referer", "set-cookie", "te",
-        "trailer", "transfer-encoding", "upgrade", "via",
-    ];
-    let lower = name.to_ascii_lowercase();
-    NAMES.contains(&lower.as_str()) || lower.starts_with("proxy-") || lower.starts_with("sec-")
-}
-
 pub fn now_secs() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
@@ -174,61 +170,82 @@ impl Client {
         &self.dns
     }
 
+    /// The cookie jar; a lock poisoned by a panic elsewhere is taken over,
+    /// since every change to the jar leaves it consistent.
+    pub fn lock_jar(&self) -> MutexGuard<'_, CookieJar> {
+        self.jar.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The whole response, its body decoded and held in memory up to the
+    /// configured caps.
     pub fn fetch(&self, req: &Request) -> Result<Response, NetError> {
+        struct Collect(Option<Response>);
+        impl Sink for Collect {
+            fn head(&mut self, r: &Response) -> Result<(), NetError> {
+                self.0 = Some(r.clone());
+                Ok(())
+            }
+            fn body(&mut self, chunk: &[u8]) -> Result<(), NetError> {
+                if let Some(r) = &mut self.0 {
+                    r.body.extend_from_slice(chunk);
+                }
+                Ok(())
+            }
+        }
+        let mut c = Collect(None);
+        self.fetch_into(req, &mut c)?;
+        Ok(c.0.expect("the head comes before a successful end"))
+    }
+
+    /// Fetches `req`, handing the final response's head and then its
+    /// decoded body to `sink` as they arrive; the body is never held whole.
+    pub fn fetch_into(&self, req: &Request, sink: &mut dyn Sink) -> Result<(), NetError> {
+        if is_forbidden_method(&req.method) {
+            return Err(NetError::Refused(format!("forbidden method {}", req.method)));
+        }
+        let deadline = Instant::now() + self.config.request_timeout;
         let mut url = req.url.clone();
-        let mut method = req.method.to_ascii_uppercase();
+        let mut method = normalize_method(&req.method);
         let mut body = req.body.clone();
         let mut headers: Vec<(String, Vec<u8>)> =
-            req.headers.iter().filter(|(n, _)| !is_forbidden(n)).cloned().collect();
+            req.headers.iter().filter(|(n, v)| !is_forbidden(n, v)).cloned().collect();
         let mut url_list = vec![url.clone()];
         loop {
             if !matches!(url.scheme(), "http" | "https") {
                 return Err(NetError::Scheme(url.scheme().to_owned()));
             }
+            if Instant::now() >= deadline {
+                return Err(NetError::Deadline);
+            }
             let ctx = site_context(req, &url, &method);
-            let cookie = if req.credentials { self.jar.lock().unwrap().header(&url, ctx, now_secs()) } else { None };
+            let cookie = if req.credentials { self.lock_jar().header(&url, ctx, now_secs()) } else { None };
             let origin = (!matches!(method.as_str(), "GET" | "HEAD"))
                 .then(|| req.initiator.as_ref().map_or("null".into(), |i| i.origin().ascii_serialization()));
-            let extra = exchange::Extra { cookie: cookie.as_deref(), origin: origin.as_deref() };
-            let raw = self.exchange(&method, &url, &headers, extra, body.as_deref())?;
-            if req.credentials {
-                let mut jar = self.jar.lock().unwrap();
-                let now = now_secs();
-                for (_, v) in raw.headers.iter().filter(|(n, _)| n.eq_ignore_ascii_case("set-cookie")) {
-                    jar.set(&url, &String::from_utf8_lossy(v), Api::Http, now);
-                }
+            let extra = exchange::Extra { cookie: cookie.as_deref(), origin: origin.as_deref(), body: body.as_deref(), deadline };
+            let mut hop = Hop { client: self, req, url: &url, url_list: &url_list, method: &method, sink: &mut *sink, decoder: None, delivered: false };
+            let raw = self.exchange(&method, &url, &headers, extra, &mut hop)?;
+            if hop.delivered {
+                let Hop { decoder, sink, .. } = hop;
+                return match decoder {
+                    Some(mut d) => d.finish(&mut |b| sink.body(b)),
+                    None => Ok(()),
+                };
             }
-            let location = raw.header("location").map(|l| String::from_utf8_lossy(l).into_owned());
-            if let (true, Some(loc)) = (matches!(raw.status, 301 | 302 | 303 | 307 | 308), location) {
-                match req.redirect {
-                    Redirect::Manual => return Ok(finish_raw(raw, url_list)),
-                    Redirect::Error => return Err(NetError::Refused("redirect with redirect mode error".into())),
-                    Redirect::Follow => {}
-                }
-                if url_list.len() > self.config.max_redirects {
-                    return Err(NetError::TooManyRedirects);
-                }
-                let next = redirect_url(&url, &loc)?;
-                rewrite_for_redirect(raw.status, &mut method, &mut body, &mut headers);
-                if next.origin().ascii_serialization() != url.origin().ascii_serialization() {
-                    headers.retain(|(n, _)| !n.eq_ignore_ascii_case("authorization"));
-                }
-                url = next;
-                url_list.push(url.clone());
-                continue;
+            if req.redirect == Redirect::Error {
+                return Err(NetError::Refused("redirect with redirect mode error".into()));
             }
-            return self.finish(raw, &method, url_list);
+            if url_list.len() > self.config.max_redirects {
+                return Err(NetError::TooManyRedirects);
+            }
+            let loc = String::from_utf8_lossy(raw.head.header("location").unwrap_or_default()).into_owned();
+            let next = redirect_url(&url, &loc)?;
+            rewrite_for_redirect(raw.head.status, &mut method, &mut body, &mut headers);
+            if next.origin().ascii_serialization() != url.origin().ascii_serialization() {
+                headers.retain(|(n, _)| !n.eq_ignore_ascii_case("authorization"));
+            }
+            url = next;
+            url_list.push(url.clone());
         }
-    }
-
-    fn finish(&self, raw: http1::RawResponse, method: &str, url_list: Vec<Url>) -> Result<Response, NetError> {
-        let has_body = method != "HEAD" && !matches!(raw.status, 204 | 304);
-        let mut r = finish_raw(raw, url_list);
-        if has_body && let Some(enc) = r.header("content-encoding") {
-            let codings = decode::codings(enc)?;
-            r.body = decode::decode(std::mem::take(&mut r.body), &codings, self.config.max_decoded)?;
-        }
-        Ok(r)
     }
 }
 
@@ -253,8 +270,4 @@ fn rewrite_for_redirect(status: u16, method: &mut String, body: &mut Option<Vec<
             !matches!(n.as_str(), "content-encoding" | "content-language" | "content-location" | "content-type")
         });
     }
-}
-
-fn finish_raw(raw: http1::RawResponse, url_list: Vec<Url>) -> Response {
-    Response { status: raw.status, reason: raw.reason, url_list, headers: raw.headers, body: raw.body }
 }

@@ -20,6 +20,8 @@ pub mod kind {
     pub const HEAD: u16 = 2;
     pub const BODY: u16 = 3;
     pub const END: u16 = 4;
+    /// a failed fetch; it may follow a HEAD and BODY frames when the
+    /// response fails part way, and nothing follows it
     pub const ERROR: u16 = 5;
     /// content → network: `document.cookie` read and write
     pub const COOKIE_GET: u16 = 6;
@@ -178,8 +180,13 @@ impl Frame {
         if !(2..=MAX_FRAME).contains(&len) {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "frame length out of range"));
         }
-        let mut body = vec![0u8; len];
-        r.read_exact(&mut body)?;
+        // the length is the peer's word: grow with the bytes that arrive
+        // instead of reserving all of it up front
+        let mut body = Vec::new();
+        (&mut *r).take(len as u64).read_to_end(&mut body)?;
+        if body.len() != len {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
         let fields = fields(&body[2..]).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{e:?}")))?;
         Ok(Some(Frame { kind: u16::from_le_bytes([body[0], body[1]]), fields }))
     }
@@ -227,6 +234,8 @@ mod tests {
         assert_eq!(Frame::decode(&[0xff, 0xff, 0xff, 0xff]), Err(FrameError::TooLong));
         assert_eq!(Frame::decode(&[5, 0, 0, 0, 1, 0, 3, 9, 0]), Err(FrameError::Malformed));
         assert!(Frame::read_from(&mut &[0xffu8, 0xff, 0xff, 0x7f][..]).is_err());
+        let short = Frame::read_from(&mut &[0x00u8, 0x00, 0x00, 0x01, 1, 0, 9][..]).unwrap_err();
+        assert_eq!(short.kind(), io::ErrorKind::UnexpectedEof, "a frame claiming 16 MiB that stops short");
         let mut seed = 0x9e37_79b9u32;
         for n in 0..2000usize {
             let junk: Vec<u8> = (0..n % 64)

@@ -75,15 +75,20 @@ pub fn reply(status: u16, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
 }
 
 pub fn serve(handler: Handler) -> Fixture {
-    start(handler, false)
+    start("127.0.0.1:0", handler, false)
 }
 
 pub fn serve_tls(handler: Handler) -> Fixture {
-    start(handler, true)
+    start("127.0.0.1:0", handler, true)
 }
 
-fn start(handler: Handler, tls: bool) -> Fixture {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+/// TLS on `bind`, which the certificate may not name.
+pub fn serve_tls_at(bind: &str, handler: Handler) -> Fixture {
+    start(bind, handler, true)
+}
+
+fn start(bind: &str, handler: Handler, tls: bool) -> Fixture {
+    let listener = TcpListener::bind(bind).unwrap();
     let addr = listener.local_addr().unwrap();
     let seen = Arc::new(Mutex::new(Vec::new()));
     let accepted = Arc::new(AtomicUsize::new(0));

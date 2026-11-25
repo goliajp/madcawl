@@ -2,13 +2,14 @@
 //! verdict comes from Security.framework's `SecTrust` with the SSL policy,
 //! so user and enterprise roots, revocation and certificate transparency
 //! policy match Safari's. Accepted verdicts are kept per (leaf hash, host)
-//! for the life of the process, up to a cap.
+//! for at most an hour and never past the leaf's expiry, up to a cap.
 
 #![allow(non_snake_case)]
 
-use std::collections::{HashSet, VecDeque};
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::{c_char, c_void};
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 use torajs_tls::client::ServerCertVerifier;
 use torajs_tls::torajs_crypto::sha2::sha256;
 use torajs_tls::torajs_x509::{Cert, ServerName, TrustAnchor, UnixTime, Verifier};
@@ -23,6 +24,7 @@ struct Callbacks {
 
 const UTF8: u32 = 0x0800_0100;
 const VERDICT_CAP: usize = 4096;
+const VERDICT_LIFETIME: u64 = 3600;
 
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
@@ -124,31 +126,88 @@ pub enum TrustSource {
 
 type VerdictKey = ([u8; 32], String);
 
+/// Accepted verdicts and when each stops counting, at most `cap`; the
+/// oldest goes first.
+pub struct Verdicts {
+    expires: HashMap<VerdictKey, u64>,
+    order: VecDeque<VerdictKey>,
+    cap: usize,
+}
+
+impl Verdicts {
+    pub fn new(cap: usize) -> Self {
+        Verdicts { expires: HashMap::new(), order: VecDeque::new(), cap }
+    }
+
+    pub fn len(&self) -> usize {
+        self.expires.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.expires.is_empty()
+    }
+
+    /// Whether `key` was accepted and has not expired at `now`; an expired
+    /// entry is dropped.
+    pub fn holds(&mut self, key: &VerdictKey, now: u64) -> bool {
+        match self.expires.get(key) {
+            Some(&until) if now < until => true,
+            Some(_) => {
+                self.expires.remove(key);
+                self.order.retain(|k| k != key);
+                false
+            }
+            None => false,
+        }
+    }
+
+    /// Remembers an accepted verdict from `now` until the earlier of the
+    /// leaf's `not_after` and an hour on.
+    pub fn insert(&mut self, key: VerdictKey, not_after: u64, now: u64) {
+        let until = not_after.min(now.saturating_add(VERDICT_LIFETIME));
+        if self.expires.insert(key.clone(), until).is_none() {
+            self.order.push_back(key);
+            if self.order.len() > self.cap
+                && let Some(old) = self.order.pop_front()
+            {
+                self.expires.remove(&old);
+            }
+        }
+    }
+}
+
+thread_local! {
+    /// Why the system refused the last chain verified on this thread. The
+    /// TLS layer's rejection carries only an alert, and the handshake runs
+    /// on the thread that verifies, so it picks the reason up here.
+    static LAST_REASON: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// The reason the last rejection on this thread gave, taken.
+pub fn take_rejection_reason() -> Option<String> {
+    LAST_REASON.with(|r| r.borrow_mut().take())
+}
+
+fn set_rejection_reason(reason: String) {
+    LAST_REASON.with(|r| *r.borrow_mut() = Some(reason));
+}
+
 pub struct Trust {
     source: TrustSource,
-    verdicts: Mutex<(HashSet<VerdictKey>, VecDeque<VerdictKey>)>,
+    verdicts: Mutex<Verdicts>,
 }
 
 impl Trust {
     pub fn new(source: TrustSource) -> Self {
-        Trust { source, verdicts: Mutex::new((HashSet::new(), VecDeque::new())) }
+        Trust { source, verdicts: Mutex::new(Verdicts::new(VERDICT_CAP)) }
+    }
+
+    fn verdicts(&self) -> std::sync::MutexGuard<'_, Verdicts> {
+        self.verdicts.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub fn cached_verdicts(&self) -> usize {
-        self.verdicts.lock().unwrap().0.len()
-    }
-
-    fn remember(&self, key: VerdictKey) {
-        let mut g = self.verdicts.lock().unwrap();
-        let (set, order) = &mut *g;
-        if set.insert(key.clone()) {
-            order.push_back(key);
-            if order.len() > VERDICT_CAP
-                && let Some(old) = order.pop_front()
-            {
-                set.remove(&old);
-            }
-        }
+        self.verdicts().len()
     }
 }
 
@@ -170,20 +229,49 @@ impl ServerCertVerifier for Trust {
             }
             TrustSource::System => {
                 let key = (sha256(end_entity.der()), host);
-                if self.verdicts.lock().unwrap().0.contains(&key) {
+                if self.verdicts().holds(&key, now.as_secs()) {
                     return Ok(());
                 }
                 let mut chain = vec![end_entity.der()];
                 chain.extend_from_slice(intermediates);
                 match system_trusts(&chain, &key.1) {
                     Ok(()) => {
-                        self.remember(key);
+                        self.verdicts().insert(key, end_entity.not_after().as_secs(), now.as_secs());
                         Ok(())
                     }
-                    Err(_) => Err(Rejection::with_alert(AlertDescription::BadCertificate)
-                        .expect("bad_certificate is an error alert")),
+                    Err(reason) => {
+                        set_rejection_reason(reason);
+                        Err(Rejection::with_alert(AlertDescription::BadCertificate)
+                            .expect("bad_certificate is an error alert"))
+                    }
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(n: u8) -> VerdictKey {
+        ([n; 32], "example.com".into())
+    }
+
+    #[test]
+    fn verdicts_expire_at_the_leaf_expiry_or_after_an_hour() {
+        let mut v = Verdicts::new(2);
+        v.insert(key(1), 10_000_000, 1000);
+        assert!(v.holds(&key(1), 1000 + 3599));
+        assert!(!v.holds(&key(1), 1000 + 3600), "an hour after it was stored");
+        assert!(v.is_empty(), "the expired entry is dropped");
+        v.insert(key(2), 1500, 1000);
+        assert!(v.holds(&key(2), 1499));
+        assert!(!v.holds(&key(2), 1500), "the leaf's notAfter comes first");
+        v.insert(key(3), u64::MAX, 0);
+        v.insert(key(4), u64::MAX, 0);
+        v.insert(key(5), u64::MAX, 0);
+        assert_eq!(v.len(), 2);
+        assert!(!v.holds(&key(3), 1), "the oldest went at the cap");
     }
 }

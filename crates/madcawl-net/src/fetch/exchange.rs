@@ -3,16 +3,20 @@
 use super::Client;
 use crate::connect::connect;
 use crate::error::NetError;
-use crate::http1::{self, RawResponse};
+use crate::http1::{self, BodySink, RawResponse, ReadLimits};
 use crate::pool::Key;
 use crate::stream::Stream;
 use crate::tls::TlsStream;
 use alt_url::Url;
+use std::time::Instant;
 
-/// Headers this stack adds to the requester's.
+/// Headers this stack adds to the requester's, the body, and when the
+/// whole request has to be done.
 pub struct Extra<'a> {
     pub cookie: Option<&'a str>,
     pub origin: Option<&'a str>,
+    pub body: Option<&'a [u8]>,
+    pub deadline: Instant,
 }
 
 fn target(url: &Url) -> String {
@@ -49,7 +53,7 @@ impl Client {
         url: &Url,
         headers: &[(String, Vec<u8>)],
         extra: Extra<'_>,
-        body: Option<&[u8]>,
+        sink: &mut dyn BodySink,
     ) -> Result<RawResponse, NetError> {
         let key = Key {
             tls: url.scheme() == "https",
@@ -73,6 +77,7 @@ impl Client {
             fields.push(("Origin", o.as_bytes()));
         }
         let target = target(url);
+        let limits = ReadLimits { max_body: self.config.max_body, io: self.config.io_timeout, deadline: extra.deadline };
         let (slot, idle) = self.pool.checkout(&key, self.config.connect_timeout)?;
         let mut reused = idle.is_some();
         let mut stream = match idle {
@@ -81,9 +86,9 @@ impl Client {
         };
         loop {
             stream.set_timeouts(self.config.io_timeout, self.config.io_timeout)?;
-            let sent = http1::write_request(&mut stream, method, &target, &fields, body);
+            let sent = http1::write_request(&mut stream, method, &target, &fields, extra.body);
             let result = match sent {
-                Ok(()) => http1::read_response(&mut stream, method, self.config.max_body),
+                Ok(()) => http1::read_response(&mut stream, method, &limits, sink),
                 Err(error) => Err(http1::ExchangeError { error, nothing_received: true }),
             };
             match result {

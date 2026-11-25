@@ -121,3 +121,15 @@ fn sites_without_a_suffix_list() {
     assert_eq!(site_of("localhost"), "localhost");
     assert_eq!(site_of("127.0.0.1"), "127.0.0.1");
 }
+
+#[test]
+fn a_domain_equal_to_the_host_makes_a_domain_cookie() {
+    let mut jar = CookieJar::new(JarLimits::default());
+    let u = url("https://example.com/");
+    assert!(jar.set(&u, "a=1; Domain=example.com", Api::Http, NOW));
+    let set = jar.matching(&u, SiteContext::SameSite, Api::Http, NOW);
+    assert_eq!((set.len(), set[0].host_only, set[0].domain.as_str()), (1, false, "example.com"));
+    assert_eq!(names(&mut jar, "https://www.example.com/", SiteContext::SameSite, Api::Http), ["a"]);
+    assert!(jar.set(&u, "b=1", Api::Http, NOW));
+    assert_eq!(names(&mut jar, "https://www.example.com/", SiteContext::SameSite, Api::Http), ["a"]);
+}

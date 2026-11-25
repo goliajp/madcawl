@@ -1,4 +1,4 @@
-//! `madcawl-netd --socket <path> [--clients N] [--in-flight N]`: the
+//! `madcawl-netd --socket <path> [--clients N] [--in-flight N] [--requests N]`: the
 //! network process. It listens on the Unix socket at `path`, replacing a
 //! stale socket file there, and serves until killed.
 
@@ -20,8 +20,9 @@ fn main() -> ExitCode {
             ("--socket", Some(v), _) => socket = Some(v),
             ("--clients", _, Some(n)) => limits.clients = n,
             ("--in-flight", _, Some(n)) => limits.in_flight = n,
+            ("--requests", _, Some(n)) => limits.requests = n,
             _ => {
-                eprintln!("usage: madcawl-netd --socket <path> [--clients N] [--in-flight N]");
+                eprintln!("usage: madcawl-netd --socket <path> [--clients N] [--in-flight N] [--requests N]");
                 return ExitCode::from(2);
             }
         }
@@ -40,11 +41,6 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match serve(listener, Arc::new(Client::new(Config::default())), limits) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("madcawl-netd: {e}");
-            ExitCode::FAILURE
-        }
-    }
+    serve(listener, Arc::new(Client::new(Config::default())), limits);
+    ExitCode::SUCCESS
 }

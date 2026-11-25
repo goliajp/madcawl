@@ -2,7 +2,7 @@
 
 use madcawl_net::wire::{Frame, kind, tag};
 use madcawl_net::{Client, Config};
-use madcawl_netd::{ServerLimits, serve};
+use madcawl_netd::{ServerLimits, serve, serve_streams};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -145,7 +145,7 @@ fn large_bodies_errors_and_unknown_frames() {
 
 #[test]
 fn clients_and_requests_in_flight_are_capped() {
-    let path = netd(ServerLimits { clients: 1, in_flight: 1 });
+    let path = netd(ServerLimits { clients: 1, in_flight: 1, ..ServerLimits::default() });
     let mut a = connect(&path);
     assert_eq!(cookie_get(&mut a, "http://127.0.0.1/"), "");
     let mut b = connect(&path);
@@ -159,5 +159,66 @@ fn clients_and_requests_in_flight_are_capped() {
     let e = read(&mut a);
     assert_eq!((e.kind, e.get_num(tag::ID)), (kind::ERROR, Some(2)));
     drop(silent);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_forbidden_method_is_answered_with_an_error() {
+    let origin = http_fixture();
+    let path = netd(ServerLimits::default());
+    let mut s = connect(&path);
+    Frame::new(kind::FETCH).num(tag::ID, 1).str(tag::METHOD, "trace").str(tag::URL, &format!("{origin}/")).write_to(&mut s).unwrap();
+    let e = read(&mut s);
+    assert_eq!((e.kind, e.get_num(tag::ID)), (kind::ERROR, Some(1)));
+    assert!(e.get_str(tag::MESSAGE).unwrap().contains("forbidden method"));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_failed_accept_does_not_stop_the_server() {
+    let origin = http_fixture();
+    let path = std::env::temp_dir().join(format!("mcnetd-{}-accept.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let l = UnixListener::bind(&path).unwrap();
+    let client = Arc::new(Client::new(Config::default()));
+    let failures = [24, 23, 53].map(|e| Err(std::io::Error::from_raw_os_error(e)));
+    std::thread::spawn(move || serve_streams(failures.into_iter().chain(l.incoming()), client, ServerLimits::default()));
+    let mut s = connect(&path);
+    assert_eq!(cookie_get(&mut s, &format!("{origin}/")), "");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn requests_are_capped_across_clients() {
+    let path = netd(ServerLimits { requests: 1, ..ServerLimits::default() });
+    let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/", silent.local_addr().unwrap());
+    let mut a = connect(&path);
+    let mut b = connect(&path);
+    Frame::new(kind::FETCH).num(tag::ID, 1).str(tag::URL, &url).write_to(&mut a).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    Frame::new(kind::FETCH).num(tag::ID, 2).str(tag::URL, &url).write_to(&mut b).unwrap();
+    let e = read(&mut b);
+    assert_eq!((e.kind, e.get_num(tag::ID)), (kind::ERROR, Some(2)), "the one place is taken by another client");
+    drop(silent);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_client_that_stops_reading_lets_go_of_its_request() {
+    let origin = http_fixture();
+    let limits = ServerLimits { requests: 1, write_timeout: Duration::from_millis(200), ..ServerLimits::default() };
+    let path = netd(limits);
+    let mut stuck = connect(&path);
+    Frame::new(kind::FETCH).num(tag::ID, 1).str(tag::URL, &format!("{origin}/big")).write_to(&mut stuck).unwrap();
+    std::thread::sleep(Duration::from_millis(1000));
+    // the stuck client's request gave its place back once its writes timed out
+    let mut s = connect(&path);
+    let (head, body) = fetch(&mut s, 2, &format!("{origin}/echo"));
+    assert_eq!((head.get_num(tag::STATUS), body), (Some(200), Vec::new()));
+    // and the stuck client finds its connection closed part way
+    let mut rest = Vec::new();
+    stuck.read_to_end(&mut rest).unwrap();
+    assert!(rest.len() < 600 * 1024);
     let _ = std::fs::remove_file(&path);
 }

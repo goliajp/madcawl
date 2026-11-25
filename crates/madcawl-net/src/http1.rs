@@ -4,25 +4,52 @@
 use crate::error::NetError;
 use crate::stream::Stream;
 use std::io::{Read, Write};
+use std::time::{Duration, Instant};
 use torajs_http1::{BodyDecoder, BodyKind, Framing, Limits, Progress, ResponseHead, Version};
 
 pub const MAX_HEAD: usize = 64 * 1024;
 
+/// How many interim (1xx) responses one request may get before its final
+/// one.
+pub const MAX_INTERIM: usize = 16;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RawResponse {
+pub struct RawHead {
     pub status: u16,
     pub reason: String,
     pub headers: Vec<(String, Vec<u8>)>,
-    /// the body as sent, before content decoding
-    pub body: Vec<u8>,
+}
+
+impl RawHead {
+    pub fn header(&self, name: &str) -> Option<&[u8]> {
+        self.headers.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_slice())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawResponse {
+    pub head: RawHead,
     /// whether the connection can carry another request
     pub reusable: bool,
 }
 
-impl RawResponse {
-    pub fn header(&self, name: &str) -> Option<&[u8]> {
-        self.headers.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_slice())
-    }
+/// Where a response goes as it is read: the final head, then the body as
+/// sent (before content decoding) in pieces.
+pub trait BodySink {
+    /// false reads the body to the end without handing it on
+    fn head(&mut self, head: &RawHead) -> Result<bool, NetError>;
+    fn body(&mut self, bytes: &[u8]) -> Result<(), NetError>;
+}
+
+/// Bounds on reading one response.
+#[derive(Clone, Copy, Debug)]
+pub struct ReadLimits {
+    /// the body as sent
+    pub max_body: usize,
+    /// how long one read may block
+    pub io: Duration,
+    /// when the whole request has to be done
+    pub deadline: Instant,
 }
 
 /// Why an exchange failed, and whether the server sent nothing at all, in
@@ -60,17 +87,44 @@ pub fn write_request(
     Ok(())
 }
 
-/// Reads the response to a `method` request; the body may hold at most
-/// `max_body` bytes as sent.
-pub fn read_response(stream: &mut Stream, method: &str, max_body: usize) -> Result<RawResponse, ExchangeError> {
-    let limits = Limits::new().max_head_len(MAX_HEAD);
+/// Reads from `stream` into `chunk`, the read bounded by the request's
+/// deadline as well as the per-read timeout.
+fn read_bounded(stream: &mut Stream, chunk: &mut [u8], limits: &ReadLimits) -> Result<usize, NetError> {
+    let left = limits.deadline.saturating_duration_since(Instant::now());
+    if left.is_zero() {
+        return Err(NetError::Deadline);
+    }
+    if left < limits.io {
+        stream.set_timeouts(left, limits.io)?;
+    }
+    match stream.read(chunk) {
+        Ok(n) => Ok(n),
+        Err(_) if Instant::now() >= limits.deadline => Err(NetError::Deadline),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Reads the response to a `method` request, handing the final head and
+/// the body to `sink` as they arrive.
+pub fn read_response(
+    stream: &mut Stream,
+    method: &str,
+    limits: &ReadLimits,
+    sink: &mut dyn BodySink,
+) -> Result<RawResponse, ExchangeError> {
+    let parse_limits = Limits::new().max_head_len(MAX_HEAD);
     let mut buf = Vec::with_capacity(16 * 1024);
     let mut chunk = vec![0u8; 16 * 1024];
+    let mut interim = 0;
     let (head, mut used) = loop {
-        match ResponseHead::parse(&buf, &limits) {
+        match ResponseHead::parse(&buf, &parse_limits) {
             Ok(Progress::Complete { consumed, value }) if (100..200).contains(&value.status()) => {
                 if value.status() == 101 {
                     return Err(fail(NetError::Http("protocol upgrade not supported".into()), false));
+                }
+                interim += 1;
+                if interim > MAX_INTERIM {
+                    return Err(fail(NetError::Http("too many interim responses".into()), false));
                 }
                 buf.drain(..consumed);
                 continue;
@@ -79,42 +133,50 @@ pub fn read_response(stream: &mut Stream, method: &str, max_body: usize) -> Resu
             Ok(Progress::Incomplete) => {}
             Err(e) => return Err(fail(NetError::Http(format!("response head: {e:?}")), false)),
         }
-        let n = stream.read(&mut chunk).map_err(|e| fail(e.into(), buf.is_empty()))?;
+        let n = read_bounded(stream, &mut chunk, limits).map_err(|e| fail(e, buf.is_empty()))?;
         if n == 0 {
             let error = NetError::Http("connection closed before the response head".into());
             return Err(fail(error, buf.is_empty()));
         }
         buf.extend_from_slice(&chunk[..n]);
     };
+    let raw_head = RawHead {
+        status: head.status(),
+        reason: String::from_utf8_lossy(head.reason()).into_owned(),
+        headers: head.headers().iter().map(|h| (h.name().to_owned(), h.value().to_vec())).collect(),
+    };
+    let wanted = sink.head(&raw_head).map_err(|e| fail(e, false))?;
     let kind = head.body_kind(method);
-    let mut decoder = BodyDecoder::with_limits(kind, &limits);
+    let mut decoder = BodyDecoder::with_limits(kind, &parse_limits);
     let mut body = Vec::new();
+    let mut total = 0usize;
     let mut leftover = false;
     loop {
         let input = &buf[used..];
         let progress = decoder.decode(input, &mut body).map_err(|e| fail(NetError::Http(format!("body: {e:?}")), false))?;
-        if body.len() > max_body {
+        total += body.len();
+        if total > limits.max_body {
             return Err(fail(NetError::TooLarge("response body"), false));
         }
+        if wanted && !body.is_empty() {
+            sink.body(&body).map_err(|e| fail(e, false))?;
+        }
+        body.clear();
         if let Progress::Complete { consumed, .. } = progress {
             leftover = consumed < input.len();
             break;
         }
         buf.clear();
         used = 0;
-        let n = stream.read(&mut chunk).map_err(|e| fail(e.into(), false))?;
+        let n = read_bounded(stream, &mut chunk, limits).map_err(|e| fail(e, false))?;
         if n == 0 {
             decoder.finish().map_err(|e| fail(NetError::Http(format!("body: {e:?}")), false))?;
             break;
         }
         buf.extend_from_slice(&chunk[..n]);
     }
-    let headers = head.headers().iter().map(|h| (h.name().to_owned(), h.value().to_vec())).collect();
     Ok(RawResponse {
-        status: head.status(),
-        reason: String::from_utf8_lossy(head.reason()).into_owned(),
-        headers,
-        body,
+        head: raw_head,
         reusable: head.keep_alive() && kind != BodyKind::UntilClose && decoder.is_done() && !leftover,
     })
 }

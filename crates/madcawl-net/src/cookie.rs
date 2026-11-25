@@ -128,7 +128,7 @@ fn admit(sc: &SetCookie, url: &Url, api: Api, now: i64) -> Option<Admitted> {
     }
     let (domain, host_only) = match sc.domain.as_deref() {
         None => (host, true),
-        Some(d) if d == host => (host, true),
+        Some(d) if d == host && (ip || !d.contains('.')) => (host, true), // single label: a public suffix
         Some(d) if ip || !d.contains('.') || !domain_matches(&host, d, false) => return None,
         Some(d) => (d.to_owned(), false),
     };
