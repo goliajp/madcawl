@@ -6,6 +6,7 @@
 use madcawl_dom::Dom;
 
 use crate::agents::{AgentError, Agents, SessionId, ViewKind};
+use crate::extract::{ExtractOpts, Format, What};
 use crate::frame::Frame;
 use crate::role::Role;
 use crate::tree::Inputs;
@@ -49,10 +50,17 @@ pub mod tag {
     pub const HEIGHT: u8 = 18;
     /// The charset label a transport would have given
     pub const CHARSET: u8 = 19;
+    /// What an extraction takes: `table`, `list`, `links`, `images`,
+    /// `forms`
+    pub const WHAT: u8 = 20;
+    /// `json` (the default, a JSON object a line) or `markdown`
+    pub const FORMAT: u8 = 21;
+    /// Records an extraction skips
+    pub const OFFSET: u8 = 22;
 }
 
-/// The views by number on the wire.
-const VIEWS: [&str; 4] = ["outline", "snapshot", "markdown", "find"];
+/// The views by number on the wire; `extract` is a view of records.
+const VIEWS: [&str; 5] = ["outline", "snapshot", "markdown", "find", "extract"];
 /// The scopes by number on the wire.
 const SCOPES: [&str; 4] = ["page", "viewport", "subtree", "main"];
 
@@ -74,6 +82,8 @@ fn error(e: AgentError) -> Frame {
         AgentError::Ref(crate::refs::RefError::Stale) => 3,
         AgentError::TooFarBehind => 4,
         AgentError::TooManySessions => 5,
+        // the host's code for a request it cannot take, so both agree
+        AgentError::BadRequest(_) => 10,
     };
     Frame::new(kind::ERROR)
         .num(tag::CODE, code)
@@ -135,6 +145,9 @@ impl Agents {
             3 => Scope::Main,
             _ => Scope::Page,
         };
+        if f.get_num(tag::VIEW) == Some(4) {
+            return self.extract_request(session, dom, inputs, f, scope);
+        }
         let opts = ViewOpts {
             scope,
             budget: f.get_num(tag::BUDGET).map(|b| b as usize),
@@ -151,5 +164,36 @@ impl Agents {
             _ => ViewKind::Snapshot,
         };
         self.view(session, dom, inputs, &kind, opts)
+    }
+
+    fn extract_request(
+        &mut self,
+        session: SessionId,
+        dom: &mut Dom,
+        inputs: Inputs,
+        f: &Frame,
+        scope: Scope,
+    ) -> Result<(u64, crate::view::View), AgentError> {
+        let what = match f.get_str(tag::WHAT) {
+            None => What::Table,
+            Some(w) => What::from_name(w).ok_or(AgentError::BadRequest(
+                "unknown what: table, list, links, images or forms",
+            ))?,
+        };
+        let mut opts = ExtractOpts::new(what);
+        // a reference names the target: the table, an item, the subtree
+        match scope {
+            Scope::Subtree(n) => opts.target = Some(n),
+            s => opts.scope = s,
+        }
+        opts.offset = f.get_num(tag::OFFSET).unwrap_or(0) as usize;
+        opts.budget = f.get_num(tag::BUDGET).map(|b| b as usize);
+        opts.include_hidden = f.get_num(tag::HIDDEN).unwrap_or(0) != 0;
+        opts.format = match f.get_str(tag::FORMAT).map(str::trim) {
+            None | Some("" | "json") => Format::JsonLines,
+            Some("markdown") => Format::Markdown,
+            Some(_) => return Err(AgentError::BadRequest("unknown format: json or markdown")),
+        };
+        self.extract(session, dom, inputs, &opts)
     }
 }

@@ -3,8 +3,9 @@
 //! generation — and a pool of the strings they point at), element
 //! references, the outline, snapshot, Markdown and find views with their
 //! scopes and token budgets, diffs from a session's bounded ring of
-//! changes, the envelope page content is handed over in, and the frames
-//! of the agent protocol.
+//! changes, structured extraction (tables, repeated items, links,
+//! images, form fields), the envelope page content is handed over in,
+//! and the frames of the agent protocol.
 //!
 //! None of it exists until an agent attaches: `Agents` holds no tree,
 //! the DOM records no changes, nothing is allocated. The first session
@@ -20,6 +21,7 @@ mod agents;
 mod cx;
 mod diff;
 mod envelope;
+pub mod extract;
 mod frame;
 mod geom;
 mod html_role;

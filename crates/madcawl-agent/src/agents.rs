@@ -27,6 +27,8 @@ pub enum AgentError {
     TooFarBehind,
     /// The page has `MAX_SESSIONS` sessions already
     TooManySessions,
+    /// A request field holds a value the request cannot take
+    BadRequest(&'static str),
 }
 
 impl AgentError {
@@ -36,6 +38,7 @@ impl AgentError {
             AgentError::Ref(e) => e.message(),
             AgentError::TooFarBehind => "too far behind: take a new snapshot",
             AgentError::TooManySessions => "too many agent sessions on this page",
+            AgentError::BadRequest(m) => m,
         }
     }
 }
@@ -196,6 +199,21 @@ impl Agents {
             ViewKind::Find(q) => t.find(dom, inputs, opts, q),
         };
         Ok((seq, v))
+    }
+
+    /// Records extracted after bringing the tree up to date, written as
+    /// `opts` asks; with the sequence they show the page at.
+    pub fn extract(
+        &mut self,
+        id: SessionId,
+        dom: &mut Dom,
+        inputs: Inputs,
+        opts: &crate::extract::ExtractOpts,
+    ) -> Result<(u64, View), AgentError> {
+        self.check(id)?;
+        let seq = self.sync(dom, inputs);
+        let t = self.check(id)?;
+        Ok((seq, t.extract_view(dom, inputs, opts)))
     }
 
     /// What changed since the view stamped `since`, one line a node.
