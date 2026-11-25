@@ -27,6 +27,12 @@ pub mod kind {
     pub const COOKIE_GET: u16 = 6;
     pub const COOKIE_SET: u16 = 7;
     pub const COOKIES: u16 = 8;
+    /// network → content: the response is going to a file in the
+    /// profile's downloads directory instead of BODY frames; then
+    /// DOWNLOAD_PROGRESS frames, and DOWNLOAD_DONE before END, or ERROR
+    pub const DOWNLOAD: u16 = 20;
+    pub const DOWNLOAD_PROGRESS: u16 = 21;
+    pub const DOWNLOAD_DONE: u16 = 22;
     /// content → network, first on a connection: the token its host got
     /// for it; answered with HELLO and `OK`
     pub const HELLO: u16 = 32;
@@ -57,6 +63,13 @@ pub mod tag {
     pub const MESSAGE: u8 = 12;
     pub const TEXT: u8 = 13;
     pub const OK: u8 = 14;
+    /// on FETCH: 1 sends the response to a file whatever its type
+    pub const DOWNLOAD: u8 = 20;
+    /// a downloaded file's name in the downloads directory
+    pub const FILE: u8 = 21;
+    pub const BYTES: u8 = 22;
+    /// the length the response announced, when it did
+    pub const TOTAL: u8 = 23;
     pub const TOKEN: u8 = 32;
     pub const COUNT: u8 = 33;
     /// on an ERROR: the network process refused what the content process

@@ -63,7 +63,7 @@ fn netd(limits: ServerLimits) -> Netd {
     let (host, theirs) = UnixStream::pair().unwrap();
     host.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
     let client = Arc::new(Client::new(Config::default()));
-    std::thread::spawn(move || serve_guarded(l, theirs, client, limits).unwrap());
+    std::thread::spawn(move || serve_guarded(l, theirs, client, limits, None).unwrap());
     Netd { path, control: host }
 }
 

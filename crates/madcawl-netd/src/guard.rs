@@ -41,6 +41,8 @@
 //! all connections without one, since a client may reconnect to be
 //! refused again. Registrations are bounded by the client limit.
 
+mod fetch;
+
 use crate::error;
 use madcawl_net::Url;
 use madcawl_net::cookie::site_of;
@@ -140,27 +142,6 @@ fn same_site(a: &Url, b: &Url) -> bool {
     }
 }
 
-/// A FETCH with its initiator checked and, when it claimed none, set to
-/// the document, never a navigation and with one credentials value; the
-/// reason when it is refused.
-fn screen_fetch(doc: &Url, mut frame: Frame) -> Result<Frame, &'static str> {
-    if frame.all(tag::NAVIGATION).any(|v| v != [0]) {
-        return Err("a navigation from a content process");
-    }
-    let credentials = flag_of(&frame, tag::CREDENTIALS).map_err(|()| "a credentials value other than 0 and 1")?.unwrap_or(1);
-    let mut claimed = None;
-    for raw in frame.all(tag::INITIATOR) {
-        let url = std::str::from_utf8(raw).ok().and_then(|s| Url::parse(s).ok()).ok_or("an initiator that is not a url")?;
-        if !same_site(&url, doc) {
-            return Err("an initiator of another site than the document");
-        }
-        claimed.get_or_insert(url);
-    }
-    let initiator = claimed.unwrap_or_else(|| doc.clone());
-    frame.fields.retain(|(t, _)| !matches!(*t, tag::INITIATOR | tag::NAVIGATION | tag::CREDENTIALS));
-    Ok(frame.str(tag::INITIATOR, initiator.as_str()).num(tag::NAVIGATION, 0).num(tag::CREDENTIALS, credentials))
-}
-
 impl Guard {
     /// A guard that holds at most `max` registered documents.
     pub fn new(max: usize) -> Self {
@@ -242,7 +223,7 @@ impl Guard {
             (kind::HELLO, _) => return Screened::Close(self.refuse(binding, Some(doc), id, "a second HELLO")),
             (kind::REGISTER | kind::UNREGISTER | kind::STATS, _) => "a control frame from a content process",
             (_, None) => return Screened::Pass(frame),
-            (kind::FETCH, Some(url)) => match screen_fetch(url, frame) {
+            (kind::FETCH, Some(url)) => match fetch::screen(url, frame) {
                 Ok(f) => return Screened::Pass(f),
                 Err(why) => why,
             },

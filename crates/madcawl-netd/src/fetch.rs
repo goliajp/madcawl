@@ -1,6 +1,7 @@
 //! One fetch for a content process: the request out of its frame, the
 //! response back as frames.
 
+use crate::download::{Downloads, Tee};
 use crate::{Writer, error, is_hidden_response_header, parse_url, send};
 use madcawl_net::fetch::{Redirect, Request, Sink, is_forbidden_method};
 use madcawl_net::sock::Cancel;
@@ -86,19 +87,35 @@ impl Sink for Frames<'_> {
     }
 }
 
-pub(crate) fn run_fetch(client: &Client, w: &Writer, id: u64, frame: Frame, cancel: Arc<Cancel>) -> io::Result<()> {
+pub(crate) fn run_fetch(
+    client: &Client,
+    w: &Writer,
+    id: u64,
+    frame: Frame,
+    cancel: Arc<Cancel>,
+    downloads: Option<&Downloads>,
+) -> io::Result<()> {
+    let forced = frame.get_num(tag::DOWNLOAD).unwrap_or(0) != 0;
     let mut req = match request_of(frame) {
         Ok(r) => r,
         Err(e) => return send(w, &error(id, &e)),
     };
     req.cancel = Some(cancel.clone());
     let mut out = Frames { w, id, pending: Vec::new(), cancel: &cancel };
-    if let Err(e) = client.fetch_into(&req, &mut out) {
-        if let NetError::Untrusted(reason) = &e {
-            eprintln!("madcawl-netd: {}: certificate not trusted: {reason}", req.url);
+    let mut tee = Tee::new(&mut out, w, id, &cancel, downloads);
+    (tee.navigation, tee.forced) = (req.navigation, forced);
+    let r = client.fetch_into(&req, &mut tee);
+    let downloaded = match tee.finish(r) {
+        Ok(d) => d,
+        Err(e) => {
+            if let NetError::Untrusted(reason) = &e {
+                eprintln!("madcawl-netd: {}: certificate not trusted: {reason}", req.url);
+            }
+            return send(w, &error(id, &e.to_string()));
         }
-        return send(w, &error(id, &e.to_string()));
+    };
+    if !downloaded {
+        out.flush()?;
     }
-    out.flush()?;
     send(w, &Frame::new(kind::END).num(tag::ID, id))
 }
