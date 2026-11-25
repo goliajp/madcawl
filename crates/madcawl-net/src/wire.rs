@@ -184,21 +184,24 @@ impl Frame {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "frame length out of range"));
         }
         let mut body = Vec::new();
-        while body.len() < len {
-            let at = body.len();
-            // doubling, but taking the rest at once when it is less than
-            // two steps, so the last growth is not a small one
-            let step = at.max(64 << 10);
-            let want = if len - at <= 2 * step { len - at } else { step };
-            body.reserve_exact(want);
-            body.resize(at + want, 0);
-            let n = match r.read(&mut body[at..]) {
+        // bytes read so far; the buffer past them is zeroed once, when it
+        // grows, not again on every short read
+        let mut filled = 0;
+        while filled < len {
+            if filled == body.len() {
+                // doubling, but taking the rest at once when it is less
+                // than two steps, so the last growth is not a small one
+                let step = filled.max(64 << 10);
+                let want = if len - filled <= 2 * step { len - filled } else { step };
+                body.reserve_exact(want);
+                body.resize(filled + want, 0);
+            }
+            filled += match r.read(&mut body[filled..]) {
                 Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
                 Ok(n) => n,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => 0,
                 Err(e) => return Err(e),
             };
-            body.truncate(at + n);
         }
         let kind = u16::from_le_bytes([body[0], body[1]]);
         let spans = spans(&body, 2).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{e:?}")))?;
@@ -263,6 +266,27 @@ mod tests {
         assert_eq!(g.headers(), vec![("a".into(), b"1".to_vec()), ("b".into(), b"x\0y".to_vec())]);
         assert_eq!(Frame::read_from(&mut &b[..]).unwrap(), Some(g));
         assert_eq!(Frame::read_from(&mut &b""[..]).unwrap(), None);
+    }
+
+    /// A peer sending one byte at a time costs a read per byte, not a
+    /// zeroed buffer per byte.
+    #[test]
+    fn a_frame_sent_a_byte_at_a_time_is_read_in_linear_time() {
+        struct Dribble<'a>(&'a [u8]);
+        impl Read for Dribble<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                let Some((&b, rest)) = self.0.split_first() else { return Ok(0) };
+                buf[0] = b;
+                self.0 = rest;
+                Ok(1)
+            }
+        }
+        let f = Frame::new(kind::BODY).bytes(tag::BODY, &vec![7u8; 4 << 20]);
+        let mut b = Vec::new();
+        f.encode(&mut b);
+        let t = std::time::Instant::now();
+        assert_eq!(Frame::read_from(&mut Dribble(&b)).unwrap(), Some(f));
+        assert!(t.elapsed() < std::time::Duration::from_secs(5), "{:?}", t.elapsed());
     }
 
     #[test]

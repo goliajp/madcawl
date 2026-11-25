@@ -27,8 +27,11 @@ impl Cancel {
 
     pub fn cancel(&self) {
         self.flag.store(true, Ordering::SeqCst);
-        let socks = std::mem::take(&mut *self.socks.lock().unwrap_or_else(PoisonError::into_inner));
-        for (_, s) in socks {
+        // under the lock: a request that detached has gone through it, so
+        // a socket it put back in the pool for another request is never
+        // shut down here
+        let mut socks = self.socks.lock().unwrap_or_else(PoisonError::into_inner);
+        for (_, s) in socks.drain(..) {
             let _ = s.shutdown(Shutdown::Both);
         }
     }

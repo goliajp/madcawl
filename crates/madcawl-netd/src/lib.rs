@@ -2,7 +2,11 @@
 //! socket and send frames (`madcawl_net::wire`); each fetch runs on its own
 //! thread, at most `in_flight` per connection, `requests` in all and
 //! `clients` connections at a time. When a connection closes, its fetches
-//! are cancelled and their sockets shut down.
+//! are cancelled and their sockets shut down. A fetch that is still
+//! waiting for a pool slot, a DNS answer or a connect is not woken: it
+//! holds its request slot until that step's own limit (connect timeout,
+//! DNS timeout, bounded by the request deadline) and then sees the
+//! cancellation.
 //!
 //! Memory: a response body goes out as it is decoded, with at most
 //! `BODY_CHUNK` bytes of it waiting per request. A request body is held
