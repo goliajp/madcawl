@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "alt-url"
+version = "0.1.0"
+
+[[package]]
 name = "madcawl-agent"
 version = "0.0.1"
 dependencies = [
@@ -81,6 +85,23 @@ name = "madcawl-mcp"
 version = "0.0.1"
 
 [[package]]
+name = "madcawl-net"
+version = "0.0.1"
+dependencies = [
+ "alt-url",
+ "torajs-flate",
+ "torajs-http1",
+ "torajs-tls",
+]
+
+[[package]]
+name = "madcawl-netd"
+version = "0.0.1"
+dependencies = [
+ "madcawl-net",
+]
+
+[[package]]
 name = "madcawl-paint"
 version = "0.0.1"
 dependencies = [
@@ -129,5 +150,32 @@ name = "torajs-abi"
 version = "0.1.0"
 
 [[package]]
+name = "torajs-crypto"
+version = "0.1.0"
+
+[[package]]
 name = "torajs-encoding"
 version = "0.1.0"
+
+[[package]]
+name = "torajs-flate"
+version = "0.1.0"
+
+[[package]]
+name = "torajs-http1"
+version = "0.1.0"
+
+[[package]]
+name = "torajs-tls"
+version = "0.1.0"
+dependencies = [
+ "torajs-crypto",
+ "torajs-x509",
+]
+
+[[package]]
+name = "torajs-x509"
+version = "0.1.0"
+dependencies = [
+ "torajs-crypto",
+]

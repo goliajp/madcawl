@@ -1,0 +1,244 @@
+//! Frames between content processes and the network process: a length
+//! (u32, little-endian, of what follows), a kind (u16), then fields, each
+//! a tag byte, a LEB128 length and the bytes; the same layout as the agent
+//! protocol. A tag may repeat. A reader skips kinds and tags it does not
+//! know.
+
+use std::io::{self, Read, Write};
+
+/// The longest frame a reader takes; a longer length is an error, never
+/// an allocation.
+pub const MAX_FRAME: usize = 16 << 20;
+pub const MAX_FIELDS: usize = 1024;
+/// Response bodies go out in frames of at most this many bytes.
+pub const BODY_CHUNK: usize = 256 << 10;
+
+pub mod kind {
+    /// content → network: start a fetch
+    pub const FETCH: u16 = 1;
+    /// network → content: status, final URL and the headers it may see
+    pub const HEAD: u16 = 2;
+    pub const BODY: u16 = 3;
+    pub const END: u16 = 4;
+    pub const ERROR: u16 = 5;
+    /// content → network: `document.cookie` read and write
+    pub const COOKIE_GET: u16 = 6;
+    pub const COOKIE_SET: u16 = 7;
+    pub const COOKIES: u16 = 8;
+}
+
+pub mod tag {
+    pub const ID: u8 = 1;
+    pub const METHOD: u8 = 2;
+    pub const URL: u8 = 3;
+    /// name, a zero byte, value
+    pub const HEADER: u8 = 4;
+    pub const BODY: u8 = 5;
+    pub const NAVIGATION: u8 = 6;
+    pub const INITIATOR: u8 = 7;
+    pub const CREDENTIALS: u8 = 8;
+    pub const REDIRECT: u8 = 9;
+    pub const STATUS: u8 = 10;
+    pub const REASON: u8 = 11;
+    pub const MESSAGE: u8 = 12;
+    pub const TEXT: u8 = 13;
+    pub const OK: u8 = 14;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Frame {
+    pub kind: u16,
+    pub fields: Vec<(u8, Vec<u8>)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameError {
+    Short,
+    TooLong,
+    Malformed,
+}
+
+fn put_varint(out: &mut Vec<u8>, mut v: u64) {
+    while v >= 0x80 {
+        out.push((v as u8) | 0x80);
+        v >>= 7;
+    }
+    out.push(v as u8);
+}
+
+fn get_varint(b: &[u8]) -> Option<(u64, usize)> {
+    let mut v = 0u64;
+    for (i, &x) in b.iter().enumerate().take(10) {
+        v |= u64::from(x & 0x7f) << (7 * i);
+        if x & 0x80 == 0 {
+            return Some((v, i + 1));
+        }
+    }
+    None
+}
+
+impl Frame {
+    pub fn new(kind: u16) -> Self {
+        Frame { kind, fields: Vec::new() }
+    }
+
+    pub fn bytes(mut self, tag: u8, v: &[u8]) -> Self {
+        self.fields.push((tag, v.to_vec()));
+        self
+    }
+
+    pub fn str(self, tag: u8, v: &str) -> Self {
+        self.bytes(tag, v.as_bytes())
+    }
+
+    pub fn num(mut self, tag: u8, v: u64) -> Self {
+        let mut b = Vec::new();
+        put_varint(&mut b, v);
+        self.fields.push((tag, b));
+        self
+    }
+
+    pub fn header(self, name: &str, value: &[u8]) -> Self {
+        let mut b = Vec::with_capacity(name.len() + 1 + value.len());
+        b.extend_from_slice(name.as_bytes());
+        b.push(0);
+        b.extend_from_slice(value);
+        self.bytes(tag::HEADER, &b)
+    }
+
+    pub fn field(&self, tag: u8) -> Option<&[u8]> {
+        self.fields.iter().find(|(t, _)| *t == tag).map(|(_, v)| v.as_slice())
+    }
+
+    pub fn all(&self, tag: u8) -> impl Iterator<Item = &[u8]> {
+        self.fields.iter().filter(move |(t, _)| *t == tag).map(|(_, v)| v.as_slice())
+    }
+
+    pub fn get_str(&self, tag: u8) -> Option<&str> {
+        std::str::from_utf8(self.field(tag)?).ok()
+    }
+
+    pub fn get_num(&self, tag: u8) -> Option<u64> {
+        let b = self.field(tag)?;
+        get_varint(b).filter(|&(_, n)| n == b.len()).map(|(v, _)| v)
+    }
+
+    /// The headers, each split at its first zero byte; others are skipped.
+    pub fn headers(&self) -> Vec<(String, Vec<u8>)> {
+        self.all(tag::HEADER)
+            .filter_map(|b| {
+                let i = b.iter().position(|&x| x == 0)?;
+                Some((std::str::from_utf8(&b[..i]).ok()?.to_owned(), b[i + 1..].to_vec()))
+            })
+            .collect()
+    }
+
+    pub fn encode(&self, out: &mut Vec<u8>) {
+        let start = out.len();
+        out.extend_from_slice(&[0; 4]);
+        out.extend_from_slice(&self.kind.to_le_bytes());
+        for (tag, v) in &self.fields {
+            out.push(*tag);
+            put_varint(out, v.len() as u64);
+            out.extend_from_slice(v);
+        }
+        let len = (out.len() - start - 4) as u32;
+        out[start..start + 4].copy_from_slice(&len.to_le_bytes());
+    }
+
+    /// The frame at the start of `b` and how many bytes it took.
+    pub fn decode(b: &[u8]) -> Result<(Frame, usize), FrameError> {
+        let Some(head) = b.first_chunk::<4>() else { return Err(FrameError::Short) };
+        let len = u32::from_le_bytes(*head) as usize;
+        if len > MAX_FRAME {
+            return Err(FrameError::TooLong);
+        }
+        if len < 2 {
+            return Err(FrameError::Malformed);
+        }
+        let body = b.get(4..4 + len).ok_or(FrameError::Short)?;
+        Ok((Frame { kind: u16::from_le_bytes([body[0], body[1]]), fields: fields(&body[2..])? }, 4 + len))
+    }
+
+    pub fn write_to(&self, w: &mut impl Write) -> io::Result<()> {
+        let mut out = Vec::new();
+        self.encode(&mut out);
+        w.write_all(&out)
+    }
+
+    /// Reads one frame; `None` at a clean end of the stream.
+    pub fn read_from(r: &mut impl Read) -> io::Result<Option<Frame>> {
+        let mut head = [0u8; 4];
+        match r.read_exact(&mut head) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+            Err(e) => return Err(e),
+        }
+        let len = u32::from_le_bytes(head) as usize;
+        if !(2..=MAX_FRAME).contains(&len) {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "frame length out of range"));
+        }
+        let mut body = vec![0u8; len];
+        r.read_exact(&mut body)?;
+        let fields = fields(&body[2..]).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{e:?}")))?;
+        Ok(Some(Frame { kind: u16::from_le_bytes([body[0], body[1]]), fields }))
+    }
+}
+
+fn fields(body: &[u8]) -> Result<Vec<(u8, Vec<u8>)>, FrameError> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < body.len() {
+        if out.len() == MAX_FIELDS {
+            return Err(FrameError::Malformed);
+        }
+        let tag = body[at];
+        let (n, used) = get_varint(&body[at + 1..]).ok_or(FrameError::Malformed)?;
+        let from = at + 1 + used;
+        let to = from
+            .checked_add(usize::try_from(n).map_err(|_| FrameError::Malformed)?)
+            .filter(|&t| t <= body.len())
+            .ok_or(FrameError::Malformed)?;
+        out.push((tag, body[from..to].to_vec()));
+        at = to;
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frames_round_trip_with_repeated_tags() {
+        let f = Frame::new(kind::HEAD).num(tag::ID, 7).header("a", b"1").header("b", b"x\0y").str(tag::URL, "u");
+        let mut b = Vec::new();
+        f.encode(&mut b);
+        let (g, used) = Frame::decode(&b).unwrap();
+        assert_eq!((g.clone(), used), (f, b.len()));
+        assert_eq!(g.headers(), vec![("a".into(), b"1".to_vec()), ("b".into(), b"x\0y".to_vec())]);
+        assert_eq!(Frame::read_from(&mut &b[..]).unwrap(), Some(g));
+        assert_eq!(Frame::read_from(&mut &b""[..]).unwrap(), None);
+    }
+
+    #[test]
+    fn hostile_frames_are_errors() {
+        assert_eq!(Frame::decode(&[1, 0]), Err(FrameError::Short));
+        assert_eq!(Frame::decode(&[0xff, 0xff, 0xff, 0xff]), Err(FrameError::TooLong));
+        assert_eq!(Frame::decode(&[5, 0, 0, 0, 1, 0, 3, 9, 0]), Err(FrameError::Malformed));
+        assert!(Frame::read_from(&mut &[0xffu8, 0xff, 0xff, 0x7f][..]).is_err());
+        let mut seed = 0x9e37_79b9u32;
+        for n in 0..2000usize {
+            let junk: Vec<u8> = (0..n % 64)
+                .map(|_| {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    seed as u8
+                })
+                .collect();
+            let _ = Frame::decode(&junk);
+            let _ = Frame::read_from(&mut &junk[..]);
+        }
+    }
+}

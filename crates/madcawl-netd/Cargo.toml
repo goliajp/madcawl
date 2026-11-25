@@ -1,0 +1,22 @@
+[package]
+name = "madcawl-netd"
+description = "The network process: one per host instance, serving fetches to content processes over a Unix socket and keeping sockets, TLS state and cookies to itself"
+version.workspace = true
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "madcawl-netd"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+madcawl-net = { path = "../madcawl-net" }
