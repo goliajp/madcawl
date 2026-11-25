@@ -1,15 +1,22 @@
-//! `madcawl-netd --socket <path> (--control-fd N | --unguarded) [--clients N]
-//! [--in-flight N] [--requests N] [--body-bytes N]`: the network process.
-//! It listens on the Unix socket at `path`, replacing a stale socket file
-//! there, and serves until killed. `--control-fd` is the inherited end of
-//! the socket pair its host registers documents on; `--unguarded` trusts
-//! every client's claims and is for tests and tools only.
+//! `madcawl-netd --socket <path> (--control-fd N | --unguarded)
+//! [--profile <dir>] [--clients N] [--in-flight N] [--requests N]
+//! [--body-bytes N]`: the network process. It listens on the Unix socket
+//! at `path`, replacing a stale socket file there, and serves until
+//! killed. `--control-fd` is the inherited end of the socket pair its host
+//! registers documents on; `--unguarded` trusts every client's claims and
+//! is for tests and tools only. With a profile, its cookies are loaded at
+//! start and saved as they change and on SIGTERM, SIGINT or SIGHUP, and
+//! downloads go to its `downloads` directory; a profile another process
+//! holds is refused.
+
+mod stop;
 
 use madcawl_net::{Client, Config};
-use madcawl_netd::{ServerLimits, serve, serve_guarded};
+use madcawl_netd::{Downloads, Profile, ServerLimits, serve_guarded, serve_with};
 use std::os::fd::FromRawFd;
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -19,11 +26,29 @@ unsafe extern "C" {
 
 const F_GETFD: i32 = 1;
 
-const USAGE: &str =
-    "usage: madcawl-netd --socket <path> (--control-fd N | --unguarded) [--clients N] [--in-flight N] [--requests N] [--body-bytes N]";
+const USAGE: &str = "usage: madcawl-netd --socket <path> (--control-fd N | --unguarded) [--profile <dir>] [--clients N] \
+                     [--in-flight N] [--requests N] [--body-bytes N]";
+
+/// Opens the profile, if one is given, and has SIGTERM, SIGINT and SIGHUP
+/// save it and remove the socket before the process exits.
+fn open_profile(dir: Option<PathBuf>, socket: &str, client: &Arc<Client>, signals: stop::SigSet) -> Result<Option<Arc<Downloads>>, ()> {
+    let Some(dir) = dir else {
+        stop::on_signal(signals, || std::process::exit(0));
+        return Ok(None);
+    };
+    let p = Profile::open(&dir, client.clone()).map_err(|e| eprintln!("madcawl-netd: {e}"))?;
+    let d = p.downloads();
+    let socket = socket.to_owned();
+    stop::on_signal(signals, move || {
+        drop(p);
+        let _ = std::fs::remove_file(&socket);
+        std::process::exit(0);
+    });
+    Ok(Some(d))
+}
 
 fn main() -> ExitCode {
-    let mut socket = None;
+    let (mut socket, mut profile) = (None, None);
     let (mut control_fd, mut unguarded) = (None, false);
     let mut limits = ServerLimits::default();
     let mut args = std::env::args().skip(1);
@@ -36,6 +61,7 @@ fn main() -> ExitCode {
         let number = value.as_deref().and_then(|v| v.parse::<usize>().ok());
         match (a.as_str(), value, number) {
             ("--socket", Some(v), _) => socket = Some(v),
+            ("--profile", Some(v), _) => profile = Some(PathBuf::from(v)),
             ("--control-fd", _, Some(n)) if n > 2 && i32::try_from(n).is_ok() => control_fd = Some(n as i32),
             ("--clients", _, Some(n)) => limits.clients = n,
             ("--in-flight", _, Some(n)) => limits.in_flight = n,
@@ -64,6 +90,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let signals = stop::block();
+    let client = Arc::new(Client::new(Config::default()));
+    let Ok(downloads) = open_profile(profile, &path, &client, signals) else { return ExitCode::FAILURE };
     if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_socket()) {
         let _ = std::fs::remove_file(&path);
     }
@@ -74,12 +103,11 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let client = Arc::new(Client::new(Config::default()));
     let Some(control) = control else {
-        serve(listener, client, limits);
+        serve_with(listener.incoming(), client, limits, downloads);
         return ExitCode::SUCCESS;
     };
-    match serve_guarded(listener, control, client, limits) {
+    match serve_guarded(listener, control, client, limits, downloads) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("madcawl-netd: control channel: {e}");

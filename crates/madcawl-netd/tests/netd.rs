@@ -148,7 +148,9 @@ fn clients_and_requests_in_flight_are_capped() {
     let path = netd(ServerLimits { clients: 1, in_flight: 1, ..ServerLimits::default() });
     let mut a = connect(&path);
     assert_eq!(cookie_get(&mut a, "http://127.0.0.1/"), "");
-    let mut b = connect(&path);
+    // no read timeout: the server may have closed it already, and macOS
+    // refuses socket options on a socket whose peer is gone (EINVAL)
+    let mut b = UnixStream::connect(&path).unwrap();
     let mut one = [0u8; 1];
     assert_eq!(b.read(&mut one).unwrap(), 0, "a second client is turned away");
     // a request that hangs on a server that never answers holds the one slot
