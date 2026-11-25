@@ -19,9 +19,47 @@ use crate::tree::{BoxTree, NONE};
 
 const SLOTS: usize = 4;
 
-pub type Slots = [Option<(Space, Laid)>; SLOTS];
+type Entry = Option<(Space, Laid)>;
 
-pub const EMPTY: Slots = [const { None }; SLOTS];
+/// A box's entries, the most recently used first. Most boxes are laid out in one space only, so the first
+/// entry is held in place and the others are allocated when a second one is stored: four in place would be
+/// most of a large document's layout memory.
+#[derive(Clone)]
+pub struct Slots {
+    first: Entry,
+    rest: Option<Box<[Entry; SLOTS - 1]>>,
+}
+
+pub const EMPTY: Slots = Slots { first: None, rest: None };
+
+impl Slots {
+    fn get(&self, k: usize) -> Option<&(Space, Laid)> {
+        match k {
+            0 => self.first.as_ref(),
+            _ => self.rest.as_ref()?[k - 1].as_ref(),
+        }
+    }
+
+    /// Moves entry `k` to the front, those before it back by one.
+    fn bring_forward(&mut self, k: usize) {
+        if k == 0 {
+            return;
+        }
+        let rest = self.rest.as_mut().expect("an entry after the first is in the rest");
+        rest[..k].rotate_right(1);
+        std::mem::swap(&mut self.first, &mut rest[0]);
+    }
+
+    /// Puts `e` in front of the first `k` entries, dropping entry `k`.
+    fn push_front(&mut self, k: usize, e: (Space, Laid)) {
+        if k > 0 {
+            let rest = self.rest.get_or_insert_with(|| Box::new([const { None }; SLOTS - 1]));
+            rest[..k].rotate_right(1);
+            rest[0] = self.first.take();
+        }
+        self.first = Some(e);
+    }
+}
 
 fn pct(s: CssSize) -> bool {
     matches!(s, CssSize::Lp(l) if l.has_pct())
@@ -124,18 +162,14 @@ fn find(cx: &mut Cx, measured: bool, b: u32, space: &Space) -> Option<Laid> {
     } else {
         &cx.cache[b as usize]
     };
-    let k = (0..SLOTS).find(|&k| {
-        slots[k]
-            .as_ref()
-            .is_some_and(|(sp, laid)| answers(cx, b, sp, laid, space))
-    })?;
-    let laid = slots[k].as_ref().map(|(_, l)| l.clone());
+    let k = (0..SLOTS).find(|&k| slots.get(k).is_some_and(|(sp, laid)| answers(cx, b, sp, laid, space)))?;
+    let laid = slots.get(k).map(|(_, l)| l.clone());
     let slots = if measured {
         &mut cx.measures[b as usize]
     } else {
         &mut cx.cache[b as usize]
     };
-    slots[..=k].rotate_right(1);
+    slots.bring_forward(k);
     laid
 }
 
@@ -177,10 +211,71 @@ pub fn store(cx: &mut Cx, b: u32, space: Space, laid: &Laid, exact: bool) {
         &mut cx.measures[b as usize]
     };
     // the same space replaces its entry; otherwise the least recently used one goes
-    let k = slots
-        .iter()
-        .position(|e| e.as_ref().is_none_or(|(sp, _)| *sp == space))
+    let k = (0..SLOTS)
+        .position(|k| slots.get(k).is_none_or(|(sp, _)| *sp == space))
         .unwrap_or(SLOTS - 1);
-    slots[..=k].rotate_right(1);
-    slots[0] = Some((space, laid.clone()));
+    slots.push_front(k, (space, laid.clone()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::au::{Au, Size};
+    use crate::cx::Strut;
+    use crate::fragment::{FragKind, Fragment};
+
+    fn entry(w: i32) -> (Space, Laid) {
+        let frag = Fragment::new(FragKind::Box, None, Size::default(), Vec::new());
+        let laid = Laid {
+            frag,
+            mt: Strut::default(),
+            mb: Strut::default(),
+            ml: Au::default(),
+            mr: Au::default(),
+            through: false,
+            baseline: None,
+            clamped: false,
+            floats: false,
+            statics: Vec::new(),
+        };
+        (Space::new(Au::from_px(w as f32), None), laid)
+    }
+
+    fn widths(s: &Slots) -> Vec<Option<i32>> {
+        (0..SLOTS).map(|k| s.get(k).map(|(sp, _)| sp.width.px() as i32)).collect()
+    }
+
+    // the entries kept in place and in the rest move as the four in an array did
+    #[test]
+    fn slots_move_as_an_array_of_four() {
+        let mut s = EMPTY;
+        let mut model: [Option<i32>; SLOTS] = [None; SLOTS];
+        let mut x = 7u32;
+        for _ in 0..2000 {
+            x = x.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            let w = (x >> 16) as i32 % 6;
+            if x & 1 == 0 {
+                let k = (0..SLOTS).position(|k| model[k].is_none_or(|m| m == w)).unwrap_or(SLOTS - 1);
+                model[..=k].rotate_right(1);
+                model[0] = Some(w);
+                let k2 = (0..SLOTS).position(|k| s.get(k).is_none_or(|(sp, _)| sp.width.px() as i32 == w));
+                s.push_front(k2.unwrap_or(SLOTS - 1), entry(w));
+            } else if let Some(k) = (0..SLOTS).find(|&k| model[k] == Some(w)) {
+                model[..=k].rotate_right(1);
+                s.bring_forward(k);
+            }
+            assert_eq!(widths(&s), model.to_vec());
+        }
+    }
+
+    #[test]
+    fn one_entry_allocates_nothing_more() {
+        let mut s = EMPTY;
+        s.push_front(0, entry(3));
+        s.push_front(0, entry(4));
+        assert!(s.rest.is_none());
+        s.push_front(1, entry(5));
+        assert!(s.rest.is_some());
+        assert_eq!(widths(&s), vec![Some(5), Some(4), None, None]);
+    }
 }
