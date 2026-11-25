@@ -6,11 +6,12 @@
 
 use madcawl_agent::act::Action;
 use madcawl_agent::activate::{Activation, activation, form_controls, radio_group};
-use madcawl_agent::{AgentError, scroll_into_view};
+use madcawl_agent::{AgentError, Frame, Geometry, kind, scroll_into_view, tag};
 use madcawl_dom::NodeId;
 use madcawl_net::Url;
 
 use super::code;
+use super::doc::asks_geometry;
 use super::page::{Env, Page, Request};
 
 pub(crate) enum ActError {
@@ -121,34 +122,78 @@ impl Page {
     }
 
     fn scroll(&mut self, target: Option<&str>, by: i64) -> Acted {
-        let geo = &mut self.doc.geometry;
         if let Some(r) = target {
             let n = self.resolve(r)?;
-            let geo = &mut self.doc.geometry;
+            let geo = self.geometry();
             if geo.place(n).is_none() {
                 return Err(ActError::Check("check failed: not laid out, nothing to scroll to".into()));
             }
             scroll_into_view(geo, n);
         } else {
+            let geo = self.geometry();
             let y = geo.viewport.y + by as f32 * geo.viewport.h;
             geo.scroll_to(y);
         }
-        let geo = &self.doc.geometry;
+        let geo = self.geometry();
         Ok(format!("scrolled: the viewport is at y={} of {}", geo.viewport.y as i64, geo.bottom() as i64))
+    }
+
+    /// The document's geometry, laid out now if nothing asked for it
+    /// before. The semantic tree takes it in at once, between two syncs,
+    /// so what the geometry refines can be told from what changed.
+    pub(crate) fn geometry(&mut self) -> &mut Geometry {
+        if self.doc.geometry.is_none() && self.agents.is_attached() {
+            let before = self.sync();
+            self.doc.lay_out();
+            self.doc.laid_out_at = Some((before, self.sync()));
+        }
+        self.doc.lay_out().0
+    }
+
+    /// Where a diff since `since` starts: past the layout when nothing
+    /// changed between `since` and it. The visibility the first layout
+    /// refines (an element without area or off the canvas is no longer
+    /// shown) is not a change of the page; one laid out at open never
+    /// showed it. A diff from before an earlier change keeps it, so no
+    /// change is dropped.
+    pub(crate) fn diff_floor(&self, since: u64) -> u64 {
+        match self.doc.laid_out_at {
+            Some((before, after)) if (before..after).contains(&since) => after,
+            _ => since,
+        }
+    }
+
+    /// Lays the document out first when request `f` needs geometry.
+    pub(crate) fn lay_out_for(&mut self, f: &Frame) {
+        if asks_geometry(f) {
+            self.geometry();
+        }
+    }
+
+    /// `f`, a diff request whose start is moved past the first layout
+    /// when that drops no change (`diff_floor`).
+    pub(crate) fn floored(&self, f: Frame) -> Frame {
+        match f.get_num(tag::SINCE) {
+            Some(s) if f.kind == kind::DIFF && self.diff_floor(s) != s => {
+                let mut f = f;
+                f.fields.retain(|(t, _)| *t != tag::SINCE);
+                f.num(tag::SINCE, self.diff_floor(s))
+            }
+            _ => f,
+        }
     }
 
     /// The target scrolled into view and checked; the point to act at.
     pub(crate) fn point(&mut self, n: NodeId, enabled: bool) -> Result<(f32, f32), ActError> {
-        scroll_into_view(&mut self.doc.geometry, n);
-        self.agents
-            .check_target(&self.doc.dom, &self.doc.geometry, n, enabled)
-            .map_err(|c| ActError::Check(c.message()))
+        scroll_into_view(self.geometry(), n);
+        let geo = self.doc.geometry.as_ref().expect("laid out");
+        self.agents.check_target(&self.doc.dom, geo, n, enabled).map_err(|c| ActError::Check(c.message()))
     }
 
     fn click(&mut self, r: &str, env: &Env) -> Acted {
         let n = self.resolve(r)?;
         let (x, y) = self.point(n, true)?;
-        let hit = self.doc.geometry.hit(x, y).unwrap_or(n);
+        let hit = self.geometry().hit(x, y).unwrap_or(n);
         let dom = &self.doc.dom;
         match activation(dom, hit) {
             Activation::Follow(a) => {

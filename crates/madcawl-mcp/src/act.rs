@@ -130,8 +130,12 @@ pub(crate) fn requests_frame(page: u64, args: &Value) -> Frame {
 pub(crate) fn timing(f: &Frame) -> String {
     let Some(stable) = f.get_num(tag::STABLE) else { return String::new() };
     let ms = |t| f.get_num(t).map_or(0.0, |u| u as f64 / 1e3);
+    let layout = match f.get_num(tag::LAYOUT_US) {
+        Some(u) if u > 0 => format!(", of which layout {:.3} ms", u as f64 / 1e3),
+        _ => String::new(),
+    };
     format!(
-        " · {} · dispatch {:.3} ms, wait {:.3} ms, diff {:.3} ms",
+        " · {} · dispatch {:.3} ms, wait {:.3} ms, diff {:.3} ms{layout}",
         if stable == 1 { "stable" } else { "NOT stable" },
         ms(tag::DISPATCH_US),
         ms(tag::WAIT_US),

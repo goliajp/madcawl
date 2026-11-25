@@ -1,14 +1,14 @@
 //! One windowless page the host holds for an agent session: its current
-//! document, styled and laid out in the viewport the agent asked for,
-//! the one agent session on it the host speaks for, its history, its
-//! loads in flight and its request log.
+//! document, styled for the viewport the agent asked for and laid out
+//! once asked where things are, the one agent session on it the host
+//! speaks for, its history, its loads in flight and its request log.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::time::{Duration, Instant};
 
-use madcawl_agent::{Agents, Frame, Inputs, SessionId, role_and_name, tag};
+use madcawl_agent::{Agents, Frame, SessionId, role_and_name, tag};
 use madcawl_dom::NodeId;
 use madcawl_html::Encoding;
 use madcawl_net::Url;
@@ -114,8 +114,7 @@ impl Page {
         if self.agents.is_attached() {
             return;
         }
-        let Doc { dom, styles, geometry, .. } = &mut self.doc;
-        let inputs = Inputs { styles: Some(styles), geometry: Some(geometry) };
+        let (dom, inputs) = self.doc.parts();
         self.session = self.agents.attach(dom, inputs).expect("a page has one agent session, under the limit");
     }
 
@@ -221,8 +220,8 @@ impl Page {
     fn commit(&mut self, doc: Doc, url: String, masked: bool) {
         self.doc = doc;
         if self.agents.is_attached() {
-            let Doc { dom, styles, geometry, .. } = &mut self.doc;
-            self.agents.navigated(dom, Inputs { styles: Some(styles), geometry: Some(geometry) });
+            let (dom, inputs) = self.doc.parts();
+            self.agents.navigated(dom, inputs);
         } else {
             self.ensure();
         }
@@ -254,22 +253,23 @@ impl Page {
         let mut f = f.clone();
         f.fields.retain(|(t, _)| !matches!(*t, tag::SESSION | tag::PAGE));
         let f = f.num(tag::SESSION, self.session as u64);
-        let Doc { dom, styles, geometry, .. } = &mut self.doc;
-        self.agents.handle(dom, Inputs { styles: Some(styles), geometry: Some(geometry) }, &f)
+        self.lay_out_for(&f);
+        let f = self.floored(f);
+        let (dom, inputs) = self.doc.parts();
+        self.agents.handle(dom, inputs, &f)
     }
 
     /// Brings the semantic tree up to date; the sequence it is at.
     pub(crate) fn sync(&mut self) -> u64 {
         self.ensure();
-        let Doc { dom, styles, geometry, .. } = &mut self.doc;
-        self.agents.sync(dom, Inputs { styles: Some(styles), geometry: Some(geometry) })
+        let (dom, inputs) = self.doc.parts();
+        self.agents.sync(dom, inputs)
     }
 
     /// The node a reference names, if it still does.
     pub(crate) fn resolve(&mut self, r: &str) -> Result<NodeId, madcawl_agent::AgentError> {
         self.ensure();
-        let Doc { dom, styles, geometry, .. } = &mut self.doc;
-        let inputs = Inputs { styles: Some(styles), geometry: Some(geometry) };
+        let (dom, inputs) = self.doc.parts();
         self.agents.resolve(self.session, dom, inputs, r)
     }
 

@@ -58,6 +58,7 @@ pub mod tag {
     pub const DISPATCH_US: u8 = 32;
     pub const WAIT_US: u8 = 33;
     pub const DIFF_US: u8 = 34;
+    pub const LAYOUT_US: u8 = 35;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

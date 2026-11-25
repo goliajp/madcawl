@@ -1,17 +1,15 @@
 //! Waiting for a page to be stable, decided by the page's own
 //! state and never by sleeping: no navigation in flight, the parser done
-//! with its input, no request in flight for the page, its styles and
-//! layout up to date; and, when asked, a reference that names a node or
+//! with its input, no request in flight for the page, its styles up to
+//! date; and, when asked, a reference that names a node or
 //! a text that is on the page. A wait that runs out says what is still
 //! missing. Without script nothing changes a stable page, so a condition
 //! not met once the page is stable is reported at once, not waited for.
 
 use std::time::Instant;
 
-use madcawl_agent::Inputs;
 use madcawl_agent::act::Until;
 
-use super::doc::Doc;
 use super::loader::Stage;
 use super::page::{Env, Page};
 
@@ -78,8 +76,11 @@ impl Page {
 
     /// Some shown node's name or value holds `t`, ignoring case.
     fn has_text(&mut self, t: &str) -> bool {
-        let Doc { dom, styles, geometry, .. } = &mut self.doc;
-        self.agents.sync(dom, Inputs { styles: Some(styles), geometry: Some(geometry) });
+        // whether text is shown takes geometry: clipped away or off the
+        // canvas, it is not
+        self.geometry();
+        let (dom, inputs) = self.doc.parts();
+        self.agents.sync(dom, inputs);
         let want = t.to_lowercase();
         let Some(tree) = self.agents.tree() else { return false };
         let dom = &self.doc.dom;

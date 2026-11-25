@@ -105,6 +105,8 @@ impl Page {
                 self.check(n, on)
             }
             "Tab" => {
+                // the next control is the next one shown, which takes geometry
+                self.geometry();
                 let dom = &self.doc.dom;
                 let next = dom.descendants(dom.document()).skip_while(|&c| c != n).skip(1).find(|&c| {
                     [atom!("input"), atom!("select"), atom!("textarea"), atom!("button"), atom!("a")]

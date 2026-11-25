@@ -91,6 +91,10 @@ pub mod tag {
     pub const DISPATCH_US: u8 = 32;
     pub const WAIT_US: u8 = 33;
     pub const DIFF_US: u8 = 34;
+    /// Of the dispatch and the wait, microseconds spent laying the
+    /// document out: the first question of geometry on a document lays it
+    /// out
+    pub const LAYOUT_US: u8 = 35;
 }
 
 /// The views by number on the wire; `extract` is a view of records.

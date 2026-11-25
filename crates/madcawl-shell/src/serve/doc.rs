@@ -1,9 +1,11 @@
 //! One document of a page: its DOM, its styles, and where its nodes are
-//! in the page's viewport. A new navigation makes a new one.
+//! in the page's viewport, laid out only once something asks where they
+//! are. A new navigation makes a new one.
 
 use std::sync::LazyLock;
+use std::time::{Duration, Instant};
 
-use madcawl_agent::Geometry;
+use madcawl_agent::{Frame, Geometry, Inputs, kind, tag};
 use madcawl_css::decode_stylesheet;
 use madcawl_css::style::{Device, Scope, SheetCache, Styles, style_document_shared};
 use madcawl_dom::Dom;
@@ -40,10 +42,33 @@ pub(crate) fn forget_session(session: u32) {
     SHEETS.forget(partition_of(session));
 }
 
+/// A view request whose answer needs geometry: one of the viewport.
+pub fn asks_geometry(f: &Frame) -> bool {
+    f.kind == kind::READ && f.get_num(tag::SCOPE) == Some(1)
+}
+
 pub struct Doc {
     pub dom: Dom,
     pub styles: Styles,
-    pub geometry: Geometry,
+    /// None until the first question that needs geometry (`lay_out`)
+    pub geometry: Option<Geometry>,
+    size: (f32, f32),
+    /// How many times the document was laid out: once at most
+    pub(crate) layouts: u32,
+    /// The semantic tree's sequences just before the layout and once it
+    /// took in the geometry (`Page::diff_floor`)
+    pub laid_out_at: Option<(u64, u64)>,
+}
+
+thread_local! {
+    /// The time this thread spent laying documents out, in all
+    static LAYOUT_TIME: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+}
+
+/// The time the calling thread has spent laying documents out, so a
+/// request can tell its own share (a connection is one thread).
+pub fn layout_time() -> Duration {
+    LAYOUT_TIME.get()
 }
 
 /// A response's body as a DOM: HTML as it is; plain text, as a browser
@@ -59,9 +84,9 @@ pub fn parse(body: &[u8], content_type: &str, charset: Option<Encoding>) -> (Dom
 }
 
 impl Doc {
-    /// Styles and lays out `dom`, a document at `url` of agent session
-    /// `session`, in a viewport of `size`; a linked stylesheet's text
-    /// comes from `sheet`, by its `href` as written.
+    /// Styles `dom`, a document at `url` of agent session `session`, for a
+    /// viewport of `size`; a linked stylesheet's text comes from `sheet`,
+    /// by its `href` as written. It is not laid out yet.
     pub fn new(
         dom: Dom,
         encoding: Encoding,
@@ -79,14 +104,27 @@ impl Doc {
             &SHEETS,
             scope,
         );
-        let geometry = lay_out(&dom, &styles, size);
-        Doc { dom, styles, geometry }
+        Doc { dom, styles, geometry: None, size, layouts: 0, laid_out_at: None }
     }
-}
 
-fn lay_out(dom: &Dom, styles: &Styles, (w, h): (f32, f32)) -> Geometry {
-    let mut layout = Layout::new(dom, styles, w, h);
-    Geometry::from_layout(&mut layout, styles, w, h)
+    /// The DOM, and the styles and geometry so far for the agent side.
+    pub fn parts(&mut self) -> (&mut Dom, Inputs<'_>) {
+        (&mut self.dom, Inputs { styles: Some(&self.styles), geometry: self.geometry.as_ref() })
+    }
+
+    /// The geometry, laid out now if it is not yet; true when it was.
+    pub fn lay_out(&mut self) -> (&mut Geometry, bool) {
+        let fresh = self.geometry.is_none();
+        if fresh {
+            let started = Instant::now();
+            let (w, h) = self.size;
+            let mut layout = Layout::new(&self.dom, &self.styles, w, h);
+            self.geometry = Some(Geometry::from_layout(&mut layout, &self.styles, w, h));
+            self.layouts += 1;
+            LAYOUT_TIME.set(LAYOUT_TIME.get() + started.elapsed());
+        }
+        (self.geometry.as_mut().expect("laid out"), fresh)
+    }
 }
 
 #[cfg(test)]

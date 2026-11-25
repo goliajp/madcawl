@@ -12,6 +12,7 @@ use madcawl_agent::{Frame, kind, tag};
 
 use super::Conn;
 use crate::serve::act::ActError;
+use crate::serve::doc::layout_time;
 use crate::serve::page::{Env, Page};
 use crate::serve::{Shared, code, error_frame};
 
@@ -127,6 +128,13 @@ fn request(f: &Frame) -> Result<(Option<Action>, Until, String), Frame> {
 /// or the outline of the document a navigation brought.
 fn run(p: &mut Page, action: Option<&Action>, until: &Until, since: Option<u64>, t0: Instant, env: &Env) -> Result<Frame, Frame> {
     let gen0 = page_gen(p);
+    let laid0 = layout_time();
+    // waiting for text asks geometry; laying out before the action keeps
+    // the layout ahead of every change the action makes, which is what
+    // lets the diff start past it (`Page::diff_floor`)
+    if until.text.is_some() {
+        p.geometry();
+    }
     let since = since.unwrap_or_else(|| p.sync());
     let mut text = match action {
         Some(a) => p.act(a, env).map_err(failure)?,
@@ -161,5 +169,10 @@ fn run(p: &mut Page, action: Option<&Action>, until: &Until, since: Option<u64>,
         .num(tag::DISPATCH_US, us(t0, t1))
         .num(tag::WAIT_US, us(t1, t2))
         .num(tag::DIFF_US, us(t2, t3))
+        .num(tag::LAYOUT_US, (layout_time() - laid0).as_micros() as u64)
         .str(tag::TEXT, &text))
 }
+
+#[cfg(test)]
+#[path = "lazy_tests.rs"]
+mod tests;
