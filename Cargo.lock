@@ -12,6 +12,7 @@ version = "0.0.1"
 dependencies = [
  "madcawl-css",
  "madcawl-dom",
+ "madcawl-form",
  "madcawl-html",
  "madcawl-layout",
  "madcawl-str",
@@ -140,10 +141,12 @@ dependencies = [
  "madcawl-agent",
  "madcawl-css",
  "madcawl-dom",
+ "madcawl-form",
  "madcawl-html",
  "madcawl-layout",
  "madcawl-mcp",
  "madcawl-net",
+ "madcawl-netd",
  "madcawl-paint",
  "madcawl-str",
 ]

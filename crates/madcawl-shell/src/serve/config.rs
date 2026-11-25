@@ -28,6 +28,18 @@ pub struct Config {
     pub listen_fd: Option<i32>,
     /// With no session open for this long, the process exits
     pub exit_idle: Option<Duration>,
+    /// Pages may come from the network, through the host's network
+    /// service, in a cookie jar of its own that starts empty
+    pub net: bool,
+    /// Where downloads go, a directory per session below it
+    pub downloads: Option<PathBuf>,
+    /// The largest download; the directory takes four times it
+    pub download_cap: u64,
+    /// Files an upload may pick come only from below these canonical
+    /// directories, which the user approved by starting the host
+    pub uploads: Vec<PathBuf>,
+    /// Origins a form with a password field may be submitted to
+    pub approve: Vec<String>,
 }
 
 impl Config {
@@ -50,13 +62,22 @@ impl Config {
             burst: 100.0,
             listen_fd: None,
             exit_idle: None,
+            net: false,
+            downloads: None,
+            download_cap: 256 << 20,
+            uploads: Vec::new(),
+            approve: Vec::new(),
         }
     }
 }
 
-pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds>] [--listen-fd N] [--exit-idle <seconds>]
+pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds>] [--listen-fd N] [--exit-idle <seconds>] [--net] [--downloads <dir>] [--upload-allow <dir>]... [--approve <origin>]...
          pages and their stylesheets open only from below the --allow directories;
          without --allow, only from below the current directory;
+         --net lets pages come from http and https URLs, in a cookie jar that starts empty;
+         --downloads saves downloads below <dir>, a directory per session (default <socket>.downloads);
+         --upload-allow lets an upload pick files from below <dir>; none, no uploads;
+         --approve lets a form with a password field be submitted to <origin> (scheme://host[:port]);
          --listen-fd accepts on an inherited listening socket instead of binding <socket>;
          --exit-idle exits once no session has been open for that long (checked once a period
          while sessions are open, so up to twice that after the last one ends)";
@@ -73,6 +94,10 @@ pub fn parse_args(args: &[&str]) -> Option<Config> {
     let mut allow = Vec::new();
     let mut rest = rest.iter();
     while let Some(&opt) = rest.next() {
+        if opt == "--net" {
+            c.net = true;
+            continue;
+        }
         let v = *rest.next()?;
         let n = || v.parse::<usize>().ok().filter(|&n| n > 0);
         match opt {
@@ -84,11 +109,39 @@ pub fn parse_args(args: &[&str]) -> Option<Config> {
             "--idle" => c.idle = Duration::from_secs(n()? as u64),
             "--listen-fd" => c.listen_fd = Some(v.parse::<i32>().ok().filter(|&fd| fd > 2)?),
             "--exit-idle" => c.exit_idle = Some(Duration::from_secs(n()? as u64)),
+            "--downloads" => c.downloads = Some(PathBuf::from(v)),
+            "--upload-allow" => c.uploads.push(PathBuf::from(v).canonicalize().ok()?),
+            "--approve" => c.approve.push(v.trim_end_matches('/').to_ascii_lowercase()),
             _ => return None,
         }
     }
     if !allow.is_empty() {
         c.allow = allow;
     }
+    if c.net && c.downloads.is_none() {
+        let mut d = c.socket.clone().into_os_string();
+        d.push(".downloads");
+        c.downloads = Some(d.into());
+    }
     Some(c)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_network_and_the_users_approvals_come_from_the_command_line() {
+        let tmp = std::env::temp_dir();
+        let up = tmp.to_str().unwrap();
+        let c = parse_args(&["/s", "--net", "--upload-allow", up, "--approve", "HTTP://127.0.0.1:8/"]).unwrap();
+        assert!(c.net);
+        assert_eq!(c.downloads, Some(PathBuf::from("/s.downloads")), "the default beside the socket");
+        assert_eq!(c.uploads, [tmp.canonicalize().unwrap()]);
+        assert_eq!(c.approve, ["http://127.0.0.1:8"]);
+        let c = parse_args(&["/s", "--downloads", "/d"]).unwrap();
+        assert!(!c.net && c.uploads.is_empty() && c.approve.is_empty());
+        assert_eq!(c.downloads, Some(PathBuf::from("/d")));
+        assert!(parse_args(&["/s", "--upload-allow", "/no/such/dir"]).is_none());
+    }
 }

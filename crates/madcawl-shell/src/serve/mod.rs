@@ -1,24 +1,35 @@
 //! `madcawl-shell --serve <socket>`: the host outside marspot. It
 //! listens on a Unix socket and plays the proxy's trusted part for
 //! every agent session that connects (one connection is one session):
-//! it opens windowless pages from local files, answers the agent
-//! protocol's view and diff requests on them, puts every reply that
-//! carries page content in a fresh envelope, and writes a line to the
-//! audit log for every request. Sessions, pages per session, frame
-//! sizes and each page's change ring are bounded; a page nobody asked
+//! it opens windowless pages from local files, and with `--net` from
+//! the network through its own network service; it answers the agent
+//! protocol's view, diff, action, wait and request-log requests on them,
+//! only on the session's own pages; it puts every reply that carries
+//! page content in a fresh envelope, and writes a line to the audit log
+//! for every request. Sessions, pages per session, frame sizes, each
+//! page's change ring and request log are bounded; a page nobody asked
 //! anything of for the idle time is closed, and a session's pages close
 //! with it.
 
+mod act;
+mod act_input;
 mod activation;
 mod config;
 mod conn;
+mod doc;
 mod limit;
+mod loader;
 mod log;
+mod net;
 mod page;
+mod reqlog;
 mod socket;
+mod submit;
 mod target;
+mod wait;
 mod wire;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
@@ -29,6 +40,9 @@ use madcawl_agent::{Frame, kind, tag};
 
 pub use config::{Config, USAGE, parse_args};
 pub use log::AuditLog;
+pub use net::Net;
+pub use reqlog::{ERROR_CAP, LOG_CAP};
+pub use submit::origin;
 pub use target::{TargetError, resolve, scheme};
 
 /// The error codes the host adds to the agent protocol's own (1 to 5).
@@ -45,6 +59,14 @@ pub mod code {
     pub const REQUEST_TOO_LARGE: u64 = 17;
     pub const TOO_MANY_SESSIONS: u64 = 18;
     pub const RATE_LIMITED: u64 = 19;
+    /// A check of an action's target failed, or it cannot take the action
+    pub const CHECK: u64 = 20;
+    /// The page is another session's
+    pub const DENIED: u64 = 21;
+    /// Needs the user's approval, which the host was not started with
+    pub const APPROVAL: u64 = 22;
+    /// A navigation could not start
+    pub const NAVIGATION: u64 = 23;
 }
 
 pub(crate) struct Shared {
@@ -56,11 +78,28 @@ pub(crate) struct Shared {
     pub pages: AtomicUsize,
     /// When the last session ended, or the host started
     pub quiet_since: Mutex<Instant>,
+    /// Page numbers are the host's, so one session cannot name another's
+    /// page by accident; each page's session
+    pub next_page: AtomicU32,
+    pub owners: Mutex<HashMap<u32, u32>>,
+    pub net: Option<Arc<Net>>,
+    /// The host's start time and process, as session directories are
+    /// named by
+    pub run: String,
 }
 
 pub struct Server {
     listener: std::os::unix::net::UnixListener,
     shared: Arc<Shared>,
+}
+
+/// The UTC start time to the second and the process id, e.g.
+/// `20261125T093000-4242`.
+fn run_tag() -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let (days, s) = (secs / 86_400, secs % 86_400);
+    let (y, m, d) = log::civil(days);
+    format!("{y:04}{m:02}{d:02}T{:02}{:02}{:02}-{}", s / 3600, s / 60 % 60, s % 60, std::process::id())
 }
 
 pub(crate) fn error_frame(code: u64, text: &str) -> Frame {
@@ -88,6 +127,15 @@ impl Server {
             None => socket::bind(&config.socket)?,
         };
         let log = AuditLog::open(&config.audit)?;
+        let net = match config.net {
+            true => {
+                let mut sock = config.socket.clone().into_os_string();
+                sock.push(".net");
+                let d = config.downloads.as_deref().map(|d| (d, config.download_cap, config.download_cap * 4));
+                Some(Arc::new(Net::start(std::path::Path::new(&sock), d)?))
+            }
+            false => None,
+        };
         let shared = Arc::new(Shared {
             config,
             log,
@@ -95,6 +143,10 @@ impl Server {
             active: AtomicUsize::new(0),
             pages: AtomicUsize::new(0),
             quiet_since: Mutex::new(Instant::now()),
+            next_page: AtomicU32::new(1),
+            owners: Mutex::new(HashMap::new()),
+            net,
+            run: run_tag(),
         });
         Ok(Server { listener, shared })
     }

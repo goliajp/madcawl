@@ -92,7 +92,7 @@ fn utc_now() -> String {
 
 /// The calendar date `days` after 1970-01-01 (Howard Hinnant's
 /// days-to-civil).
-fn civil(days: u64) -> (u64, u64, u64) {
+pub(crate) fn civil(days: u64) -> (u64, u64, u64) {
     let z = days + 719_468;
     let era = z / 146_097;
     let doe = z % 146_097;

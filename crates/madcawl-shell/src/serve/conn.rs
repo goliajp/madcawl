@@ -14,6 +14,7 @@ use super::page::Page;
 use super::wire::{Got, read_frame};
 use super::{Shared, code, error_frame};
 
+mod act;
 mod open;
 
 const VIEWS: [&str; 5] = ["outline", "snapshot", "markdown", "find", "extract"];
@@ -22,7 +23,6 @@ pub(crate) struct Conn<'a> {
     id: u32,
     shared: &'a Shared,
     pages: Vec<Page>,
-    next_page: u32,
     bucket: Bucket,
 }
 
@@ -40,7 +40,6 @@ impl<'a> Conn<'a> {
             id,
             shared,
             pages: Vec::new(),
-            next_page: 1,
             bucket: Bucket::new(shared.config.rate, shared.config.burst),
         }
     }
@@ -125,6 +124,7 @@ impl<'a> Conn<'a> {
     }
 
     fn drop_page(&self, p: Page) {
+        self.shared.owners.lock().unwrap_or_else(|e| e.into_inner()).remove(&p.id);
         p.close();
         self.shared.pages.fetch_sub(1, Ordering::SeqCst);
     }
@@ -159,6 +159,8 @@ impl<'a> Conn<'a> {
             kind::CLOSE => self.close(f),
             kind::PAGES => self.list(),
             kind::READ | kind::DIFF => self.page_request(f),
+            kind::ACT | kind::WAIT => self.act(f),
+            kind::REQUESTS => self.requests(f),
             _ => {
                 let r = error_frame(code::UNKNOWN, "unknown request kind");
                 self.log("-", &format!("kind-{}", f.kind), ("", ""), &r);
@@ -214,8 +216,9 @@ impl<'a> Conn<'a> {
                 .copied()
                 .unwrap_or("snapshot"),
         };
-        let Some(i) = self.page_index(f) else {
-            return self.no_page(action);
+        let i = match self.page_for(f, action) {
+            Ok(i) => i,
+            Err(r) => return r,
         };
         let p = &mut self.pages[i];
         let subtree = f.kind == kind::READ && f.get_num(tag::SCOPE) == Some(2);
@@ -234,8 +237,9 @@ impl<'a> Conn<'a> {
     }
 
     fn close(&mut self, f: &Frame) -> Frame {
-        let Some(i) = self.page_index(f) else {
-            return self.no_page("close");
+        let i = match self.page_for(f, "close") {
+            Ok(i) => i,
+            Err(r) => return r,
         };
         let p = self.pages.remove(i);
         let reply = Frame::new(kind::RESULT).str(tag::TEXT, &format!("closed p{}", p.id));

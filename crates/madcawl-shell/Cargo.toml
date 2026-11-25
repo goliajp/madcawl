@@ -19,9 +19,11 @@ path = "src/main.rs"
 madcawl-agent = { path = "../madcawl-agent" }
 madcawl-css = { path = "../madcawl-css" }
 madcawl-dom = { path = "../madcawl-dom" }
+madcawl-form = { path = "../madcawl-form" }
 madcawl-html = { path = "../madcawl-html" }
 madcawl-layout = { path = "../madcawl-layout" }
 madcawl-net = { path = "../madcawl-net" }
+madcawl-netd = { path = "../madcawl-netd" }
 madcawl-paint = { path = "../madcawl-paint" }
 madcawl-str = { path = "../madcawl-str" }
 

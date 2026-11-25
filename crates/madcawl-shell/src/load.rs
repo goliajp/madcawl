@@ -79,7 +79,7 @@ pub fn read_file(path: &Path, max: u64) -> std::io::Result<Vec<u8>> {
 
 /// The stylesheet a `<link>` names, when it is a regular file under one
 /// of `allow` (any file when `allow` is None).
-fn sheet_file(base: &Path, href: &str, allow: Option<&[PathBuf]>) -> Option<Vec<u8>> {
+pub fn sheet_file(base: &Path, href: &str, allow: Option<&[PathBuf]>) -> Option<Vec<u8>> {
     let mut p = local(base, href)?;
     if let Some(allow) = allow {
         // read the checked path itself, so a link swapped in between is not followed

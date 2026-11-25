@@ -1,0 +1,274 @@
+//! A page's loads over the network, as a state the page's waits drive:
+//! the document's response, then its stylesheets, then the commit. Every
+//! request a page has in flight is here, which is what "no request in
+//! flight for this page" is decided by; reading stops at a deadline with
+//! what has arrived kept, so a wait that runs out can be taken up again.
+
+use std::collections::HashMap;
+use std::time::Instant;
+
+use madcawl_css::style::{SheetSource, sheet_sources};
+use madcawl_dom::Dom;
+use madcawl_html::Encoding;
+use madcawl_net::Url;
+use madcawl_net::wire::{Frame, kind, tag};
+
+use super::doc;
+use super::net::NetConn;
+use super::reqlog::{Entry, RequestLog};
+use crate::fetch::charset_of;
+use crate::load::MAX_FILE;
+
+/// The most stylesheets one document has fetched.
+pub const MAX_SHEETS: usize = 32;
+
+pub(crate) struct Pending {
+    pub what: &'static str,
+    pub method: String,
+    /// As logs and replies show it
+    pub url: String,
+    /// Query fields whose values are masked wherever the URL the load
+    /// ends at is written: a password form's
+    pub mask: Vec<String>,
+    started: Instant,
+    head_at: Option<Instant>,
+    status: Option<u16>,
+    final_url: Option<String>,
+    content_type: String,
+    body: Vec<u8>,
+    download: Option<(String, u64)>,
+    failed: Option<String>,
+    done: bool,
+}
+
+impl Pending {
+    pub fn new(what: &'static str, method: &str, url: String) -> Pending {
+        Pending {
+            what,
+            method: method.to_owned(),
+            url,
+            mask: Vec::new(),
+            started: Instant::now(),
+            head_at: None,
+            status: None,
+            final_url: None,
+            content_type: String::new(),
+            body: Vec::new(),
+            download: None,
+            failed: None,
+            done: false,
+        }
+    }
+
+    fn take(&mut self, f: &Frame) {
+        match f.kind {
+            kind::HEAD => {
+                self.head_at = Some(Instant::now());
+                self.status = f.get_num(tag::STATUS).map(|s| s as u16);
+                self.final_url = f.all(tag::URL).last().map(|u| String::from_utf8_lossy(u).into_owned());
+                let ct = f.headers().into_iter().find(|(n, _)| n.eq_ignore_ascii_case("content-type"));
+                self.content_type = ct.map(|(_, v)| String::from_utf8_lossy(&v).into_owned()).unwrap_or_default();
+            }
+            kind::BODY => {
+                let b = f.field(tag::BODY).unwrap_or_default();
+                if self.body.len() + b.len() > MAX_FILE as usize {
+                    self.failed = Some(format!("the body is more than the {MAX_FILE} bytes a page may be"));
+                    self.done = true;
+                } else {
+                    self.body.extend_from_slice(b);
+                }
+            }
+            kind::DOWNLOAD => self.download = Some((f.get_str(tag::FILE).unwrap_or("").to_owned(), 0)),
+            kind::DOWNLOAD_DONE => {
+                let name = f.get_str(tag::FILE).unwrap_or("").to_owned();
+                self.download = Some((name, f.get_num(tag::BYTES).unwrap_or(0)));
+            }
+            kind::END => self.done = true,
+            kind::ERROR => {
+                self.failed = Some(f.get_str(tag::MESSAGE).unwrap_or("the request failed").to_owned());
+                self.done = true;
+            }
+            _ => {}
+        }
+    }
+
+    fn entry(&self) -> Entry {
+        let ms = |t: Instant| t.duration_since(self.started).as_secs_f64() * 1e3;
+        Entry {
+            what: self.what,
+            method: self.method.clone(),
+            url: self.url.clone(),
+            status: self.status,
+            bytes: self.download.as_ref().map_or(self.body.len() as u64, |d| d.1),
+            head_ms: self.head_at.map(ms),
+            total_ms: ms(Instant::now()),
+            error: self.failed.clone(),
+        }
+    }
+
+    /// As a reply shows a request still in flight.
+    pub fn line(&self) -> String {
+        let ms = self.started.elapsed().as_millis();
+        format!("{} {} ({} for {ms} ms)", self.method, self.url, self.what)
+    }
+}
+
+/// A document parsed and waiting for its stylesheets.
+pub(crate) struct Parsed {
+    pub dom: Dom,
+    pub encoding: Encoding,
+    pub url: String,
+    /// `url` has password values masked: it cannot be loaded again
+    pub masked: bool,
+    pub status: u16,
+}
+
+#[derive(Default)]
+pub(crate) enum Stage {
+    #[default]
+    Idle,
+    Document(u64),
+    Sheets(Box<Parsed>),
+}
+
+/// What a load came to.
+pub(crate) enum Loaded {
+    /// Still in flight, or nothing was
+    Pending,
+    Committed(Box<Parsed>, HashMap<String, Vec<u8>>),
+    Downloaded { file: String, bytes: u64 },
+    Failed(String),
+}
+
+#[derive(Default)]
+pub(crate) struct Loader {
+    pub stage: Stage,
+    pub inflight: Vec<(u64, Pending)>,
+    /// `href` as written, to the bytes
+    sheets: HashMap<String, u64>,
+}
+
+impl Loader {
+    pub fn is_idle(&self) -> bool {
+        matches!(self.stage, Stage::Idle) && self.inflight.iter().all(|(_, p)| p.done)
+    }
+
+    /// What is still in flight, a line each.
+    pub fn lines(&self) -> Vec<String> {
+        self.inflight.iter().filter(|(_, p)| !p.done).map(|(_, p)| p.line()).collect()
+    }
+
+    /// A new document request replaces whatever was loading.
+    pub fn begin(&mut self, id: u64, p: Pending, log: &mut RequestLog) {
+        for (_, mut old) in self.inflight.drain(..).filter(|(_, p)| !p.done) {
+            old.failed = Some("replaced by a new navigation".into());
+            log.push(old.entry());
+        }
+        self.sheets.clear();
+        self.inflight.push((id, p));
+        self.stage = Stage::Document(id);
+    }
+
+    /// Reads what arrives until the load moves on or `deadline` passes.
+    pub fn pump(&mut self, conn: &mut NetConn, deadline: Instant, log: &mut RequestLog) -> std::io::Result<Loaded> {
+        loop {
+            if let Some(out) = self.advance(conn)? {
+                return Ok(out);
+            }
+            if matches!(self.stage, Stage::Idle) {
+                return Ok(Loaded::Pending);
+            }
+            let Some(f) = conn.next(deadline)? else { return Ok(Loaded::Pending) };
+            let id = f.get_num(tag::ID).unwrap_or(0);
+            if let Some((_, p)) = self.inflight.iter_mut().find(|(i, p)| *i == id && !p.done) {
+                p.take(&f);
+                if p.done {
+                    log.push(p.entry());
+                }
+            }
+        }
+    }
+
+    fn done(&self, id: u64) -> bool {
+        self.inflight.iter().find(|(i, _)| *i == id).is_none_or(|(_, p)| p.done)
+    }
+
+    /// The next stage once what the current one waits on is in.
+    fn advance(&mut self, conn: &mut NetConn) -> std::io::Result<Option<Loaded>> {
+        match &self.stage {
+            Stage::Idle => Ok(None),
+            Stage::Document(id) if self.done(*id) => {
+                let id = *id;
+                let i = self.inflight.iter().position(|(x, _)| *x == id).expect("the document request");
+                let (_, p) = self.inflight.remove(i);
+                self.stage = Stage::Idle;
+                if let Some(why) = p.failed {
+                    return Ok(Some(Loaded::Failed(why)));
+                }
+                if let Some((file, bytes)) = p.download {
+                    return Ok(Some(Loaded::Downloaded { file, bytes }));
+                }
+                let (dom, encoding) = doc::parse(&p.body, &p.content_type, charset_of(&p.content_type));
+                let url = p.final_url.map_or(p.url, |u| super::submit::masked(&u, &p.mask));
+                let masked = super::submit::is_masked(&url);
+                let parsed = Parsed { dom, encoding, url, masked, status: p.status.unwrap_or(0) };
+                self.request_sheets(conn, &parsed)?;
+                self.stage = Stage::Sheets(Box::new(parsed));
+                self.advance(conn)
+            }
+            Stage::Sheets(_) if self.sheets.values().all(|id| self.done(*id)) => {
+                let Stage::Sheets(parsed) = std::mem::take(&mut self.stage) else { unreachable!() };
+                let mut got = HashMap::new();
+                for (href, id) in self.sheets.drain() {
+                    if let Some(i) = self.inflight.iter().position(|(x, _)| *x == id) {
+                        let (_, p) = self.inflight.remove(i);
+                        if p.failed.is_none() && p.status.is_some_and(|s| s < 400) {
+                            got.insert(href, p.body);
+                        }
+                    }
+                }
+                Ok(Some(Loaded::Committed(parsed, got)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// Asks for the document's linked stylesheets over the network, as
+    /// requests of the document's URL without its query or fragment.
+    fn request_sheets(&mut self, conn: &mut NetConn, parsed: &Parsed) -> std::io::Result<()> {
+        let Ok(base) = Url::parse(&parsed.url) else { return Ok(()) };
+        for s in sheet_sources(&parsed.dom) {
+            let SheetSource::Link { href, .. } = s else { continue };
+            if self.sheets.len() == MAX_SHEETS || self.sheets.contains_key(&href) {
+                continue;
+            }
+            let Ok(u) = base.join(href.trim()) else { continue };
+            if !matches!(u.scheme(), "http" | "https") {
+                continue;
+            }
+            let f = Frame::new(kind::FETCH).str(tag::URL, u.as_str()).str(tag::INITIATOR, &initiator(&base));
+            let id = conn.fetch(f)?;
+            self.inflight.push((id, Pending::new("stylesheet", "GET", u.as_str().to_owned())));
+            self.sheets.insert(href, id);
+        }
+        Ok(())
+    }
+}
+
+/// The document's URL as its subresource requests name it: no query or
+/// fragment, which may hold what a form sent.
+fn initiator(doc: &Url) -> String {
+    let s = doc.as_str();
+    s[..s.find(['?', '#']).unwrap_or(s.len())].to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_subresource_initiator_has_no_query() {
+        let u = Url::parse("http://127.0.0.1:8/gate?user=al&pin=s3cret#top").unwrap();
+        assert_eq!(initiator(&u), "http://127.0.0.1:8/gate");
+    }
+}
