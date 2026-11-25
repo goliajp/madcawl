@@ -7,8 +7,11 @@
 
 mod domain;
 mod parse;
+mod room;
+mod store;
 
 pub use parse::{SameSite, SetCookie, parse, parse_date};
+pub use store::{MAX_FILE as MAX_STORE_FILE, StoreError};
 
 use alt_url::{Host, Url};
 use std::collections::HashMap;
@@ -65,6 +68,7 @@ pub struct CookieJar {
     total: usize,
     clock: u64,
     limits: JarLimits,
+    on_change: Option<Box<dyn Fn() + Send>>,
 }
 
 fn host_of(url: &Url) -> Option<(String, bool)> {
@@ -148,7 +152,7 @@ fn admit(sc: &SetCookie, url: &Url, api: Api, now: i64) -> Option<Admitted> {
 
 impl CookieJar {
     pub fn new(limits: JarLimits) -> Self {
-        CookieJar { by_domain: HashMap::new(), total: 0, clock: 0, limits }
+        CookieJar { by_domain: HashMap::new(), total: 0, clock: 0, limits, on_change: None }
     }
 
     pub fn len(&self) -> usize {
@@ -170,6 +174,7 @@ impl CookieJar {
         self.clock += 1;
         let clock = self.clock;
         let mut created = clock;
+        let mut persistent = expires.is_some();
         if let Some(list) = self.by_domain.get_mut(&domain) {
             let shadows_secure = |c: &Cookie| {
                 c.secure && c.name == sc.name && (path_matches(&c.path, &path) || path_matches(&path, &c.path))
@@ -181,7 +186,8 @@ impl CookieJar {
                 if list[i].http_only && api == Api::Script {
                     return false;
                 }
-                created = list.remove(i).created;
+                let old = list.remove(i);
+                (created, persistent) = (old.created, persistent || old.expires.is_some());
                 self.total -= 1;
                 if list.is_empty() {
                     self.by_domain.remove(&domain);
@@ -189,6 +195,7 @@ impl CookieJar {
             }
         }
         if expires.is_some_and(|e| e < now) {
+            self.changed(persistent);
             return true;
         }
         let cookie = Cookie {
@@ -204,36 +211,12 @@ impl CookieJar {
             created,
             accessed: clock,
         };
+        let before = self.total;
         self.make_room(&domain, now);
         self.by_domain.entry(domain).or_default().push(cookie);
         self.total += 1;
+        self.changed(persistent || self.total <= before);
         true
-    }
-
-    fn make_room(&mut self, domain: &str, now: i64) {
-        for list in self.by_domain.values_mut() {
-            let before = list.len();
-            list.retain(|c| c.expires.is_none_or(|e| e >= now));
-            self.total -= before - list.len();
-        }
-        if let Some(list) = self.by_domain.get_mut(domain)
-            && list.len() >= self.limits.per_domain
-            && let Some(i) = list.iter().enumerate().min_by_key(|(_, c)| c.accessed).map(|(i, _)| i)
-        {
-            list.remove(i);
-            self.total -= 1;
-        }
-        while self.total >= self.limits.total {
-            let oldest = self
-                .by_domain
-                .iter()
-                .flat_map(|(d, l)| l.iter().enumerate().map(move |(i, c)| (c.accessed, d.clone(), i)))
-                .min();
-            let Some((_, d, i)) = oldest else { break };
-            self.by_domain.get_mut(&d).expect("domain just seen").remove(i);
-            self.total -= 1;
-        }
-        self.by_domain.retain(|_, l| !l.is_empty());
     }
 
     /// The cookies to send to `url`, longest path first.
