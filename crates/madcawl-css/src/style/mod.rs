@@ -82,6 +82,7 @@ mod resolve_grid;
 mod restyle;
 mod roots;
 mod rules;
+mod shared;
 mod shorthand;
 mod sources;
 mod states;
@@ -92,7 +93,7 @@ mod values;
 mod var;
 
 use std::cell::OnceCell;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use madcawl_dom::Dom;
@@ -116,6 +117,7 @@ pub use media::matches_media;
 pub use props::Prop;
 pub use restyle::{Change, Restyled};
 pub use rules::Origin;
+pub use shared::{Scope, SheetCache, SheetCacheStats, style_document_shared};
 pub use sources::{SheetSource, sheet_sources};
 pub use states::ElementStates;
 pub use styles::{StyleStats, Styles};
@@ -272,25 +274,5 @@ pub fn style_document(
     device: Device,
     load: &mut dyn FnMut(&str) -> Option<String>,
 ) -> Styles {
-    let mut sheets = Vec::new();
-    for s in sheet_sources(dom) {
-        let (text, media) = match s {
-            SheetSource::Inline { text, media } => (Some(text), media),
-            SheetSource::Link { href, media } => (load(&href), media),
-        };
-        let applies = media
-            .as_deref()
-            .is_none_or(|m| matches_media(m, Span::new(0, m.len()), &device));
-        if let Some(text) = text.filter(|_| applies)
-            && let Ok(sheet) = Stylesheet::parse(text)
-        {
-            sheets.push(sheet);
-        }
-    }
-    let mut c = Cascade::new(device);
-    c.add(ua_sheet(), Origin::UserAgent);
-    for s in &sheets {
-        c.add(s, Origin::Author);
-    }
-    c.compute(dom)
+    shared::style_parsed_by(dom, device, load, &mut |t| Stylesheet::parse(t).ok().map(Arc::new))
 }
