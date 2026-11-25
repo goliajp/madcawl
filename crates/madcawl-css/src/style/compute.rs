@@ -14,6 +14,7 @@ use crate::Span;
 use crate::parser::{BlockItem, parse_declaration_list};
 
 use super::Styles;
+use super::ancestors::Ancestors;
 use super::computed::ComputedStyle;
 use super::custom;
 use super::device::Device;
@@ -69,6 +70,8 @@ pub(crate) struct Run<'r, 'a> {
     /// By class list number, the text numbers of the classes in it that
     /// some selector names
     pub named: HashMap<u32, Vec<u64>>,
+    /// What the ancestors of the element being styled have
+    pub ancestors: Ancestors,
 }
 
 impl<'r, 'a> Run<'r, 'a> {
@@ -100,6 +103,7 @@ impl<'r, 'a> Run<'r, 'a> {
             verify: cfg!(debug_assertions),
             sig: Vec::new(),
             named: HashMap::new(),
+            ancestors: Ancestors::default(),
         }
     }
 
@@ -153,7 +157,7 @@ impl<'r, 'a> Run<'r, 'a> {
         let rules = self.m.rules;
         for &c in &self.candidates {
             let e = &rules.entries[c as usize];
-            if !self.m.entry(e, el) {
+            if !self.may_match(c, el) || !self.m.entry(e, el) {
                 continue;
             }
             let origin = rules.sheets[e.sheet as usize].origin as u32;

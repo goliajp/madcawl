@@ -62,6 +62,9 @@ impl Run<'_, '_> {
         let kinds = &self.prep.pseudo_buckets.kinds;
         let rules = self.m.rules;
         let any = pc.iter().any(|&c| {
+            if !self.may_match(c, el) {
+                return false;
+            }
             self.m.pseudo.set(Some(PSEUDOS[kinds[c as usize] as usize - 1]));
             self.m.entry(&rules.entries[c as usize], el)
         });

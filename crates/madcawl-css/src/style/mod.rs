@@ -43,6 +43,7 @@ macro_rules! keywords {
     };
 }
 
+mod ancestors;
 mod before_after;
 mod buckets;
 mod calc;
@@ -151,6 +152,7 @@ pub struct Cascade<'a> {
     generation: u64,
     path_key: bool,
     verify: bool,
+    ancestor_filter: bool,
 }
 
 fn is_quirks(dom: &Dom) -> bool {
@@ -181,6 +183,7 @@ impl<'a> Cascade<'a> {
             generation: next_generation(),
             path_key: true,
             verify: cfg!(debug_assertions),
+            ancestor_filter: true,
         }
     }
 
@@ -209,6 +212,13 @@ impl<'a> Cascade<'a> {
         self.verify = on;
     }
 
+    /// Whether rules that need an ancestor to have an id, class or name none has are left untried (on by
+    /// default); off, every candidate rule is matched, which tests compare against.
+    #[doc(hidden)]
+    pub fn set_ancestor_filter(&mut self, on: bool) {
+        self.ancestor_filter = on;
+    }
+
     pub fn rule_stats(&self) -> RuleStats {
         RuleStats {
             selectors: self.rules.entries.len(),
@@ -231,6 +241,7 @@ impl<'a> Cascade<'a> {
         let mut r = compute::Run::new(dom, &self.rules, self.prepared(dom), states, self.device);
         r.path_key = self.path_key;
         r.verify = self.verify;
+        r.ancestors.off = !self.ancestor_filter;
         r
     }
 

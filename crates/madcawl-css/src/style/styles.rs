@@ -29,6 +29,9 @@ pub struct StyleStats {
     pub verified: u64,
     pub mismatches: u64,
     pub first_mismatch: Option<NodeId>,
+    /// Rules the ancestor filter was asked about, and those it ruled out without matching them
+    pub filter_checked: u64,
+    pub filter_skipped: u64,
 }
 
 /// The computed values of a document's elements, by node.

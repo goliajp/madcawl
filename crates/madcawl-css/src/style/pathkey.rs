@@ -150,7 +150,10 @@ impl Run<'_, '_> {
         self.sig.push(REVAL);
         let rules = self.m.rules;
         for &c in &self.candidates {
-            if f.reval[c as usize] && self.m.entry(&rules.entries[c as usize], el) {
+            if f.reval[c as usize]
+                && self.may_match(c, el)
+                && self.m.entry(&rules.entries[c as usize], el)
+            {
                 self.sig.push(u64::from(c));
             }
         }
@@ -164,6 +167,7 @@ impl Run<'_, '_> {
     pub(crate) fn style_one(&mut self, el: NodeId, out: &mut Styles) -> (bool, bool) {
         let i = el.index() as usize;
         out.grow(i);
+        self.enter(el);
         let parent = self.m.parent_element(el);
         self.candidates(el);
         let before = (out.of[i], out.flags[i], out.customs[i]);
@@ -213,6 +217,7 @@ impl Run<'_, '_> {
                 }
             }
         }
+        self.count_filtered(out);
         (
             before != (out.of[i], out.flags[i], out.customs[i]),
             pseudo_before != out.pseudos.get(&el.index()).copied(),

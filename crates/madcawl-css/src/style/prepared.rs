@@ -1,6 +1,7 @@
 //! What a cascade builds once from its rules for each quirks mode: the
 //! buckets, the layer ranks and the selectors' features.
 
+use super::ancestors::{Filter, needs};
 use super::buckets::{Buckets, declares_content};
 use super::features::Features;
 use super::rules::Rules;
@@ -20,6 +21,8 @@ pub(crate) struct Prepared {
     /// The rank of the author origin's unlayered rules
     pub author_rank: u32,
     pub features: Features,
+    /// By rule, what some ancestor of an element it matches has
+    pub needs: Vec<Filter>,
 }
 
 impl Prepared {
@@ -40,6 +43,7 @@ impl Prepared {
             ranks: rules.layer_ranks(),
             author_rank: rules.author_rank(),
             features,
+            needs: needs(rules, quirks),
         }
     }
 }
