@@ -222,3 +222,68 @@ fn a_client_that_stops_reading_lets_go_of_its_request() {
     assert!(rest.len() < 600 * 1024);
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn a_client_that_disconnects_gives_its_requests_back_at_once() {
+    let origin = http_fixture();
+    let path = netd(ServerLimits { requests: 2, ..ServerLimits::default() });
+    let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/", silent.local_addr().unwrap());
+    let mut a = connect(&path);
+    for id in 1..=2 {
+        Frame::new(kind::FETCH).num(tag::ID, id).str(tag::URL, &url).write_to(&mut a).unwrap();
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    let mut b = connect(&path);
+    Frame::new(kind::FETCH).num(tag::ID, 3).str(tag::URL, &format!("{origin}/echo")).write_to(&mut b).unwrap();
+    assert_eq!(read(&mut b).kind, kind::ERROR, "both places are held by the hanging requests");
+    drop(a);
+    std::thread::sleep(Duration::from_millis(300));
+    let (head, _) = fetch(&mut b, 4, &format!("{origin}/echo"));
+    assert_eq!(head.get_num(tag::STATUS), Some(200), "the gone client's requests were cancelled");
+    drop(silent);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn one_client_cannot_take_another_clients_reserve() {
+    let origin = http_fixture();
+    // each of the two clients keeps one request for itself; two more are shared
+    let limits = ServerLimits { clients: 2, in_flight: 4, requests: 4, ..ServerLimits::default() };
+    assert_eq!(limits.reserve(), 1);
+    let path = netd(limits);
+    let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/", silent.local_addr().unwrap());
+    let mut a = connect(&path);
+    for id in 1..=4 {
+        Frame::new(kind::FETCH).num(tag::ID, id).str(tag::URL, &url).write_to(&mut a).unwrap();
+    }
+    let e = read(&mut a);
+    assert_eq!((e.kind, e.get_num(tag::ID)), (kind::ERROR, Some(4)));
+    let mut b = connect(&path);
+    let (head, _) = fetch(&mut b, 5, &format!("{origin}/echo"));
+    assert_eq!(head.get_num(tag::STATUS), Some(200));
+    drop(silent);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn request_bodies_are_held_within_a_budget() {
+    let path = netd(ServerLimits { body_bytes: 1 << 20, ..ServerLimits::default() });
+    let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/", silent.local_addr().unwrap());
+    let mut a = connect(&path);
+    let post = |s: &mut UnixStream, id: u64| {
+        let f = Frame::new(kind::FETCH).num(tag::ID, id).str(tag::METHOD, "POST").str(tag::URL, &url);
+        f.bytes(tag::BODY, &vec![b'b'; 700 << 10]).write_to(s).unwrap();
+    };
+    post(&mut a, 1);
+    std::thread::sleep(Duration::from_millis(100));
+    let mut b = connect(&path);
+    post(&mut b, 2);
+    let e = read(&mut b);
+    assert_eq!((e.kind, e.get_num(tag::ID)), (kind::ERROR, Some(2)));
+    assert!(e.get_str(tag::MESSAGE).unwrap().contains("budget"));
+    drop(silent);
+    let _ = std::fs::remove_file(&path);
+}

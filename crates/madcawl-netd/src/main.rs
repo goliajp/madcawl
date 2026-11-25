@@ -1,6 +1,6 @@
-//! `madcawl-netd --socket <path> [--clients N] [--in-flight N] [--requests N]`: the
-//! network process. It listens on the Unix socket at `path`, replacing a
-//! stale socket file there, and serves until killed.
+//! `madcawl-netd --socket <path> [--clients N] [--in-flight N] [--requests N]
+//! [--body-bytes N]`: the network process. It listens on the Unix socket
+//! at `path`, replacing a stale socket file there, and serves until killed.
 
 use madcawl_net::{Client, Config};
 use madcawl_netd::{ServerLimits, serve};
@@ -21,8 +21,9 @@ fn main() -> ExitCode {
             ("--clients", _, Some(n)) => limits.clients = n,
             ("--in-flight", _, Some(n)) => limits.in_flight = n,
             ("--requests", _, Some(n)) => limits.requests = n,
+            ("--body-bytes", _, Some(n)) => limits.body_bytes = n,
             _ => {
-                eprintln!("usage: madcawl-netd --socket <path> [--clients N] [--in-flight N] [--requests N]");
+                eprintln!("usage: madcawl-netd --socket <path> [--clients N] [--in-flight N] [--requests N] [--body-bytes N]");
                 return ExitCode::from(2);
             }
         }

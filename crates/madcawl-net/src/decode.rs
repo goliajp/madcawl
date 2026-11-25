@@ -51,11 +51,9 @@ pub fn decode(body: &[u8], codings: &[Coding], cap: usize) -> Result<Vec<u8>, Ne
 pub type Emit<'a> = dyn FnMut(&[u8]) -> Result<(), NetError> + 'a;
 
 /// Undoes `codings` on a body that arrives in pieces, handing the output
-/// on as it is produced; at most `cap` bytes of it in all.
+/// on as it is produced; each layer may produce at most `cap` bytes.
 pub struct Decoder {
     stages: Vec<Stage>,
-    cap: usize,
-    produced: usize,
 }
 
 impl Decoder {
@@ -65,11 +63,11 @@ impl Decoder {
             .rev()
             .filter_map(|c| match c {
                 Coding::Identity => None,
-                Coding::Gzip => Some(Stage::new(Some(Format::Gzip))),
-                Coding::Deflate => Some(Stage::new(None)),
+                Coding::Gzip => Some(Stage::new(Some(Format::Gzip), cap)),
+                Coding::Deflate => Some(Stage::new(None, cap)),
             })
             .collect();
-        Decoder { stages, cap, produced: 0 }
+        Decoder { stages }
     }
 
     pub fn push(&mut self, input: &[u8], out: &mut Emit<'_>) -> Result<(), NetError> {
@@ -82,26 +80,24 @@ impl Decoder {
     }
 
     fn run(&mut self, input: &[u8], finish: bool, out: &mut Emit<'_>) -> Result<(), NetError> {
-        let (cap, produced) = (self.cap, &mut self.produced);
-        let mut counted = |b: &[u8]| {
-            *produced += b.len();
-            if *produced > cap {
-                return Err(NetError::TooLarge("decoded body"));
-            }
-            out(b)
-        };
-        if self.stages.is_empty() {
-            return if input.is_empty() { Ok(()) } else { out(input) };
-        }
-        feed(&mut self.stages, input, finish, &mut counted)
+        feed(&mut self.stages, input, finish, out)
     }
 }
 
+/// Runs `input` through the stages in turn. Every stage's output counts
+/// against the cap, not only the last one's, and a stage that ended takes
+/// no more: output an earlier stage makes after it is an error, so a
+/// layer cannot be made to inflate data nobody reads.
 fn feed(stages: &mut [Stage], input: &[u8], finish: bool, out: &mut Emit<'_>) -> Result<(), NetError> {
     let Some((first, rest)) = stages.split_first_mut() else {
         return if input.is_empty() { Ok(()) } else { out(input) };
     };
-    first.run(input, finish, &mut |b| feed(rest, b, false, out))?;
+    first.run(input, finish, &mut |b| {
+        if rest.first().is_some_and(|s| s.done) {
+            return Err(NetError::Decode("data after the end of an inner coding".into()));
+        }
+        feed(rest, b, false, out)
+    })?;
     if finish {
         feed(rest, &[], true, out)?;
     }
@@ -141,6 +137,8 @@ struct Stage {
     pending: Vec<u8>,
     done: bool,
     chunk: Vec<u8>,
+    produced: usize,
+    cap: usize,
 }
 
 fn is_zlib(b: &[u8]) -> bool {
@@ -148,8 +146,9 @@ fn is_zlib(b: &[u8]) -> bool {
 }
 
 impl Stage {
-    fn new(format: Option<Format>) -> Self {
-        let mut s = Stage { state: State::new(), format, pending: Vec::new(), done: false, chunk: vec![0u8; 32 * 1024] };
+    fn new(format: Option<Format>, cap: usize) -> Self {
+        let chunk = vec![0u8; 32 * 1024];
+        let mut s = Stage { state: State::new(), format, pending: Vec::new(), done: false, chunk, produced: 0, cap };
         if let Some(f) = format {
             s.state.inflate().reset(f, CpuFeatures::compile_time());
         }
@@ -183,6 +182,10 @@ impl Stage {
                 .inflate(&input[at..], &mut self.chunk, flush)
                 .map_err(|e| NetError::Decode(format!("{e:?}")))?;
             at += p.consumed;
+            self.produced += p.produced;
+            if self.produced > self.cap {
+                return Err(NetError::TooLarge("decoded body"));
+            }
             if p.produced > 0 {
                 emit(&self.chunk[..p.produced])?;
             }

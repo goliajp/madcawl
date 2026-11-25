@@ -16,6 +16,8 @@ pub enum NetError {
     ReadTimeout,
     /// the whole request, redirects included, ran past its time
     Deadline,
+    /// the requester went away
+    Cancelled,
     Http(String),
     /// the response head, body or decoded body passed its cap
     TooLarge(&'static str),
@@ -39,6 +41,7 @@ impl fmt::Display for NetError {
             NetError::Io(s) => write!(f, "io: {s}"),
             NetError::ReadTimeout => f.write_str("read: timed out"),
             NetError::Deadline => f.write_str("request: timed out"),
+            NetError::Cancelled => f.write_str("request: cancelled"),
             NetError::Http(s) => write!(f, "http: {s}"),
             NetError::TooLarge(what) => write!(f, "{what} over its size cap"),
             NetError::Decode(s) => write!(f, "content decoding: {s}"),
@@ -52,6 +55,9 @@ impl std::error::Error for NetError {}
 
 impl From<std::io::Error> for NetError {
     fn from(e: std::io::Error) -> Self {
+        if let Some(inner) = e.get_ref().and_then(|i| i.downcast_ref::<NetError>()) {
+            return inner.clone();
+        }
         match e.kind() {
             std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => NetError::ReadTimeout,
             _ => NetError::Io(e.to_string()),

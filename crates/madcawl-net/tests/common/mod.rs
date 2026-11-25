@@ -75,19 +75,25 @@ pub fn reply(status: u16, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
 }
 
 pub fn serve(handler: Handler) -> Fixture {
-    start("127.0.0.1:0", handler, false)
+    start("127.0.0.1:0", handler, false, None)
 }
 
 pub fn serve_tls(handler: Handler) -> Fixture {
-    start("127.0.0.1:0", handler, true)
+    start("127.0.0.1:0", handler, true, None)
 }
 
 /// TLS on `bind`, which the certificate may not name.
 pub fn serve_tls_at(bind: &str, handler: Handler) -> Fixture {
-    start(bind, handler, true)
+    start(bind, handler, true, None)
 }
 
-fn start(bind: &str, handler: Handler, tls: bool) -> Fixture {
+/// TLS that, after the handshake, sends its records one byte every
+/// `delay`.
+pub fn serve_tls_dribbling(handler: Handler, delay: Duration) -> Fixture {
+    start("127.0.0.1:0", handler, true, Some(delay))
+}
+
+fn start(bind: &str, handler: Handler, tls: bool, dribble: Option<Duration>) -> Fixture {
     let listener = TcpListener::bind(bind).unwrap();
     let addr = listener.local_addr().unwrap();
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -101,7 +107,7 @@ fn start(bind: &str, handler: Handler, tls: bool) -> Fixture {
             std::thread::spawn(move || {
                 tcp.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
                 if tls {
-                    let _ = serve_tls_conn(tcp, n, &h, &s);
+                    let _ = serve_tls_conn(tcp, n, &h, &s, dribble);
                 } else {
                     let mut tcp = tcp;
                     let _ = serve_conn(&mut tcp, n, &h, &s);
@@ -160,12 +166,19 @@ fn serve_conn(io: &mut (impl Read + Write), n: usize, h: &Handler, seen: &Mutex<
 struct ServerTls<'c, 'b> {
     conn: Connection<'c, 'b>,
     tcp: TcpStream,
+    dribble: Option<Duration>,
 }
 
 impl ServerTls<'_, '_> {
     fn flush_records(&mut self) -> io::Result<()> {
         while !self.conn.send_buf().is_empty() {
-            let k = self.tcp.write(self.conn.send_buf())?;
+            let k = match self.dribble.filter(|_| !self.conn.is_handshaking()) {
+                Some(delay) => {
+                    std::thread::sleep(delay);
+                    self.tcp.write(&self.conn.send_buf()[..1])?
+                }
+                None => self.tcp.write(self.conn.send_buf())?,
+            };
             self.conn.send_ack(k).map_err(|e| io::Error::other(format!("{e:?}")))?;
         }
         Ok(())
@@ -212,7 +225,7 @@ impl Write for ServerTls<'_, '_> {
     }
 }
 
-fn serve_tls_conn(tcp: TcpStream, n: usize, h: &Handler, seen: &Mutex<Vec<Req>>) -> io::Result<()> {
+fn serve_tls_conn(tcp: TcpStream, n: usize, h: &Handler, seen: &Mutex<Vec<Req>>, dribble: Option<Duration>) -> io::Result<()> {
     let key = SigningKey::from_pkcs8_der(KEY).unwrap();
     let chain: [&[u8]; 1] = [LEAF];
     let config = ServerConfig::new(&chain, &key).unwrap();
@@ -220,7 +233,7 @@ fn serve_tls_conn(tcp: TcpStream, n: usize, h: &Handler, seen: &Mutex<Vec<Req>>)
     let mut send = vec![0u8; RECOMMENDED_BUFFER_LEN];
     let conn = Connection::new(config, &mut madcawl_net::tls::OsEntropy, CpuFeatures::compile_time(), &mut recv, &mut send)
         .map_err(|e| io::Error::other(format!("{e:?}")))?;
-    let mut s = ServerTls { conn, tcp };
+    let mut s = ServerTls { conn, tcp, dribble };
     while s.conn.is_handshaking() {
         s.flush_records()?;
         let k = s.tcp.read(s.conn.recv_buf())?;

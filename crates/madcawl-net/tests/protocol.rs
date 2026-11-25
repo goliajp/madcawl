@@ -24,12 +24,16 @@ fn get(c: &Client, url: &str) -> Result<madcawl_net::Response, NetError> {
 }
 
 fn compress(data: &[u8], format: Format) -> Vec<u8> {
+    compress_at(data, format, Level::DEFAULT)
+}
+
+fn compress_at(data: &[u8], format: Format, level: Level) -> Vec<u8> {
     let mut mem = vec![0u64; Deflate::SIZE.div_ceil(8)];
     // SAFETY: a u64 buffer viewed as bytes of the same length
     let bytes = unsafe { std::slice::from_raw_parts_mut(mem.as_mut_ptr().cast::<u8>(), mem.len() * 8) };
     // SAFETY: zeroed, 8-byte aligned and SIZE bytes long
     let e = unsafe { Deflate::from_zeroed(bytes) };
-    e.reset(format, Level::DEFAULT, CpuFeatures::compile_time());
+    e.reset(format, level, CpuFeatures::compile_time());
     let mut out = Vec::new();
     let mut chunk = vec![0u8; 1 << 16];
     let mut at = 0;
@@ -179,6 +183,33 @@ fn gzip_and_deflate_and_the_bomb_cap() {
     assert_eq!(get(&c, &f.url("/bomb")), Err(NetError::TooLarge("decoded body")));
     assert!(matches!(get(&c, &f.url("/br")), Err(NetError::Decode(_))));
     assert_eq!(get(&c, &f.url("/big")), Err(NetError::TooLarge("response body")));
+}
+
+#[test]
+fn every_layer_of_nested_codings_is_capped() {
+    use madcawl_net::decode::{Coding, decode};
+    // an inner gzip stream exactly one 32 KiB piece of the outer layer's
+    // output long, so it ends at a piece boundary; the outer layer then
+    // inflates megabytes of zeros the inner one never reads
+    let stored = |n: usize| compress_at(&vec![b's'; n], Format::Gzip, Level::NONE);
+    let overhead = stored(1000).len() - 1000;
+    let mut inner = ((32 << 10) - overhead - 64..=(32 << 10) - overhead)
+        .rev()
+        .map(stored)
+        .find(|s| s.len() == 32 << 10)
+        .expect("a stored stream of exactly 32 KiB");
+    inner.resize(inner.len() + (16 << 20), 0);
+    let body = compress(&inner, Format::Gzip);
+    assert!(body.len() < 64 << 10);
+    let started = std::time::Instant::now();
+    let r = decode(&body, &[Coding::Gzip, Coding::Gzip], 1 << 20);
+    assert!(matches!(r, Err(NetError::TooLarge(_) | NetError::Decode(_))), "{:?}", r.map(|b| b.len()));
+    assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+    // nor may an outer layer alone inflate past the cap
+    let deep = compress(&compress(&vec![0u8; 4 << 20], Format::Gzip), Format::Gzip);
+    assert_eq!(decode(&deep, &[Coding::Gzip, Coding::Gzip], 1 << 20), Err(NetError::TooLarge("decoded body")));
+    let fine = compress(&compress(b"hello", Format::Gzip), Format::Gzip);
+    assert_eq!(decode(&fine, &[Coding::Gzip, Coding::Gzip], 1 << 20).unwrap(), b"hello");
 }
 
 #[test]

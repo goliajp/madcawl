@@ -1,26 +1,30 @@
 //! A connection to an origin: plain TCP or TLS over it.
 
+use crate::sock::{Bounds, Tcp};
 use crate::tls::TlsStream;
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
-use std::time::Duration;
 
 pub enum Stream {
-    Plain(TcpStream),
+    Plain(Tcp),
     Tls(Box<TlsStream>),
 }
 
 impl Stream {
     pub fn tcp(&self) -> &TcpStream {
         match self {
-            Stream::Plain(s) => s,
+            Stream::Plain(s) => s.sock(),
             Stream::Tls(t) => t.tcp(),
         }
     }
 
-    pub fn set_timeouts(&self, read: Duration, write: Duration) -> io::Result<()> {
-        self.tcp().set_read_timeout(Some(read))?;
-        self.tcp().set_write_timeout(Some(write))
+    /// What bounds every read and write from now on, the TLS layer's own
+    /// included.
+    pub fn set_bounds(&mut self, bounds: Bounds) {
+        match self {
+            Stream::Plain(s) => s.set_bounds(bounds),
+            Stream::Tls(t) => t.set_bounds(bounds),
+        }
     }
 
     /// Whether the peer closed or sent bytes while the connection sat idle;

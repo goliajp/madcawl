@@ -16,6 +16,7 @@ use crate::cookie::{CookieJar, JarLimits, SiteContext, site_of};
 use crate::dns::DnsCache;
 use crate::error::NetError;
 use crate::pool::{Pool, PoolLimits};
+use crate::sock::Cancel;
 use crate::trust::{Trust, TrustSource};
 use alt_url::Url;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -81,6 +82,8 @@ pub struct Request {
     pub initiator: Option<Url>,
     pub credentials: bool,
     pub redirect: Redirect,
+    /// ends the request early, its socket operations included
+    pub cancel: Option<Arc<Cancel>>,
 }
 
 impl Request {
@@ -94,6 +97,7 @@ impl Request {
             initiator: None,
             credentials: true,
             redirect: Redirect::Follow,
+            cancel: None,
         }
     }
 }
@@ -206,13 +210,16 @@ impl Client {
         let deadline = Instant::now() + self.config.request_timeout;
         let mut url = req.url.clone();
         let mut method = normalize_method(&req.method);
-        let mut body = req.body.clone();
+        let mut body = req.body.as_deref();
         let mut headers: Vec<(String, Vec<u8>)> =
             req.headers.iter().filter(|(n, v)| !is_forbidden(n, v)).cloned().collect();
         let mut url_list = vec![url.clone()];
         loop {
             if !matches!(url.scheme(), "http" | "https") {
                 return Err(NetError::Scheme(url.scheme().to_owned()));
+            }
+            if req.cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
+                return Err(NetError::Cancelled);
             }
             if Instant::now() >= deadline {
                 return Err(NetError::Deadline);
@@ -221,7 +228,7 @@ impl Client {
             let cookie = if req.credentials { self.lock_jar().header(&url, ctx, now_secs()) } else { None };
             let origin = (!matches!(method.as_str(), "GET" | "HEAD"))
                 .then(|| req.initiator.as_ref().map_or("null".into(), |i| i.origin().ascii_serialization()));
-            let extra = exchange::Extra { cookie: cookie.as_deref(), origin: origin.as_deref(), body: body.as_deref(), deadline };
+            let extra = exchange::Extra { cookie: cookie.as_deref(), origin: origin.as_deref(), body, deadline, cancel: req.cancel.as_ref() };
             let mut hop = Hop { client: self, req, url: &url, url_list: &url_list, method: &method, sink: &mut *sink, decoder: None, delivered: false };
             let raw = self.exchange(&method, &url, &headers, extra, &mut hop)?;
             if hop.delivered {
@@ -260,7 +267,7 @@ fn redirect_url(url: &Url, location: &str) -> Result<Url, NetError> {
 
 /// 301 and 302 turn POST into GET, 303 turns anything but GET and HEAD
 /// into GET; the body and its headers go with the old method.
-fn rewrite_for_redirect(status: u16, method: &mut String, body: &mut Option<Vec<u8>>, headers: &mut Vec<(String, Vec<u8>)>) {
+fn rewrite_for_redirect(status: u16, method: &mut String, body: &mut Option<&[u8]>, headers: &mut Vec<(String, Vec<u8>)>) {
     let rewrite = (matches!(status, 301 | 302) && method == "POST") || (status == 303 && !matches!(method.as_str(), "GET" | "HEAD"));
     if rewrite {
         *method = "GET".into();

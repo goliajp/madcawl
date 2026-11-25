@@ -5,10 +5,13 @@ use crate::connect::connect;
 use crate::error::NetError;
 use crate::http1::{self, BodySink, RawResponse, ReadLimits};
 use crate::pool::Key;
+use crate::sock::{Attached, Bounds, Cancel, Tcp};
 use crate::stream::Stream;
 use crate::tls::TlsStream;
 use alt_url::Url;
-use std::time::Instant;
+use std::net::TcpStream;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// Headers this stack adds to the requester's, the body, and when the
 /// whole request has to be done.
@@ -17,6 +20,20 @@ pub struct Extra<'a> {
     pub origin: Option<&'a str>,
     pub body: Option<&'a [u8]>,
     pub deadline: Instant,
+    pub cancel: Option<&'a Arc<Cancel>>,
+}
+
+/// `limit`, or less when the deadline is nearer; an error once it passed.
+fn within(limit: Duration, deadline: Instant) -> Result<Duration, NetError> {
+    let left = deadline.saturating_duration_since(Instant::now());
+    if left.is_zero() {
+        return Err(NetError::Deadline);
+    }
+    Ok(limit.min(left))
+}
+
+fn attach<'c>(cancel: Option<&'c Arc<Cancel>>, tcp: &TcpStream) -> Result<Option<Attached<'c>>, NetError> {
+    cancel.map(|c| c.attach(tcp)).transpose()
 }
 
 fn target(url: &Url) -> String {
@@ -36,11 +53,12 @@ fn host_header(url: &Url) -> String {
 }
 
 impl Client {
-    fn open(&self, key: &Key) -> Result<Stream, NetError> {
-        let addrs = self.dns.lookup(&key.host, self.config.dns_timeout)?;
-        let tcp = connect(&addrs, key.port, self.config.connect_timeout)?;
-        tcp.set_read_timeout(Some(self.config.io_timeout))?;
-        tcp.set_write_timeout(Some(self.config.io_timeout))?;
+    fn open(&self, key: &Key, bounds: &Bounds) -> Result<Stream, NetError> {
+        let deadline = bounds.deadline.unwrap_or_else(|| Instant::now() + self.config.request_timeout);
+        let addrs = self.dns.lookup(&key.host, within(self.config.dns_timeout, deadline)?)?;
+        let tcp = connect(&addrs, key.port, within(self.config.connect_timeout, deadline)?)?;
+        let _attached = attach(bounds.cancel.as_ref(), &tcp)?;
+        let tcp = Tcp::new(tcp, bounds.clone());
         if !key.tls {
             return Ok(Stream::Plain(tcp));
         }
@@ -77,22 +95,26 @@ impl Client {
             fields.push(("Origin", o.as_bytes()));
         }
         let target = target(url);
-        let limits = ReadLimits { max_body: self.config.max_body, io: self.config.io_timeout, deadline: extra.deadline };
-        let (slot, idle) = self.pool.checkout(&key, self.config.connect_timeout)?;
+        let limits = ReadLimits { max_body: self.config.max_body };
+        let bounds = Bounds { io: self.config.io_timeout, deadline: Some(extra.deadline), cancel: extra.cancel.cloned() };
+        let (slot, idle) = self.pool.checkout(&key, within(self.config.connect_timeout, extra.deadline)?)?;
         let mut reused = idle.is_some();
         let mut stream = match idle {
             Some(s) => s,
-            None => self.open(&key)?,
+            None => self.open(&key, &bounds)?,
         };
         loop {
-            stream.set_timeouts(self.config.io_timeout, self.config.io_timeout)?;
+            stream.set_bounds(bounds.clone());
+            let attached = attach(extra.cancel, stream.tcp())?;
             let sent = http1::write_request(&mut stream, method, &target, &fields, extra.body);
             let result = match sent {
                 Ok(()) => http1::read_response(&mut stream, method, &limits, sink),
                 Err(error) => Err(http1::ExchangeError { error, nothing_received: true }),
             };
+            drop(attached);
             match result {
                 Ok(raw) => {
+                    stream.set_bounds(Bounds::idle(self.config.io_timeout));
                     if raw.reusable {
                         self.pool.checkin(slot, stream);
                     } else {
@@ -100,8 +122,8 @@ impl Client {
                     }
                     return Ok(raw);
                 }
-                Err(e) if reused && e.nothing_received => {
-                    stream = self.open(&key)?;
+                Err(e) if reused && e.nothing_received && !matches!(e.error, NetError::Deadline | NetError::Cancelled) => {
+                    stream = self.open(&key, &bounds)?;
                     reused = false;
                 }
                 Err(e) => return Err(e.error),

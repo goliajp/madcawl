@@ -4,7 +4,6 @@
 use crate::error::NetError;
 use crate::stream::Stream;
 use std::io::{Read, Write};
-use std::time::{Duration, Instant};
 use torajs_http1::{BodyDecoder, BodyKind, Framing, Limits, Progress, ResponseHead, Version};
 
 pub const MAX_HEAD: usize = 64 * 1024;
@@ -41,15 +40,12 @@ pub trait BodySink {
     fn body(&mut self, bytes: &[u8]) -> Result<(), NetError>;
 }
 
-/// Bounds on reading one response.
+/// Bounds on reading one response; the time it may take is the
+/// stream's (see `Stream::set_bounds`).
 #[derive(Clone, Copy, Debug)]
 pub struct ReadLimits {
     /// the body as sent
     pub max_body: usize,
-    /// how long one read may block
-    pub io: Duration,
-    /// when the whole request has to be done
-    pub deadline: Instant,
 }
 
 /// Why an exchange failed, and whether the server sent nothing at all, in
@@ -72,36 +68,19 @@ pub fn write_request(
     headers: &[(&str, &[u8])],
     body: Option<&[u8]>,
 ) -> Result<(), NetError> {
-    let mut out = Vec::with_capacity(512 + body.map_or(0, <[u8]>::len));
+    let mut head = Vec::with_capacity(512);
     let framing = match body {
         Some(b) => Framing::Length(b.len() as u64),
         None => Framing::Unframed,
     };
-    torajs_http1::encode_request_head(&mut out, method, target, Version::Http11, headers, framing)
+    torajs_http1::encode_request_head(&mut head, method, target, Version::Http11, headers, framing)
         .map_err(|e| NetError::Http(format!("request head: {e:?}")))?;
+    stream.write_all(&head)?;
     if let Some(b) = body {
-        out.extend_from_slice(b);
+        stream.write_all(b)?;
     }
-    stream.write_all(&out)?;
     stream.flush()?;
     Ok(())
-}
-
-/// Reads from `stream` into `chunk`, the read bounded by the request's
-/// deadline as well as the per-read timeout.
-fn read_bounded(stream: &mut Stream, chunk: &mut [u8], limits: &ReadLimits) -> Result<usize, NetError> {
-    let left = limits.deadline.saturating_duration_since(Instant::now());
-    if left.is_zero() {
-        return Err(NetError::Deadline);
-    }
-    if left < limits.io {
-        stream.set_timeouts(left, limits.io)?;
-    }
-    match stream.read(chunk) {
-        Ok(n) => Ok(n),
-        Err(_) if Instant::now() >= limits.deadline => Err(NetError::Deadline),
-        Err(e) => Err(e.into()),
-    }
 }
 
 /// Reads the response to a `method` request, handing the final head and
@@ -133,7 +112,7 @@ pub fn read_response(
             Ok(Progress::Incomplete) => {}
             Err(e) => return Err(fail(NetError::Http(format!("response head: {e:?}")), false)),
         }
-        let n = read_bounded(stream, &mut chunk, limits).map_err(|e| fail(e, buf.is_empty()))?;
+        let n = stream.read(&mut chunk).map_err(NetError::from).map_err(|e| fail(e, buf.is_empty()))?;
         if n == 0 {
             let error = NetError::Http("connection closed before the response head".into());
             return Err(fail(error, buf.is_empty()));
@@ -168,7 +147,7 @@ pub fn read_response(
         }
         buf.clear();
         used = 0;
-        let n = read_bounded(stream, &mut chunk, limits).map_err(|e| fail(e, false))?;
+        let n = stream.read(&mut chunk).map_err(NetError::from).map_err(|e| fail(e, false))?;
         if n == 0 {
             decoder.finish().map_err(|e| fail(NetError::Http(format!("body: {e:?}")), false))?;
             break;

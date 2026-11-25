@@ -2,6 +2,7 @@
 //! a blocking `TcpStream`.
 
 use crate::error::NetError;
+use crate::sock::{Bounds, Tcp};
 use crate::trust::{Trust, take_rejection_reason};
 use std::io::{self, Read, Write};
 use std::mem::ManuallyDrop;
@@ -38,7 +39,7 @@ type Conn = Connection<'static, 'static, &'static Trust>;
 /// connection is dropped.
 pub struct TlsStream {
     conn: ManuallyDrop<Conn>,
-    tcp: TcpStream,
+    tcp: Tcp,
     recv: *mut [u8],
     send: *mut [u8],
     host: *mut str,
@@ -82,9 +83,9 @@ fn now() -> UnixTime {
 }
 
 impl TlsStream {
-    /// Runs the handshake for `host` over `tcp`, which carries the timeouts
-    /// the caller set.
-    pub fn handshake(tcp: TcpStream, host: &str, trust: Arc<Trust>) -> Result<Self, NetError> {
+    /// Runs the handshake for `host` over `tcp`, within the bounds it
+    /// carries.
+    pub fn handshake(tcp: Tcp, host: &str, trust: Arc<Trust>) -> Result<Self, NetError> {
         take_rejection_reason();
         let host: *mut str = Box::into_raw(host.to_owned().into_boxed_str());
         let recv: *mut [u8] = Box::into_raw(vec![0u8; RECOMMENDED_BUFFER_LEN].into_boxed_slice());
@@ -144,7 +145,11 @@ impl TlsStream {
     }
 
     pub fn tcp(&self) -> &TcpStream {
-        &self.tcp
+        self.tcp.sock()
+    }
+
+    pub fn set_bounds(&mut self, bounds: Bounds) {
+        self.tcp.set_bounds(bounds);
     }
 
     pub fn alpn(&self) -> Option<&[u8]> {

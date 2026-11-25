@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{CA, Req, reply, serve, serve_tls, serve_tls_at};
+use common::{CA, Req, reply, serve, serve_tls, serve_tls_at, serve_tls_dribbling};
 use madcawl_net::fetch::{Config, Request, Sink};
 use madcawl_net::trust::TrustSource;
 use madcawl_net::{Client, NetError, Response, Url};
@@ -112,6 +112,43 @@ fn a_slow_server_hits_the_request_deadline() {
     });
     let start = Instant::now();
     assert_eq!(c.fetch(&request("GET", &url)), Err(NetError::Deadline));
+    assert!(start.elapsed() < Duration::from_millis(1500), "{:?}", start.elapsed());
+}
+
+#[test]
+fn a_tls_server_sending_a_byte_at_a_time_hits_the_request_deadline() {
+    // each byte comes well within the per-read timeout, but one record of
+    // the reply takes seconds to arrive
+    let f = serve_tls_dribbling(Arc::new(|_: &Req| Some(reply(200, &[], &[b'x'; 200]))), Duration::from_millis(20));
+    let c = Client::new(Config {
+        trust: TrustSource::Anchors(vec![CA.to_vec()]),
+        io_timeout: Duration::from_secs(2),
+        request_timeout: Duration::from_millis(600),
+        ..Config::default()
+    });
+    let start = Instant::now();
+    assert_eq!(c.fetch(&request("GET", &f.https("/"))), Err(NetError::Deadline));
+    assert!(start.elapsed() < Duration::from_millis(1500), "{:?}", start.elapsed());
+}
+
+#[test]
+fn an_upload_the_server_never_reads_hits_the_request_deadline() {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/", l.local_addr().unwrap());
+    std::thread::spawn(move || {
+        let (s, _) = l.accept().unwrap();
+        std::thread::sleep(Duration::from_secs(10));
+        drop(s);
+    });
+    let c = Client::new(Config {
+        io_timeout: Duration::from_secs(3),
+        request_timeout: Duration::from_millis(500),
+        ..Config::default()
+    });
+    let mut r = request("POST", &url);
+    r.body = Some(vec![b'u'; 16 << 20]);
+    let start = Instant::now();
+    assert_eq!(c.fetch(&r), Err(NetError::Deadline));
     assert!(start.elapsed() < Duration::from_millis(1500), "{:?}", start.elapsed());
 }
 

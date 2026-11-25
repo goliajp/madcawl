@@ -168,7 +168,10 @@ impl Frame {
         w.write_all(&out)
     }
 
-    /// Reads one frame; `None` at a clean end of the stream.
+    /// Reads one frame; `None` at a clean end of the stream. The length
+    /// is the peer's word, so the buffer grows with the bytes that arrive
+    /// rather than being reserved up front, and the largest field keeps
+    /// that buffer instead of being copied out of it.
     pub fn read_from(r: &mut impl Read) -> io::Result<Option<Frame>> {
         let mut head = [0u8; 4];
         match r.read_exact(&mut head) {
@@ -180,36 +183,70 @@ impl Frame {
         if !(2..=MAX_FRAME).contains(&len) {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "frame length out of range"));
         }
-        // the length is the peer's word: grow with the bytes that arrive
-        // instead of reserving all of it up front
         let mut body = Vec::new();
-        (&mut *r).take(len as u64).read_to_end(&mut body)?;
-        if body.len() != len {
-            return Err(io::ErrorKind::UnexpectedEof.into());
+        while body.len() < len {
+            let at = body.len();
+            // doubling, but taking the rest at once when it is less than
+            // two steps, so the last growth is not a small one
+            let step = at.max(64 << 10);
+            let want = if len - at <= 2 * step { len - at } else { step };
+            body.reserve_exact(want);
+            body.resize(at + want, 0);
+            let n = match r.read(&mut body[at..]) {
+                Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+                Ok(n) => n,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => 0,
+                Err(e) => return Err(e),
+            };
+            body.truncate(at + n);
         }
-        let fields = fields(&body[2..]).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{e:?}")))?;
-        Ok(Some(Frame { kind: u16::from_le_bytes([body[0], body[1]]), fields }))
+        let kind = u16::from_le_bytes([body[0], body[1]]);
+        let spans = spans(&body, 2).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{e:?}")))?;
+        let largest = (0..spans.len()).max_by_key(|&i| spans[i].2 - spans[i].1);
+        let mut fields: Vec<(u8, Vec<u8>)> = spans
+            .iter()
+            .enumerate()
+            .map(|(i, &(t, from, to))| (t, if Some(i) == largest { Vec::new() } else { body[from..to].to_vec() }))
+            .collect();
+        if let Some(i) = largest {
+            let (_, from, to) = spans[i];
+            body.truncate(to);
+            body.drain(..from);
+            body.shrink_to_fit();
+            fields[i].1 = body;
+        }
+        Ok(Some(Frame { kind, fields }))
+    }
+
+    /// Takes out the first field with `tag`, without copying it.
+    pub fn take(&mut self, tag: u8) -> Option<Vec<u8>> {
+        let i = self.fields.iter().position(|(t, _)| *t == tag)?;
+        Some(self.fields.remove(i).1)
     }
 }
 
-fn fields(body: &[u8]) -> Result<Vec<(u8, Vec<u8>)>, FrameError> {
+/// Each field of `b` from `at` on: its tag and where its bytes are.
+fn spans(b: &[u8], mut at: usize) -> Result<Vec<(u8, usize, usize)>, FrameError> {
     let mut out = Vec::new();
-    let mut at = 0;
-    while at < body.len() {
+    while at < b.len() {
         if out.len() == MAX_FIELDS {
             return Err(FrameError::Malformed);
         }
-        let tag = body[at];
-        let (n, used) = get_varint(&body[at + 1..]).ok_or(FrameError::Malformed)?;
+        let tag = b[at];
+        let (n, used) = get_varint(&b[at + 1..]).ok_or(FrameError::Malformed)?;
         let from = at + 1 + used;
         let to = from
             .checked_add(usize::try_from(n).map_err(|_| FrameError::Malformed)?)
-            .filter(|&t| t <= body.len())
+            .filter(|&t| t <= b.len())
             .ok_or(FrameError::Malformed)?;
-        out.push((tag, body[from..to].to_vec()));
+        out.push((tag, from, to));
         at = to;
     }
     Ok(out)
+}
+
+fn fields(body: &[u8]) -> Result<Vec<(u8, Vec<u8>)>, FrameError> {
+    Ok(spans(body, 0)?.into_iter().map(|(t, from, to)| (t, body[from..to].to_vec())).collect())
 }
 
 #[cfg(test)]
