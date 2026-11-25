@@ -37,6 +37,7 @@ use madcawl_text::{Paragraph, Shaper};
 pub use au::{Au, Point, Rect, Size};
 pub use cx::{Counters, Space};
 pub use fragment::{Child, FragKind, Fragment};
+pub use inline::{InlineText, TextItem, TextSeg};
 pub use tree::{BoxTree, MAX_DEPTH};
 
 use cx::Cx;

@@ -248,4 +248,16 @@ impl Fonts {
     pub fn fallback_stats(&self) -> (usize, u64) {
         (self.fallbacks.len(), self.fallbacks.evictions)
     }
+
+    /// Calls `f` with the face at `size` pixels as a `CTFontRef`, which stays alive for the call, to draw
+    /// glyphs a shaped word holds.
+    pub fn with_ct_font<R>(
+        &mut self,
+        face: FaceId,
+        size: f32,
+        f: impl FnOnce(*const std::ffi::c_void) -> R,
+    ) -> R {
+        let font = self.instance(face, size);
+        f(font.get())
+    }
 }

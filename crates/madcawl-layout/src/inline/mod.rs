@@ -4,6 +4,7 @@
 
 mod collect;
 mod line;
+mod painting;
 mod pieces;
 
 use std::ops::Range;
@@ -19,6 +20,7 @@ use crate::fragment::Child;
 use crate::style::Edges;
 
 pub use collect::{Ifc, ItemKind};
+pub use painting::{InlineText, TextItem, TextSeg};
 
 /// The lines of an inline formatting context.
 pub struct Lines {
