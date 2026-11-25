@@ -28,6 +28,14 @@ const LENGTH_ONLY: Accept = Accept {
 /// already handled.
 pub(crate) fn parse(p: Prop, src: &str, xs: &[Item]) -> Option<Specified> {
     use Prop as P;
+    match p {
+        P::Content => return super::generated::parse_content(src, xs),
+        P::AspectRatio => return super::generated::parse_aspect_ratio(src, xs),
+        _ => {}
+    }
+    if let Some(v) = grid_or_table(p, src, xs) {
+        return v;
+    }
     if let Some(v) = multi(p, src, xs) {
         return Some(v);
     }
@@ -109,8 +117,86 @@ pub(crate) fn parse(p: Prop, src: &str, xs: &[Item]) -> Option<Specified> {
             Some(w) => Specified::VAlign(VerticalAlign::from_keyword(w)?),
             None => Specified::Len(parse_len(src, x, ANY)?),
         },
-        P::Display => return None,
+        P::Display | P::Content | P::AspectRatio => return None,
+        _ => unreachable!("{p:?} parsed above"),
     })
+}
+
+/// The value of a grid or table property, `None` for the other properties.
+fn grid_or_table(p: Prop, src: &str, xs: &[Item]) -> Option<Option<Specified>> {
+    use super::grid_parse as g;
+    use Prop as P;
+    let kw = || match xs {
+        [x] => x.ident(src),
+        _ => None,
+    };
+    Some(match p {
+        P::GridTemplateColumns | P::GridTemplateRows => g::template(src, xs),
+        P::GridTemplateAreas => g::areas(src, xs),
+        P::GridAutoColumns | P::GridAutoRows => g::auto_tracks(src, xs),
+        P::GridAutoFlow => g::auto_flow(src, xs).map(Specified::AutoFlow),
+        P::GridRowStart | P::GridRowEnd | P::GridColumnStart | P::GridColumnEnd => {
+            g::line(src, xs).map(Specified::GridLine)
+        }
+        P::JustifyItems | P::JustifySelf => justify(p, src, xs),
+        P::TableLayout => kw()
+            .as_deref()
+            .and_then(TableLayout::from_keyword)
+            .map(Specified::TableLayout),
+        P::BorderCollapse => kw()
+            .as_deref()
+            .and_then(BorderCollapse::from_keyword)
+            .map(Specified::BorderCollapse),
+        P::CaptionSide => kw()
+            .as_deref()
+            .and_then(CaptionSide::from_keyword)
+            .map(Specified::CaptionSide),
+        P::BorderSpacing => {
+            let l: Option<Vec<_>> = xs.iter().map(|x| parse_len(src, x, LENGTH_ONLY)).collect();
+            match l.as_deref() {
+                Some([a]) => Some(Specified::Spacing(a.clone(), a.clone())),
+                Some([a, b]) => Some(Specified::Spacing(a.clone(), b.clone())),
+                _ => None,
+            }
+        }
+        _ => return None,
+    })
+}
+
+// `justify-items` and `justify-self`: the keywords of `align-self` and `left` and `right`, `legacy` as
+// `normal`
+fn justify(p: Prop, src: &str, xs: &[Item]) -> Option<Specified> {
+    let ws: Option<Vec<String>> = xs.iter().map(|x| x.ident(src)).collect();
+    let ws = ws?;
+    let w: Vec<&str> = ws.iter().map(String::as_str).collect();
+    let one = |k: &str| {
+        let a = match k {
+            "legacy" if p == Prop::JustifyItems => Align::Normal,
+            _ => Align::from_keyword(k)?,
+        };
+        use Align as A;
+        let bad = matches!(a, A::SpaceBetween | A::SpaceAround | A::SpaceEvenly)
+            || a == A::Auto && p == Prop::JustifyItems;
+        (!bad).then_some(Specified::Align(a))
+    };
+    match &w[..] {
+        [k] => one(k),
+        ["first", "baseline"] => Some(Specified::Align(Align::Baseline)),
+        ["last", "baseline"] => Some(Specified::Align(Align::LastBaseline)),
+        // `legacy` only changes what descendants inherit, which is not kept: the box aligns as the keyword
+        ["legacy", k @ ("left" | "right" | "center")] | [k @ ("left" | "right" | "center"), "legacy"]
+            if p == Prop::JustifyItems =>
+        {
+            Align::from_keyword(k).map(Specified::Align)
+        }
+        ["safe" | "unsafe", k] => match one(k)? {
+            Specified::Align(Align::Normal | Align::Stretch | Align::Auto | Align::Baseline) => {
+                None
+            }
+            v => Some(v),
+        },
+        _ => None,
+    }
 }
 
 /// The values of more than one item.

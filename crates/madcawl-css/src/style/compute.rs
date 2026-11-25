@@ -57,6 +57,8 @@ pub(crate) struct Run<'r, 'a> {
     pub hint: Option<String>,
     pub hinted: HashMap<String, Box<[Decl]>>,
     pub candidates: Vec<u32>,
+    /// The `::before` and `::after` rules an element may match
+    pub pseudo_candidates: Vec<u32>,
     pub matched: Vec<(Key, bool, Src)>,
     pub device: Device,
     /// Look elements up by `PathKey`
@@ -84,12 +86,14 @@ impl<'r, 'a> Run<'r, 'a> {
                 quirks: prep.quirks,
                 places: Default::default(),
                 states,
+                pseudo: Default::default(),
             },
             prep,
             inline: HashMap::new(),
             hint: None,
             hinted: HashMap::new(),
             candidates: Vec::new(),
+            pseudo_candidates: Vec::new(),
             matched: Vec::new(),
             device,
             path_key: true,
@@ -120,19 +124,7 @@ impl<'r, 'a> Run<'r, 'a> {
     /// highest first.
     pub(crate) fn collect(&mut self, el: NodeId) {
         self.matched.clear();
-        let rules = self.m.rules;
-        for &c in &self.candidates {
-            let e = &rules.entries[c as usize];
-            if !self.m.entry(e, el) {
-                continue;
-            }
-            let origin = rules.sheets[e.sheet as usize].origin as u32;
-            let layer = self.prep.ranks[e.layer as usize];
-            for important in [false, true] {
-                let k = Key::new(origin, important, false, layer, e.spec, e.order);
-                self.matched.push((k, important, Src::Block(e.block)));
-            }
-        }
+        self.rule_matches(el);
         if let Some(style) = self.m.dom.attribute(el, atom!("style")) {
             let style = text(style);
             if !self.inline.contains_key(&*style) {
@@ -155,6 +147,22 @@ impl<'r, 'a> Run<'r, 'a> {
         }
         self.matched
             .sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
+    }
+
+    pub(crate) fn rule_matches(&mut self, el: NodeId) {
+        let rules = self.m.rules;
+        for &c in &self.candidates {
+            let e = &rules.entries[c as usize];
+            if !self.m.entry(e, el) {
+                continue;
+            }
+            let origin = rules.sheets[e.sheet as usize].origin as u32;
+            let layer = self.prep.ranks[e.layer as usize];
+            for important in [false, true] {
+                let k = Key::new(origin, important, false, layer, e.spec, e.order);
+                self.matched.push((k, important, Src::Block(e.block)));
+            }
+        }
     }
 
     /// The value `d` declares for `p` once `var()` in it is substituted;
@@ -190,6 +198,22 @@ impl<'r, 'a> Run<'r, 'a> {
         parent: Option<NodeId>,
         out: &mut Styles,
     ) -> ComputedStyle {
+        let (mut s, set) = self.values(el, parent, self.m.is_root(el), out);
+        out.customs[el.index() as usize] = set;
+        self.adjust(&mut s, el, out);
+        s
+    }
+
+    /// The computed values of what `matched` holds for `el`, under
+    /// `parent`, before the changes CSS Display makes; and its custom
+    /// property set.
+    pub(crate) fn values(
+        &self,
+        el: NodeId,
+        parent: Option<NodeId>,
+        root: bool,
+        out: &mut Styles,
+    ) -> (ComputedStyle, u32) {
         let initial = ComputedStyle::initial();
         let Cascaded { won, customs, .. } = {
             let from = parent.and_then(|p| out.get(p)).unwrap_or(initial);
@@ -197,10 +221,9 @@ impl<'r, 'a> Run<'r, 'a> {
         };
         let parent_set = parent.map_or(NONE, |p| out.customs[p.index() as usize]);
         let set = out.memo.element_set(&mut out.sets, parent_set, &customs);
-        out.customs[el.index() as usize] = set;
         let from = parent.and_then(|p| out.get(p)).unwrap_or(initial);
         let mut s = ComputedStyle::inheriting(from);
-        let cx = self.cx(out, self.m.is_root(el));
+        let cx = self.cx(out, root);
         for &p in Prop::ALL {
             let v = match won[p as usize] {
                 Some(d) if d.value == Specified::Unresolved => {
@@ -225,8 +248,7 @@ impl<'r, 'a> Run<'r, 'a> {
             }
         }
         fix_up(&mut s);
-        self.adjust(&mut s, el, out);
-        s
+        (s, set)
     }
 
     fn cx(&self, out: &Styles, root: bool) -> Cx {

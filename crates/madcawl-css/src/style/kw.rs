@@ -229,3 +229,18 @@ keywords!(
         Content = "content",
     }
 );
+
+keywords!(TableLayout {
+    Auto = "auto",
+    Fixed = "fixed",
+});
+
+keywords!(BorderCollapse {
+    Separate = "separate",
+    Collapse = "collapse",
+});
+
+keywords!(CaptionSide {
+    Top = "top",
+    Bottom = "bottom",
+});

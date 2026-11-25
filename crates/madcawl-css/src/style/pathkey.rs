@@ -20,6 +20,7 @@ use madcawl_dom::NodeId;
 use madcawl_str::atom;
 
 use super::Styles;
+use super::before_after::PseudoMemo;
 use super::compute::Run;
 use super::features::name_key;
 use super::hints::hints;
@@ -42,9 +43,10 @@ pub(crate) struct PathKeys {
     /// The bytes the keys of `sigs` and `texts` hold
     held: usize,
     keys: HashMap<(u32, u32), u32>,
-    /// By key: the style's place in the table and the custom property
-    /// set, once an element with the key has been styled in full
-    cache: Vec<Option<(u32, u32)>>,
+    /// By key, once an element with the key has been styled in full:
+    /// the style's place in the table, the custom property set, and what
+    /// it leaves about its pseudo-elements
+    cache: Vec<Option<(u32, u32, PseudoMemo)>>,
 }
 
 impl PathKeys {
@@ -157,13 +159,15 @@ impl Run<'_, '_> {
 
     /// Style `el`, its parent already styled: by its `PathKey` when an
     /// element with the same key was styled before, in full otherwise.
-    /// Whether its values, custom properties or flags changed.
-    pub(crate) fn style_one(&mut self, el: NodeId, out: &mut Styles) -> bool {
+    /// Whether its values, custom properties or flags changed, and whether its `::before` or `::after`
+    /// values did.
+    pub(crate) fn style_one(&mut self, el: NodeId, out: &mut Styles) -> (bool, bool) {
         let i = el.index() as usize;
         out.grow(i);
         let parent = self.m.parent_element(el);
         self.candidates(el);
         let before = (out.of[i], out.flags[i], out.customs[i]);
+        let pseudo_before = out.pseudos.get(&el.index()).copied();
         let pkey = parent.map_or(ROOT, |p| out.keys[p.index() as usize]);
         let sig = self.own_sig(el, &mut out.pk);
         let key = out.pk.key(pkey, sig);
@@ -174,7 +178,7 @@ impl Run<'_, '_> {
         } else {
             None
         };
-        if let Some((k, set)) = hit {
+        if let Some((k, set, _)) = hit {
             // a hit substitutes nothing, so it spends none of the
             // `var()` budget: the budget bounds substitution work, and an
             // element with the key paid for it when it was styled in full
@@ -189,9 +193,6 @@ impl Run<'_, '_> {
             let s = self.element(el, parent, out);
             let k = out.intern(s);
             out.of[i] = k + 1;
-            if self.path_key {
-                out.pk.cache[key as usize] = Some((k, out.customs[i]));
-            }
         }
         let s = &out.table[out.of[i] as usize - 1];
         if self.m.is_root(el) {
@@ -203,7 +204,19 @@ impl Run<'_, '_> {
                 .flags_below(p, out.get(p), out.flags[p.index() as usize], el)
         });
         out.flags[i] = above | self.m.own_flags(el, display);
-        before != (out.of[i], out.flags[i], out.customs[i])
+        match hit {
+            Some((_, _, memo)) => self.pseudos_by_key(el, memo, out),
+            None => {
+                let memo = self.pseudos_memo(el, out);
+                if self.path_key {
+                    out.pk.cache[key as usize] = Some((out.of[i] - 1, out.customs[i], memo));
+                }
+            }
+        }
+        (
+            before != (out.of[i], out.flags[i], out.customs[i]),
+            pseudo_before != out.pseudos.get(&el.index()).copied(),
+        )
     }
 
     /// Style `el` in full and compare with what its key gave; the budget

@@ -1,6 +1,7 @@
 //! The shorthands of the computed longhands: which longhands each sets,
 //! and their values from the shorthand's.
 
+mod grid;
 mod parts;
 
 use super::fonts::font_shorthand;
@@ -40,6 +41,11 @@ pub enum Short {
     WhiteSpace,
     /// `text-wrap`: only its mode is computed
     TextWrap,
+    GridTemplate,
+    Grid,
+    /// `grid-row` (`true`) and `grid-column`
+    GridLines(bool),
+    GridArea,
 }
 
 pub(crate) fn by_name(name: &str) -> Option<Short> {
@@ -74,6 +80,11 @@ pub(crate) fn by_name(name: &str) -> Option<Short> {
         "place-self" => S::PlaceSelf,
         "white-space" => S::WhiteSpace,
         "text-wrap" => S::TextWrap,
+        "grid-template" => S::GridTemplate,
+        "grid" => S::Grid,
+        "grid-row" => S::GridLines(true),
+        "grid-column" => S::GridLines(false),
+        "grid-area" => S::GridArea,
         _ => {
             let (group, rest) = name.split_once('-')?;
             let (dir, part) = rest.split_once('-').unwrap_or((rest, ""));
@@ -157,12 +168,45 @@ pub(crate) fn longhands(sh: Short) -> Vec<What> {
             .map(What::Prop)
             .into(),
         Short::PlaceContent => [P::AlignContent, P::JustifyContent].map(What::Prop).into(),
-        Short::PlaceItems => vec![What::Prop(P::AlignItems)],
-        Short::PlaceSelf => vec![What::Prop(P::AlignSelf)],
+        Short::PlaceItems => [P::AlignItems, P::JustifyItems].map(What::Prop).into(),
+        Short::PlaceSelf => [P::AlignSelf, P::JustifySelf].map(What::Prop).into(),
         Short::WhiteSpace => [P::WhiteSpaceCollapse, P::TextWrapMode]
             .map(What::Prop)
             .into(),
         Short::TextWrap => vec![What::Prop(P::TextWrapMode)],
+        Short::GridTemplate => [
+            P::GridTemplateRows,
+            P::GridTemplateColumns,
+            P::GridTemplateAreas,
+        ]
+        .map(What::Prop)
+        .into(),
+        Short::Grid => [
+            P::GridTemplateRows,
+            P::GridTemplateColumns,
+            P::GridTemplateAreas,
+            P::GridAutoRows,
+            P::GridAutoColumns,
+            P::GridAutoFlow,
+        ]
+        .map(What::Prop)
+        .into(),
+        Short::GridLines(row) => {
+            let (s, e) = if row {
+                (P::GridRowStart, P::GridRowEnd)
+            } else {
+                (P::GridColumnStart, P::GridColumnEnd)
+            };
+            [s, e].map(What::Prop).into()
+        }
+        Short::GridArea => [
+            P::GridRowStart,
+            P::GridColumnStart,
+            P::GridRowEnd,
+            P::GridColumnEnd,
+        ]
+        .map(What::Prop)
+        .into(),
     }
 }
 
@@ -175,6 +219,16 @@ pub(crate) fn parse(sh: Short, src: &str, xs: &[Item]) -> Option<Vec<(What, Spec
 
 pub(super) fn one(p: Prop, src: &str, x: &Item) -> Option<Specified> {
     longhand::parse(p, src, std::slice::from_ref(x))
+}
+
+// `place-items` and `place-self`: the align value is the first words that parse as one, the justify value
+// the rest, or the same words when nothing is left
+fn place(pa: Prop, pj: Prop, src: &str, xs: &[Item]) -> Option<Vec<Specified>> {
+    (1..=xs.len()).find_map(|k| {
+        let a = longhand::parse(pa, src, &xs[..k])?;
+        let rest = if k == xs.len() { &xs[..k] } else { &xs[k..] };
+        Some(vec![a, longhand::parse(pj, src, rest)?])
+    })
 }
 
 fn values(sh: Short, src: &str, xs: &[Item]) -> Option<Vec<Specified>> {
@@ -248,15 +302,13 @@ fn values(sh: Short, src: &str, xs: &[Item]) -> Option<Vec<Specified>> {
             ],
             _ => return None,
         },
-        Short::PlaceItems => match xs {
-            [a] | [a, _] => vec![one(P::AlignItems, src, a)?],
-            _ => return None,
-        },
+        Short::PlaceItems => place(P::AlignItems, P::JustifyItems, src, xs)?,
         Short::WhiteSpace => white_space(src, xs)?,
         Short::TextWrap => text_wrap(src, xs)?,
-        Short::PlaceSelf => match xs {
-            [a] | [a, _] => vec![one(P::AlignSelf, src, a)?],
-            _ => return None,
-        },
+        Short::PlaceSelf => place(P::AlignSelf, P::JustifySelf, src, xs)?,
+        Short::GridTemplate => grid::grid_template(src, xs)?,
+        Short::Grid => grid::grid(src, xs)?,
+        Short::GridLines(_) => grid::line_pair(src, xs)?,
+        Short::GridArea => grid::area(src, xs)?,
     })
 }

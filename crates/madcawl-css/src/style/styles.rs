@@ -53,6 +53,11 @@ pub struct Styles {
     pub(crate) generation: u64,
     pub(crate) quirks: bool,
     pub(crate) stats: StyleStats,
+    /// By element node index, 1 + the index in `table` of its `::before` and `::after` values, 0 for none
+    pub(crate) pseudos: HashMap<u32, [u32; 2]>,
+    /// Pseudo-element values by what decides them; restyles add to it, and one finding it past twice the
+    /// document's nodes starts over in full
+    pub(crate) pseudo_memo: HashMap<super::before_after::PseudoKey, Option<u32>>,
 }
 
 impl Styles {
@@ -91,6 +96,21 @@ impl Styles {
     /// names and signatures.
     pub fn path_key_bytes(&self) -> usize {
         self.pk.held()
+    }
+
+    pub(crate) fn drop_pseudos(&mut self, el: NodeId) {
+        self.pseudos.remove(&el.index());
+    }
+
+    pub(crate) fn set_pseudo(&mut self, el: NodeId, which: usize, k: u32) {
+        self.pseudos.entry(el.index()).or_default()[which] = k + 1;
+    }
+
+    /// The computed values of an element's `::before` (`after` false) or `::after`, when it generates a
+    /// box.
+    pub fn pseudo(&self, n: NodeId, after: bool) -> Option<&ComputedStyle> {
+        let k = self.pseudos.get(&n.index())?[usize::from(after)];
+        (k != 0).then(|| &self.table[k as usize - 1])
     }
 
     /// The computed values of an element in the document.

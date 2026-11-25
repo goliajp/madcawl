@@ -28,6 +28,8 @@ pub(crate) struct Matcher<'r, 'a> {
     /// of them
     pub places: RefCell<Vec<Place>>,
     pub states: &'r ElementStates,
+    /// The pseudo-element of the element being matched for, if any: a selector naming it matches it
+    pub pseudo: std::cell::Cell<Option<crate::selector::PseudoElement>>,
 }
 
 /// An element's position among its siblings, from 1: from the first,
@@ -44,58 +46,6 @@ pub(crate) fn text(s: &DomString) -> Cow<'_, str> {
         }
     }
 }
-
-/// HTML attributes whose values selectors compare ASCII
-/// case-insensitively on HTML elements (HTML, "case-sensitivity of
-/// selectors"), sorted.
-const CASELESS: &[&str] = &[
-    "accept",
-    "accept-charset",
-    "align",
-    "alink",
-    "axis",
-    "bgcolor",
-    "charset",
-    "checked",
-    "clear",
-    "codetype",
-    "color",
-    "compact",
-    "declare",
-    "defer",
-    "dir",
-    "direction",
-    "disabled",
-    "enctype",
-    "face",
-    "frame",
-    "hreflang",
-    "http-equiv",
-    "lang",
-    "language",
-    "link",
-    "media",
-    "method",
-    "multiple",
-    "nohref",
-    "noresize",
-    "noshade",
-    "nowrap",
-    "readonly",
-    "rel",
-    "rev",
-    "rules",
-    "scope",
-    "scrolling",
-    "selected",
-    "shape",
-    "target",
-    "text",
-    "type",
-    "valign",
-    "valuetype",
-    "vlink",
-];
 
 impl Matcher<'_, '_> {
     pub fn entry(&self, e: &Entry<'_>, el: NodeId) -> bool {
@@ -265,7 +215,7 @@ impl Matcher<'_, '_> {
             Component::Has(l) => self.has(k, l, el, parent),
             Component::Lang(ranges) => self.lang(k, ranges, el),
             Component::Dir(d) => self.dir(el) == *d,
-            Component::PseudoElement(_) => false,
+            Component::PseudoElement(e) => self.pseudo.get() == Some(*e),
             Component::Nesting => self.parent_matches(k, parent, el),
             Component::Combinator(_) => unreachable!("compounds hold no combinator"),
         }
@@ -291,7 +241,7 @@ impl Matcher<'_, '_> {
                 CaseFlag::Sensitive => false,
                 CaseFlag::Default => {
                     html && at.ns == AttrNamespace::None
-                        && CASELESS.binary_search(&self.name(k, a.lower)).is_ok()
+                        && super::caseless::CASELESS.binary_search(&self.name(k, a.lower)).is_ok()
                 }
             };
             value_matches(op, &text(at.value), self.name(k, val), caseless)

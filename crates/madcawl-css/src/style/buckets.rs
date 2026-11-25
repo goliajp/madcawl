@@ -8,9 +8,11 @@ use std::collections::HashMap;
 use madcawl_dom::{Dom, NodeId};
 use madcawl_str::atom;
 
-use crate::selector::Component;
+use crate::selector::{Component, PseudoElement};
 
 use super::caseless::{caseless_hash, words};
+use super::decls::What;
+use super::props::Prop;
 use super::rules::{Rules, Sel};
 
 /// Ids and classes are keyed by their atom, or in quirks mode, where
@@ -23,6 +25,8 @@ pub(crate) struct Buckets {
     class: HashMap<u64, Vec<u32>>,
     local: HashMap<u32, Vec<u32>>,
     any: Vec<u32>,
+    /// By rule, for the pseudo-element buckets, 1 for a `::before` rule and 2 for an `::after` one
+    pub kinds: Vec<u8>,
 }
 
 enum Key {
@@ -34,8 +38,19 @@ enum Key {
     Never,
 }
 
+/// Whether the block of rule `i` declares `content`.
+pub fn declares_content(rules: &Rules<'_>, i: usize) -> bool {
+    let block = rules.entries[i].block;
+    rules.blocks[block as usize]
+        .get()
+        .iter()
+        .any(|d| d.what == What::Prop(Prop::Content))
+}
+
 impl Buckets {
-    pub fn build(rules: &Rules<'_>, quirks: bool) -> Buckets {
+    /// The buckets of the rules for elements, or with `pseudo` of those for `::before` and `::after`; of
+    /// those `keep` gives true for.
+    pub fn build(rules: &Rules<'_>, quirks: bool, pseudo: bool, keep: impl Fn(usize) -> bool) -> Buckets {
         let mut b = Buckets {
             quirks,
             ..Buckets::default()
@@ -51,10 +66,19 @@ impl Buckets {
                 }
             };
             let mut key = Key::Any;
+            let mut generated = false;
             if let Sel::Complex(c) = e.sel {
                 for comp in c.comps {
                     let k = match comp {
                         Component::Combinator(_) => break,
+                        Component::PseudoElement(
+                            e @ (PseudoElement::Before | PseudoElement::After),
+                        ) if pseudo => {
+                            generated = true;
+                            b.kinds.resize(rules.entries.len(), 0);
+                            b.kinds[i] = 1 + u8::from(*e == PseudoElement::After);
+                            continue;
+                        }
                         Component::PseudoElement(_) => Key::Never,
                         Component::Id(n) => Key::Id(key_of(*n)),
                         Component::Class(n) if !matches!(key, Key::Id(_)) => Key::Class(key_of(*n)),
@@ -70,6 +94,9 @@ impl Buckets {
                 }
             }
             let i = i as u32;
+            if pseudo && !generated || !keep(i as usize) {
+                key = Key::Never;
+            }
             match key {
                 Key::Id(a) => b.id.entry(a).or_default().push(i),
                 Key::Class(a) => b.class.entry(a).or_default().push(i),
@@ -84,6 +111,10 @@ impl Buckets {
             }
         }
         b
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.id.is_empty() && self.class.is_empty() && self.local.is_empty() && self.any.is_empty()
     }
 
     /// The rules `el` may match, each once, in no particular order.

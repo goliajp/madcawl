@@ -43,6 +43,7 @@ macro_rules! keywords {
     };
 }
 
+mod before_after;
 mod buckets;
 mod calc;
 mod caseless;
@@ -55,6 +56,9 @@ mod decls;
 mod device;
 mod features;
 mod fonts;
+mod generated;
+pub mod grid;
+mod grid_parse;
 mod hints;
 mod initial;
 mod kw;
@@ -73,6 +77,7 @@ mod pseudo;
 mod render;
 mod resolve;
 mod resolve_box;
+mod resolve_grid;
 mod restyle;
 mod roots;
 mod rules;
@@ -103,6 +108,7 @@ pub use computed::{
 };
 pub use device::Device;
 pub use features::Tier;
+pub use generated::{AspectRatio, Content, ContentItem};
 pub use kw::*;
 pub use length::{Form, Lp, to_fixed};
 pub use media::matches_media;

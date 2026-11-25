@@ -122,7 +122,8 @@ impl Cascade<'_> {
     /// `changes`, with the elements in the states `states` gives. Styles
     /// made by another cascade or in another quirks mode, or whose
     /// `PathKey` tables have grown past twice the document in keys or in
-    /// bytes, are made again in full.
+    /// bytes, or whose pseudo-element memo past twice its nodes, are made
+    /// again in full.
     pub fn restyle(
         &self,
         dom: &Dom,
@@ -136,7 +137,8 @@ impl Cascade<'_> {
         // document many times over
         let held = 2 * dom.bytes() + (1 << 20);
         let stale = styles.generation != self.generation || styles.quirks != super::is_quirks(dom);
-        if stale || styles.path_keys() > bound || styles.path_key_bytes() > held {
+        let memo = styles.pseudo_memo.len() > bound;
+        if stale || memo || styles.path_keys() > bound || styles.path_key_bytes() > held {
             return self.full(dom, styles, states);
         }
         let mut run = self.run(dom, states);
@@ -187,11 +189,14 @@ impl Cascade<'_> {
                 if seen.is_some_and(|s| s >= mode) || !dom.is_connected(n) {
                     continue;
                 }
-                let changed = seen.is_none() && {
+                let (changed, pseudo) = if seen.is_none() {
                     r.styled += 1;
                     run.style_one(n, styles)
+                } else {
+                    (false, false)
                 };
-                r.changed += u64::from(changed);
+                // a pseudo-element's values reach no child's
+                r.changed += u64::from(changed || pseudo);
                 done.insert(n, mode);
                 let child = match mode {
                     Mode::Subtree => Some(Mode::Subtree),

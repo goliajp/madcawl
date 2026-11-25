@@ -263,6 +263,7 @@ hr {
 table {
   box-sizing: border-box;
   text-indent: initial;
+  border-spacing: 2px;
 }
 
 thead, tbody, tfoot, tr {

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::Span;
 use crate::tokenizer::Kind;
 
+use super::grid::{Areas, AutoFlow, GridLine, TrackList, TrackSize};
 use super::kw::*;
 use super::length::SpecLen;
 use super::vals::items;
@@ -61,6 +62,8 @@ props! {
     Display = "display", false;
     Visibility = "visibility", true;
     ContentVisibility = "content-visibility", false;
+    Content = "content", false;
+    AspectRatio = "aspect-ratio", false;
     Opacity = "opacity", false;
     Position = "position", false;
     Float = "float", false;
@@ -122,6 +125,22 @@ props! {
     RowGap = "row-gap", false;
     ColumnGap = "column-gap", false;
     VerticalAlign = "vertical-align", false;
+    GridTemplateColumns = "grid-template-columns", false;
+    GridTemplateRows = "grid-template-rows", false;
+    GridTemplateAreas = "grid-template-areas", false;
+    GridAutoColumns = "grid-auto-columns", false;
+    GridAutoRows = "grid-auto-rows", false;
+    GridAutoFlow = "grid-auto-flow", false;
+    GridRowStart = "grid-row-start", false;
+    GridRowEnd = "grid-row-end", false;
+    GridColumnStart = "grid-column-start", false;
+    GridColumnEnd = "grid-column-end", false;
+    JustifyItems = "justify-items", false;
+    JustifySelf = "justify-self", false;
+    TableLayout = "table-layout", false;
+    BorderCollapse = "border-collapse", true;
+    BorderSpacing = "border-spacing", true;
+    CaptionSide = "caption-side", true;
 }
 
 pub const PROPS: usize = Prop::ALL.len();
@@ -200,6 +219,19 @@ pub enum Specified {
     Family(Arc<str>),
     FontSize(FontSize),
     Weight(Weight),
+    Content(super::generated::Content),
+    AspectRatio(super::generated::AspectRatio),
+    /// `grid-template-rows` and `grid-template-columns`; `None` is `none`
+    Tracks(Option<TrackList<SpecLen>>),
+    AutoTracks(Arc<[TrackSize<SpecLen>]>),
+    Areas(Option<Arc<Areas>>),
+    GridLine(GridLine),
+    AutoFlow(AutoFlow),
+    /// `border-spacing`: horizontal, vertical
+    Spacing(SpecLen, SpecLen),
+    TableLayout(TableLayout),
+    BorderCollapse(BorderCollapse),
+    CaptionSide(CaptionSide),
     /// Holds `var()`, substituted at computed-value time; the text is
     /// the declaration's `raw`
     Unresolved,

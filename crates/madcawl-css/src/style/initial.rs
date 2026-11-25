@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use super::computed::*;
+use super::grid::{AutoFlow, Breadth, GridLine, TrackSize};
 use super::kw::*;
 use super::length::Lp;
 use super::props::Prop;
@@ -38,6 +39,9 @@ pub(crate) fn initial() -> ComputedStyle {
             list_style_type: ListStyleType::Disc,
             list_style_position: ListStylePosition::Outside,
             text_indent: Lp::ZERO,
+            border_collapse: BorderCollapse::Separate,
+            border_spacing: [0; 2],
+            caption_side: CaptionSide::Top,
         }),
         boxm: Arc::new(BoxModel {
             margin: [Size::Lp(Lp::ZERO); 4],
@@ -70,6 +74,8 @@ pub(crate) fn initial() -> ComputedStyle {
             flex_shrink: 1.0f32.to_bits(),
             flex_basis: AUTO,
             order: 0,
+            content: super::generated::Content::Normal,
+            aspect_ratio: super::generated::AspectRatio::AUTO,
             justify_content: Align::Normal,
             align_items: Align::Normal,
             align_self: Align::Auto,
@@ -77,6 +83,16 @@ pub(crate) fn initial() -> ComputedStyle {
             row_gap: None,
             column_gap: None,
             vertical_align: VAlign::Kw(VerticalAlign::Baseline),
+            grid_template_columns: None,
+            grid_template_rows: None,
+            grid_template_areas: None,
+            grid_auto_columns: [TrackSize::One(Breadth::Auto)].into(),
+            grid_auto_rows: [TrackSize::One(Breadth::Auto)].into(),
+            grid_auto_flow: AutoFlow::NORMAL,
+            grid_lines: std::array::from_fn(|_| GridLine::Auto),
+            justify_items: Align::Normal,
+            justify_self: Align::Auto,
+            table_layout: TableLayout::Auto,
         }),
     }
 }
@@ -161,6 +177,8 @@ impl ComputedStyle {
             FlexShrink => rare.flex_shrink,
             FlexBasis => rare.flex_basis,
             Order => rare.order,
+            Content => rare.content,
+            AspectRatio => rare.aspect_ratio,
             JustifyContent => rare.justify_content,
             AlignItems => rare.align_items,
             AlignSelf => rare.align_self,
@@ -168,6 +186,22 @@ impl ComputedStyle {
             RowGap => rare.row_gap,
             ColumnGap => rare.column_gap,
             VerticalAlign => rare.vertical_align,
+            GridTemplateColumns => rare.grid_template_columns,
+            GridTemplateRows => rare.grid_template_rows,
+            GridTemplateAreas => rare.grid_template_areas,
+            GridAutoColumns => rare.grid_auto_columns,
+            GridAutoRows => rare.grid_auto_rows,
+            GridAutoFlow => rare.grid_auto_flow,
+            GridRowStart => rare.grid_lines[0],
+            GridColumnStart => rare.grid_lines[1],
+            GridRowEnd => rare.grid_lines[2],
+            GridColumnEnd => rare.grid_lines[3],
+            JustifyItems => rare.justify_items,
+            JustifySelf => rare.justify_self,
+            TableLayout => rare.table_layout,
+            BorderCollapse => text.border_collapse,
+            BorderSpacing => text.border_spacing,
+            CaptionSide => text.caption_side,
         );
         if p == Prop::FontSize && self.font.size_keyword != from.font.size_keyword {
             Arc::make_mut(&mut self.font).size_keyword = from.font.size_keyword;

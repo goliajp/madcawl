@@ -110,6 +110,9 @@ fn margin_like(v: &Specified, l: &Ctx) -> Option<Size> {
 
 fn apply_rare(s: &mut ComputedStyle, p: Prop, v: &Specified, l: &Ctx) -> bool {
     use Prop as P;
+    if let Some(ok) = super::resolve_grid::apply(s, p, v, l) {
+        return ok;
+    }
     let r = Arc::make_mut(&mut s.rare);
     match (p, v) {
         (P::FlexDirection, Specified::FlexDirection(d)) => r.flex_direction = *d,
@@ -121,6 +124,8 @@ fn apply_rare(s: &mut ComputedStyle, p: Prop, v: &Specified, l: &Ctx) -> bool {
             r.flex_basis = x;
         }
         (P::Order, Specified::Integer(n)) => r.order = *n,
+        (P::Content, Specified::Content(c)) => r.content = c.clone(),
+        (P::AspectRatio, Specified::AspectRatio(a)) => r.aspect_ratio = *a,
         (P::JustifyContent, Specified::Align(a)) => r.justify_content = *a,
         (P::AlignItems, Specified::Align(a)) => r.align_items = *a,
         (P::AlignSelf, Specified::Align(a)) => r.align_self = *a,

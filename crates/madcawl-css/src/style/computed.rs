@@ -5,6 +5,7 @@
 
 use std::sync::{Arc, OnceLock};
 
+use super::grid::{Areas, AutoFlow, GridLine, TrackList, TrackSize};
 use super::kw::*;
 use super::length::Lp;
 use super::values::{ContentVisibility, Display, Float, Position, Visibility};
@@ -84,6 +85,10 @@ pub struct Text {
     pub list_style_type: ListStyleType,
     pub list_style_position: ListStylePosition,
     pub text_indent: Lp,
+    pub border_collapse: BorderCollapse,
+    /// Horizontal and vertical, 1/64 px
+    pub border_spacing: [i32; 2],
+    pub caption_side: CaptionSide,
 }
 
 /// The box model: sides in the order top, right, bottom, left.
@@ -132,6 +137,8 @@ pub struct Rare {
     pub flex_shrink: u32,
     pub flex_basis: Size,
     pub order: i32,
+    pub content: super::generated::Content,
+    pub aspect_ratio: super::generated::AspectRatio,
     pub justify_content: Align,
     pub align_items: Align,
     pub align_self: Align,
@@ -140,6 +147,18 @@ pub struct Rare {
     pub row_gap: Option<Lp>,
     pub column_gap: Option<Lp>,
     pub vertical_align: VAlign,
+    /// `None` is `none`
+    pub grid_template_columns: Option<TrackList<Lp>>,
+    pub grid_template_rows: Option<TrackList<Lp>>,
+    pub grid_template_areas: Option<Arc<Areas>>,
+    pub grid_auto_columns: Arc<[TrackSize<Lp>]>,
+    pub grid_auto_rows: Arc<[TrackSize<Lp>]>,
+    pub grid_auto_flow: AutoFlow,
+    /// Row start, column start, row end, column end, as `grid-area` orders them
+    pub grid_lines: [GridLine; 4],
+    pub justify_items: Align,
+    pub justify_self: Align,
+    pub table_layout: TableLayout,
 }
 
 /// One element's computed values. The ones that decide whether it is

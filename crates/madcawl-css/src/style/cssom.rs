@@ -167,6 +167,8 @@ impl ComputedStyle {
             P::Order => {
                 let _ = write!(o, "{}", r.order);
             }
+            P::Content => super::generated::serialize_content(&r.content, o),
+            P::AspectRatio => super::generated::serialize_aspect_ratio(r.aspect_ratio, o),
             P::JustifyContent => o.push_str(r.justify_content.css()),
             P::AlignItems => o.push_str(r.align_items.css()),
             P::AlignSelf => o.push_str(r.align_self.css()),
@@ -185,6 +187,58 @@ impl ComputedStyle {
                 VAlign::Kw(k) => o.push_str(k.css()),
                 VAlign::Lp(l) => lp(l, o),
             },
+            _ => self.write_grid_css(p, o),
+        }
+    }
+
+    fn write_grid_css(&self, p: Prop, o: &mut String) {
+        use super::grid::{write_areas, write_entries, write_flow, write_line, write_size};
+        use Prop as P;
+        let (t, r) = (&self.text, &self.rare);
+        let l = |v: &Lp, o: &mut String| lp(v, o);
+        let tracks = |v: &Option<super::grid::TrackList<Lp>>, o: &mut String| match v {
+            Some(t) => write_entries(&t.0, o, &l),
+            None => o.push_str("none"),
+        };
+        let auto = |v: &[super::grid::TrackSize<Lp>], o: &mut String| {
+            for (k, s) in v.iter().enumerate() {
+                if k > 0 {
+                    o.push(' ');
+                }
+                write_size(s, o, &l);
+            }
+        };
+        match p {
+            P::GridTemplateColumns => tracks(&r.grid_template_columns, o),
+            P::GridTemplateRows => tracks(&r.grid_template_rows, o),
+            P::GridTemplateAreas => write_areas(&r.grid_template_areas, o),
+            P::GridAutoColumns => auto(&r.grid_auto_columns, o),
+            P::GridAutoRows => auto(&r.grid_auto_rows, o),
+            P::GridAutoFlow => write_flow(
+                r.grid_auto_flow,
+                matches!(
+                    self.display,
+                    super::values::Display::Grid | super::values::Display::InlineGrid
+                ),
+                o,
+            ),
+            P::GridRowStart => write_line(&r.grid_lines[0], o),
+            P::GridColumnStart => write_line(&r.grid_lines[1], o),
+            P::GridRowEnd => write_line(&r.grid_lines[2], o),
+            P::GridColumnEnd => write_line(&r.grid_lines[3], o),
+            P::JustifyItems => o.push_str(r.justify_items.css()),
+            P::JustifySelf => o.push_str(r.justify_self.css()),
+            P::TableLayout => o.push_str(r.table_layout.css()),
+            P::BorderCollapse => o.push_str(t.border_collapse.css()),
+            P::CaptionSide => o.push_str(t.caption_side.css()),
+            P::BorderSpacing => {
+                px(t.border_spacing[0], o);
+                if t.border_spacing[1] != t.border_spacing[0] {
+                    o.push(' ');
+                    px(t.border_spacing[1], o);
+                }
+            }
+            _ => unreachable!("{p:?} written above"),
         }
     }
 }

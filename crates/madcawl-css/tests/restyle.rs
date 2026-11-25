@@ -232,3 +232,17 @@ fn replacing_a_large_style_attribute_keeps_path_key_bytes_bounded() {
     assert!(fulls > 0);
     assert!(s.path_keys() < 64);
 }
+
+#[test]
+fn an_after_appearing_counts_the_element_as_changed() {
+    let mut dom = parse(
+        "<!doctype html><style>.on::after { content: 'x' }</style><div id=p><b id=a><i></i></b></div>",
+    );
+    let (list, st) = (sheets(&dom), ElementStates::new());
+    let c = Pair::new(&list);
+    let mut s = c.compute_with(&dom, &st);
+    let a = by_id(&dom, "a");
+    let ch = [set(&mut dom, a, atom!("class"), "on")];
+    let r = check(&c, &dom, &mut s, &st, &ch);
+    assert_eq!((r.styled, r.changed, r.full), (1, 1, false));
+}

@@ -129,6 +129,17 @@ fn html(dom: &Dom, el: NodeId, name: Atom, out: &mut String) {
             }
         }
     }
+    // an image's width and height attributes give it the ratio it is laid out at before it loads
+    if is(&[atom!("img")]) {
+        let px = |a| {
+            get(a)
+                .and_then(|v| dimension(&v, false))
+                .and_then(|v| v.strip_suffix("px").map(str::to_owned))
+        };
+        if let (Some(w), Some(h)) = (px(atom!("width")), px(atom!("height"))) {
+            push(out, "aspect-ratio", &format!("auto {w} / {h}"));
+        }
+    }
     let cells = is(&[
         atom!("td"),
         atom!("th"),
@@ -189,6 +200,12 @@ fn html(dom: &Dom, el: NodeId, name: Atom, out: &mut String) {
             _ => {}
         }
     }
+    if is(&[atom!("table")]) {
+        table(&get, out);
+    }
+    if is(&[atom!("td"), atom!("th")]) {
+        cell(dom, el, out);
+    }
     if is(&[atom!("body")])
         && let Some(v) = get(atom!("text"))
         && !v.contains([';', '{', '}', '!'])
@@ -197,6 +214,52 @@ fn html(dom: &Dom, el: NodeId, name: Atom, out: &mut String) {
     }
     if is(&[atom!("font")]) {
         font(&get, out);
+    }
+}
+
+// a non-negative integer, as HTML's attributes for pixel lengths take it
+fn pixels(v: &str) -> Option<u32> {
+    let v = v.trim_start_matches([' ', '\t', '\n', '\x0c', '\r']);
+    let digits: String = v.chars().take_while(char::is_ascii_digit).collect();
+    digits
+        .parse::<u64>()
+        .ok()
+        .map(|n| n.min(u64::from(u16::MAX)) as u32)
+}
+
+fn table_border(v: &str) -> u32 {
+    // present without a number is a 1px border
+    pixels(v).unwrap_or(if v.trim().is_empty() { 1 } else { 0 })
+}
+
+fn table<'d>(get: &dyn Fn(Atom) -> Option<std::borrow::Cow<'d, str>>, out: &mut String) {
+    if let Some(v) = get(atom!("cellspacing")).as_deref().and_then(pixels) {
+        push(out, "border-spacing", &format!("{v}px"));
+    }
+    if let Some(v) = get(atom!("border")) {
+        let w = table_border(&v);
+        push(out, "border-width", &format!("{w}px"));
+        push(out, "border-style", "outset");
+    }
+}
+
+// what the table a cell is in gives it: its padding, and a border when the table has one
+fn cell(dom: &Dom, el: NodeId, out: &mut String) {
+    let mut up = dom.parent(el);
+    for _ in 0..3 {
+        let Some(p) = up else { return };
+        if dom.local_name(p) == Some(atom!("table")) && dom.namespace(p) == Some(Namespace::Html) {
+            let get = |a: Atom| dom.attribute(p, a).map(text);
+            if let Some(v) = get(atom!("cellpadding")).as_deref().and_then(pixels) {
+                push(out, "padding", &format!("{v}px"));
+            }
+            if get(atom!("border")).is_some_and(|v| table_border(&v) > 0) {
+                push(out, "border-width", "1px");
+                push(out, "border-style", "inset");
+            }
+            return;
+        }
+        up = dom.parent(p);
     }
 }
 
