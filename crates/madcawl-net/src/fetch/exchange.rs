@@ -82,7 +82,7 @@ impl Client {
         let mut fields: Vec<(&str, &[u8])> = vec![
             ("Host", host.as_bytes()),
             ("User-Agent", self.config.user_agent.as_bytes()),
-            ("Accept-Encoding", b"gzip, deflate"),
+            ("Accept-Encoding", b"gzip, deflate, br"),
         ];
         if !headers.iter().any(|(n, _)| n.eq_ignore_ascii_case("accept")) {
             fields.push(("Accept", b"*/*"));

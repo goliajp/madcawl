@@ -6,11 +6,14 @@ use torajs_flate::cpu::CpuFeatures;
 use torajs_flate::inflate::Inflate;
 use torajs_flate::{Flush, Format, Status};
 
+mod brotli;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Coding {
     Identity,
     Gzip,
     Deflate,
+    Brotli,
 }
 
 /// The codings of a `Content-Encoding` value in the order they were
@@ -23,6 +26,7 @@ pub fn codings(value: &[u8]) -> Result<Vec<Coding>, NetError> {
             "identity" => Coding::Identity,
             "gzip" | "x-gzip" => Coding::Gzip,
             "deflate" => Coding::Deflate,
+            "br" => Coding::Brotli,
             other => return Err(NetError::Decode(format!("unsupported coding {other}"))),
         });
         if out.len() > 4 {
@@ -65,6 +69,7 @@ impl Decoder {
                 Coding::Identity => None,
                 Coding::Gzip => Some(Stage::new(Some(Format::Gzip), cap)),
                 Coding::Deflate => Some(Stage::new(None, cap)),
+                Coding::Brotli => Some(Stage::brotli(cap)),
             })
             .collect();
         Decoder { stages }
@@ -139,6 +144,7 @@ struct Stage {
     chunk: Vec<u8>,
     produced: usize,
     cap: usize,
+    brotli: Option<Box<madcawl_brotli::Decoder>>,
 }
 
 fn is_zlib(b: &[u8]) -> bool {
@@ -148,7 +154,16 @@ fn is_zlib(b: &[u8]) -> bool {
 impl Stage {
     fn new(format: Option<Format>, cap: usize) -> Self {
         let chunk = vec![0u8; 32 * 1024];
-        let mut s = Stage { state: State::new(), format, pending: Vec::new(), done: false, chunk, produced: 0, cap };
+        let mut s = Stage {
+            state: State::new(),
+            format,
+            pending: Vec::new(),
+            done: false,
+            chunk,
+            produced: 0,
+            cap,
+            brotli: None,
+        };
         if let Some(f) = format {
             s.state.inflate().reset(f, CpuFeatures::compile_time());
         }
@@ -159,6 +174,9 @@ impl Stage {
         // bytes after the end of the stream are ignored
         if self.done {
             return Ok(());
+        }
+        if self.brotli.is_some() {
+            return self.run_brotli(input, finish, emit);
         }
         let sniffed;
         let mut input = input;

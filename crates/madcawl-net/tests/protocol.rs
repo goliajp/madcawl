@@ -63,7 +63,7 @@ fn content_length_and_chunked_bodies() {
     let reqs = f.requests();
     assert_eq!(reqs[0].target, "/a?q=1");
     assert_eq!(reqs[0].header("host").unwrap(), f.addr.to_string());
-    assert_eq!(reqs[0].header("accept-encoding").unwrap(), "gzip, deflate");
+    assert_eq!(reqs[0].header("accept-encoding").unwrap(), "gzip, deflate, br");
     assert_eq!(f.connections(), 1, "the second request reused the connection");
 }
 
@@ -159,20 +159,26 @@ fn redirects_rewrite_methods_and_stop_at_the_cap() {
 }
 
 #[test]
-fn gzip_and_deflate_and_the_bomb_cap() {
+fn gzip_deflate_brotli_and_the_bomb_cap() {
     let text = b"the quick brown fox ".repeat(500);
     let gz = compress(&text, Format::Gzip);
     let zl = compress(&text, Format::Zlib);
     let raw = compress(&text, Format::Raw);
     let bomb = compress(&vec![0u8; 8 << 20], Format::Gzip);
     assert!(bomb.len() < 64 << 10);
+    // 256 KiB and 8 MiB of zeros as brotli streams
+    const BR_ZEROS: [u8; 14] = [0x5f, 0xff, 0xff, 0x83, 0x7f, 0x02, 0x20, 0x1e, 0x0b, 0x04, 0x72, 0xef, 0x07, 0x00];
+    const BR_BOMB: [u8; 14] = [0x9f, 0xff, 0xff, 0x7f, 0xf8, 0x27, 0x00, 0xe2, 0xb1, 0x40, 0x20, 0xf7, 0xfe, 0x0f];
     let f = serve(Arc::new(move |r: &Req| {
         Some(match r.target.as_str() {
             "/gz" => reply(200, &[("Content-Encoding", "gzip")], &gz),
             "/zlib" => reply(200, &[("Content-Encoding", "deflate")], &zl),
             "/raw" => reply(200, &[("Content-Encoding", "deflate")], &raw),
             "/bomb" => reply(200, &[("Content-Encoding", "gzip")], &bomb),
-            "/br" => reply(200, &[("Content-Encoding", "br")], b"x"),
+            "/br" => reply(200, &[("Content-Encoding", "br")], &BR_ZEROS),
+            "/br-bomb" => reply(200, &[("Content-Encoding", "br")], &BR_BOMB),
+            "/br-bad" => reply(200, &[("Content-Encoding", "br")], b"x"),
+            "/zstd" => reply(200, &[("Content-Encoding", "zstd")], b"x"),
             _ => reply(200, &[], &vec![b'x'; 64 << 10]),
         })
     }));
@@ -181,7 +187,10 @@ fn gzip_and_deflate_and_the_bomb_cap() {
         assert_eq!(get(&c, &f.url(p)).unwrap().body, text, "{p}");
     }
     assert_eq!(get(&c, &f.url("/bomb")), Err(NetError::TooLarge("decoded body")));
-    assert!(matches!(get(&c, &f.url("/br")), Err(NetError::Decode(_))));
+    assert_eq!(get(&c, &f.url("/br")).unwrap().body, vec![0u8; 256 << 10]);
+    assert_eq!(get(&c, &f.url("/br-bomb")), Err(NetError::TooLarge("decoded body")));
+    assert!(matches!(get(&c, &f.url("/br-bad")), Err(NetError::Decode(_))));
+    assert!(matches!(get(&c, &f.url("/zstd")), Err(NetError::Decode(_))));
     assert_eq!(get(&c, &f.url("/big")), Err(NetError::TooLarge("response body")));
 }
 

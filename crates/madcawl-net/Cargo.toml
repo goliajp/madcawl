@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 alt-url = { path = "../../../alt/crates/alt-url" }
+madcawl-brotli = { path = "../madcawl-brotli" }
 torajs-flate = { path = "../../../torajs/crates/torajs-flate" }
 torajs-http1 = { path = "../../../torajs/crates/torajs-http1" }
 torajs-tls = { path = "../../../torajs/crates/torajs-tls" }
