@@ -1,0 +1,16 @@
+[package]
+name = "madcawl-mcp"
+description = "An MCP server over stdio that hands an agent's tool calls to a madcawl host as agent protocol frames"
+version.workspace = true
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "madcawl-mcp"
+path = "src/main.rs"
