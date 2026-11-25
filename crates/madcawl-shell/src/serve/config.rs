@@ -29,7 +29,8 @@ pub struct Config {
     /// With no session open for this long, the process exits
     pub exit_idle: Option<Duration>,
     /// Pages may come from the network, through the host's network
-    /// service, in a cookie jar of its own that starts empty
+    /// service, each session's in a cookie jar of the session's own that
+    /// starts empty and is dropped when the session ends
     pub net: bool,
     /// Where downloads go, a directory per session below it
     pub downloads: Option<PathBuf>,
@@ -74,7 +75,7 @@ impl Config {
 pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds>] [--listen-fd N] [--exit-idle <seconds>] [--net] [--downloads <dir>] [--upload-allow <dir>]... [--approve <origin>]...
          pages and their stylesheets open only from below the --allow directories;
          without --allow, only from below the current directory;
-         --net lets pages come from http and https URLs, in a cookie jar that starts empty;
+         --net lets pages come from http and https URLs, each session's in a cookie jar of its own that starts empty and ends with it;
          --downloads saves downloads below <dir>, a directory per session (default <socket>.downloads);
          --upload-allow lets an upload pick files from below <dir>; none, no uploads;
          --approve lets a form with a password field be submitted to <origin> (scheme://host[:port]);

@@ -132,7 +132,7 @@ impl Server {
                 let mut sock = config.socket.clone().into_os_string();
                 sock.push(".net");
                 let d = config.downloads.as_deref().map(|d| (d, config.download_cap, config.download_cap * 4));
-                Some(Arc::new(Net::start(std::path::Path::new(&sock), d)?))
+                Some(Arc::new(Net::start(std::path::Path::new(&sock), d, config.max_sessions)?))
             }
             false => None,
         };

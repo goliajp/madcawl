@@ -92,6 +92,11 @@ impl<'a> Conn<'a> {
             self.log(&p.url, "close-session", ("", ""), &Frame::new(kind::RESULT));
             self.drop_page(p);
         }
+        if let Some(net) = &self.shared.net
+            && let Err(e) = net.end_session(self.id)
+        {
+            eprintln!("madcawl-shell: session {}: dropping its cookies: {e}", self.id);
+        }
     }
 
     /// The answer, unless the session is over its request rate.

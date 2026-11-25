@@ -155,7 +155,7 @@ impl Page {
             return Err("this host does not fetch pages from the network (start it with --net)".into());
         };
         if self.conn.is_none() {
-            self.conn = Some(net.connect().map_err(|e| format!("the network service: {e}"))?);
+            self.conn = Some(net.connect(env.owner).map_err(|e| format!("the network service: {e}"))?);
         }
         let initiator = Url::parse(&self.url).ok().filter(|u| matches!(u.scheme(), "http" | "https"));
         let nav = Navigation {
