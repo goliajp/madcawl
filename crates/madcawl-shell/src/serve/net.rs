@@ -86,7 +86,11 @@ fn read_frame(s: &mut UnixStream, buf: &mut Vec<u8>, deadline: Instant) -> io::R
         if left.is_zero() {
             return Ok(None);
         }
-        s.set_read_timeout(Some(left.max(Duration::from_millis(1))))?;
+        match s.set_read_timeout(Some(left.max(Duration::from_millis(1)))) {
+            // macos rejects it once the peer has closed; read without waiting
+            Err(e) if e.kind() == io::ErrorKind::InvalidInput => s.set_nonblocking(true)?,
+            r => r?,
+        }
         let mut chunk = [0u8; 64 << 10];
         match s.read(&mut chunk) {
             Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
@@ -214,10 +218,13 @@ mod tests {
     #[test]
     fn a_late_reply_does_not_answer_the_next_request() {
         let (host, mut peer) = UnixStream::pair().unwrap();
-        let mut c = Control::new(host, Duration::from_millis(200)).unwrap();
+        let mut c = Control::new(host, Duration::from_secs(1)).unwrap();
+        let (timed_out_tx, timed_out_rx) = std::sync::mpsc::channel();
+        // the peer answers the first request only once it has timed out,
+        // so the test holds however slowly either thread is scheduled
         let slow = std::thread::spawn(move || {
             let first = Frame::read_from(&mut peer).unwrap().unwrap();
-            std::thread::sleep(Duration::from_millis(400));
+            timed_out_rx.recv().unwrap();
             let late = Frame::new(kind::REGISTERED).num(tag::ID, first.get_num(tag::ID).unwrap()).bytes(tag::TOKEN, b"session-x-token!");
             late.write_to(&mut peer).unwrap();
             let second = Frame::read_from(&mut peer).unwrap().unwrap();
@@ -227,11 +234,21 @@ mod tests {
         let reg = || Frame::new(kind::REGISTER).num(tag::NAVIGATION, 1).num(tag::ID, 1);
         let timed_out = c.request(reg()).unwrap_err();
         assert_eq!(timed_out.kind(), io::ErrorKind::TimedOut);
-        // the first reply arrives while the second request waits
-        std::thread::sleep(Duration::from_millis(300));
+        timed_out_tx.send(()).unwrap();
+        // the late reply is on the stream ahead of the second one
         let r = c.request(reg()).unwrap();
         assert_eq!(r.field(tag::TOKEN), Some(&b"session-y-token!"[..]));
         slow.join().unwrap();
+    }
+
+    #[test]
+    fn a_reply_written_just_before_the_service_closed_is_read() {
+        let (mut host, mut peer) = UnixStream::pair().unwrap();
+        Frame::new(kind::REGISTERED).num(tag::ID, 7).write_to(&mut peer).unwrap();
+        drop(peer);
+        let mut buf = Vec::new();
+        let f = read_frame(&mut host, &mut buf, Instant::now() + Duration::from_secs(1)).unwrap().unwrap();
+        assert_eq!(f.get_num(tag::ID), Some(7));
     }
 
     #[test]
