@@ -7,6 +7,7 @@ use madcawl_dom::{Dom, NodeId, NodeKind};
 
 use super::computed::ComputedStyle;
 use super::custom::{self, Memo};
+use super::intern::Interner;
 use super::pathkey::PathKeys;
 use super::rules;
 use super::values::{ContentVisibility, Visibility};
@@ -41,7 +42,7 @@ pub struct Styles {
     pub(crate) of: Vec<u32>,
     pub(crate) flags: Vec<u8>,
     pub(crate) table: Vec<ComputedStyle>,
-    pub(crate) interned: HashMap<ComputedStyle, u32>,
+    pub(crate) interned: Interner,
     /// By node index, the element's custom property set
     pub(crate) customs: Vec<u32>,
     pub(crate) sets: Vec<custom::CustomSet>,
@@ -95,13 +96,7 @@ impl Styles {
 
     /// The place of `s` in the table, the same for equal values.
     pub(crate) fn intern(&mut self, s: ComputedStyle) -> u32 {
-        if let Some(&k) = self.interned.get(&s) {
-            return k;
-        }
-        let k = self.table.len() as u32;
-        self.table.push(s.clone());
-        self.interned.insert(s, k);
-        k
+        self.interned.intern(&mut self.table, s)
     }
 
     /// Changes whenever these styles are made or restyled: a reader that

@@ -63,6 +63,7 @@ pub mod grid;
 mod grid_parse;
 mod hints;
 mod initial;
+mod intern;
 mod keys;
 mod kw;
 mod layers;
