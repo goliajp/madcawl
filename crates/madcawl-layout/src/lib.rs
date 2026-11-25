@@ -20,12 +20,15 @@ mod cx;
 mod flex;
 mod float;
 mod fragment;
+mod grid;
 mod inline;
 mod intrinsic;
 mod position;
 mod replaced;
 mod sizing;
+mod sticky;
 mod style;
+mod table;
 pub mod tree;
 
 use std::collections::HashMap;
@@ -65,6 +68,7 @@ pub struct Layout<'d> {
     counters: Counters,
     runs: u64,
     reuse: bool,
+    scale: f32,
 }
 
 impl<'d> Layout<'d> {
@@ -84,7 +88,16 @@ impl<'d> Layout<'d> {
             counters: Counters::default(),
             runs: 0,
             reuse: true,
+            scale: 1.0,
         }
+    }
+
+    /// The same at `scale` device pixels per CSS px, which lengths WebKit draws in whole device pixels
+    /// round to.
+    pub fn with_scale(mut self, scale: f32) -> Self {
+        self.scale = scale;
+        self.state = None;
+        self
     }
 
     /// How many times the document has been laid out.
@@ -157,16 +170,27 @@ impl<'d> Layout<'d> {
             excl: &mut Vec::new(),
             counters: &mut self.counters,
             reuse: self.reuse,
+            scale: self.scale,
         };
         let space = Space::new(self.viewport.w, Some(self.viewport.h));
         let r = block::layout(&mut cx, root, space);
-        st.root = Some(Child {
+        let mut placed = Child {
             offset: Point {
                 x: r.ml,
                 y: r.mt.resolve(),
             },
             frag: r.frag,
-        });
+        };
+        if st.tree.sticky {
+            let port = Rect {
+                x: Au::ZERO,
+                y: Au::ZERO,
+                w: self.viewport.w,
+                h: self.viewport.h,
+            };
+            placed = sticky::apply(self.styles, self.scale, placed, port);
+        }
+        st.root = Some(placed);
         st.rects = None;
     }
 

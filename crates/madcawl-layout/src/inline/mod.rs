@@ -6,6 +6,7 @@ mod collect;
 mod line;
 mod painting;
 mod pieces;
+mod shift;
 
 use std::ops::Range;
 
@@ -17,7 +18,6 @@ use crate::au::{Au, Point};
 use crate::block;
 use crate::cx::{Cx, Laid, Space};
 use crate::fragment::Child;
-use crate::style::Edges;
 
 pub use collect::{Ifc, ItemKind};
 pub use painting::{InlineText, TextItem, TextSeg};
@@ -110,7 +110,7 @@ fn float(
 ) -> Child {
     let r = block::layout(cx, f, inner);
     let s = cx.style(f);
-    let e = Edges::of(s, inner.width);
+    let e = cx.edges(s, inner.width);
     let w = r.ml + r.frag.size.w + r.mr;
     let h = e.m(0) + r.frag.size.h + e.m(2);
     let left = s.float != Float::Right;
@@ -184,6 +184,7 @@ pub fn layout(cx: &mut Cx, b: u32, inner: Space, at: Point) -> Lines {
         floats.push(float(cx, f, (inner, at, lb.y()), &mut fstatics));
     }
     let mut out = lb.finish();
+    shift::place_in_inlines(cx, b, &mut out, inner.width);
     out.lines.extend(floats);
     out.statics.extend(fstatics);
     out

@@ -13,7 +13,8 @@ use crate::cx::{Cx, Laid, Space};
 use crate::fragment::{Child, FragKind, Fragment};
 
 use super::pieces::positions;
-use crate::style::{Edges, FontInfo, line_height, lp};
+use super::shift::{valign_shift, vbox};
+use crate::style::line_height;
 
 /// An inline box's vertical metrics: its baseline's shift from the root's, the extent of its line height
 /// above and below that baseline, and of its content area plus borders and padding.
@@ -30,6 +31,10 @@ pub(super) struct VBox {
     pub(super) bp_bottom: Au,
     /// It has inline margins, borders or padding: a line with it is not empty
     pub(super) edged: bool,
+    /// Its relative offset and its ancestors'
+    pub(super) rel: Point,
+    /// The nearest box around it or itself aligned with the line's top (true) or bottom
+    pub(super) edge: Option<(usize, bool)>,
 }
 
 pub struct Builder<'i> {
@@ -51,36 +56,8 @@ pub struct Builder<'i> {
     pub(super) active: Vec<usize>,
     /// The next out-of-flow box no line has reached
     pub(super) next_abs: usize,
-}
-
-fn half_leading(f: &FontInfo, lh: Au) -> (Au, Au) {
-    let lead = lh - (f.ascent + f.descent);
-    let top = lead.half();
-    (f.ascent + top, f.descent + (lead - top))
-}
-
-// the baseline shift `vertical-align` gives a box in a parent of font size `parent`, `lh` being its own
-// line height
-pub(super) fn valign_shift(v: VAlign, parent: f32, lh: Au) -> Au {
-    match v {
-        VAlign::Lp(l) => -lp(l, lh),
-        VAlign::Kw(VerticalAlign::Sub) => Au::from_px((parent / 5.0 + 1.0).floor()),
-        VAlign::Kw(VerticalAlign::Super) => -Au::from_px((parent / 3.0 + 1.0).floor()),
-        VAlign::Kw(_) => Au::ZERO,
-    }
-}
-
-fn vbox(f: &FontInfo, lh: Au) -> VBox {
-    let (above, below) = half_leading(f, lh);
-    VBox {
-        above,
-        below,
-        asc: f.ascent,
-        desc: f.descent,
-        size: f.size,
-        x_height: f.x_height,
-        ..VBox::default()
-    }
+    /// By box, how far the current line moves it to the line's top or bottom
+    pub(super) edge_dy: Vec<Au>,
 }
 
 impl<'i> Builder<'i> {
@@ -101,12 +78,20 @@ impl<'i> Builder<'i> {
             let s = cx.style(ib.b);
             let f = cx.font(ib.b);
             let lh = line_height(s, &f);
-            let e = Edges::of(s, inner.width);
+            let e = cx.edges(s, inner.width);
+            let edge = match s.rare.vertical_align {
+                VAlign::Kw(VerticalAlign::Top) => Some((k, true)),
+                VAlign::Kw(VerticalAlign::Bottom) => Some((k, false)),
+                _ => pv.edge,
+            };
+            let cb = Space::new(inner.width, None);
             boxes.push(VBox {
                 shift: pv.shift + valign_shift(s.rare.vertical_align, pv.size, lh),
                 bp_top: e.bp(0),
                 bp_bottom: e.bp(2),
                 edged: ib.start.0 + ib.start.1 + ib.end.0 + ib.end.1 != Au::ZERO,
+                rel: pv.rel + crate::position::relative_offset(s, cb, true),
+                edge,
                 ..vbox(&f, lh)
             });
             index.insert(ib.b, k);
@@ -137,6 +122,7 @@ impl<'i> Builder<'i> {
             next_box: 0,
             active: Vec::new(),
             next_abs: 0,
+            edge_dy: vec![Au::ZERO; ifc.boxes.len()],
         }
     }
 
@@ -181,8 +167,10 @@ impl<'i> Builder<'i> {
         let (on_line, empties) = self.boxes_on(cx, span.clone(), last_line);
         for &k in on_line.iter().chain(&empties) {
             let v = self.boxes[k];
-            top = top.min(v.shift - v.above);
-            bottom = bottom.max(v.shift + v.below);
+            if v.edge.is_none() {
+                top = top.min(v.shift - v.above);
+                bottom = bottom.max(v.shift + v.below);
+            }
             filled |= v.edged;
         }
         let mut atomics = Vec::new();
@@ -197,6 +185,7 @@ impl<'i> Builder<'i> {
                     match cx.style(self.ifc.items[s.item].b).rare.vertical_align {
                         VAlign::Kw(VerticalAlign::Top) => edge.push((atomics.len(), h, true)),
                         VAlign::Kw(VerticalAlign::Bottom) => edge.push((atomics.len(), h, false)),
+                        _ if self.item_aligned(s.item) => {}
                         _ => {
                             top = top.min(t);
                             bottom = bottom.max(t + h);
@@ -207,7 +196,14 @@ impl<'i> Builder<'i> {
                 }
                 ItemKind::Break => filled = true,
                 ItemKind::Text => {
-                    filled |= s.kind == SegKind::Text || self.ifc.items[s.item].preserve
+                    filled |= s.kind == SegKind::Text || self.ifc.items[s.item].preserve;
+                    if let Some((a, d)) = s.fallback
+                        && !self.item_aligned(s.item)
+                    {
+                        let shift = self.item_shift[s.item];
+                        top = top.min(shift - a);
+                        bottom = bottom.max(shift + d);
+                    }
                 }
             }
         }
@@ -221,6 +217,8 @@ impl<'i> Builder<'i> {
                 top = top.min(bottom - h);
             }
         }
+        let all: Vec<usize> = on_line.iter().chain(&empties).copied().collect();
+        self.align_edges(&all, &mut top, &mut bottom);
         for &(a, h, at_top) in &edge {
             atomics[a].2 = if at_top { top } else { bottom - h };
         }
@@ -240,10 +238,13 @@ impl<'i> Builder<'i> {
             let laid = self.laid[item]
                 .as_ref()
                 .expect("an atomic item is laid out");
-            let mt = Edges::of(cx.style(self.ifc.items[item].b), self.inner.width).m(0);
+            let mt = cx
+                .edges(cx.style(self.ifc.items[item].b), self.inner.width)
+                .m(0);
+            let off = self.item_off(item);
             let offset = Point {
-                x: xs[k].1 + laid.ml,
-                y: baseline + t + mt,
+                x: xs[k].1 + laid.ml + off.x,
+                y: baseline + t + mt + off.y,
             };
             let st = laid.statics.iter().map(|&(a, p)| (a, p + offset + line_at));
             self.out.statics.extend(st);
@@ -264,6 +265,7 @@ impl<'i> Builder<'i> {
             },
             frag: Fragment::new(FragKind::Line, None, size, kids),
         });
+        self.reset_edges(&all);
         self.out.baseline = Some(self.y + baseline);
         self.y += height;
     }

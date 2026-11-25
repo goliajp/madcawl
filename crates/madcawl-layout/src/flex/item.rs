@@ -72,7 +72,7 @@ fn base_size(cx: &mut Cx, it: &Item, s: &ComputedStyle, is_row: bool, inner: Spa
 pub(super) fn item(cx: &mut Cx, b: u32, is_row: bool, inner: Space, fit: bool) -> Item {
     let s = item_style(cx, b);
     let e = if cx.has_edges(b) {
-        Edges::of(s, inner.width)
+        cx.edges(s, inner.width)
     } else {
         Edges::default()
     };
@@ -126,10 +126,13 @@ pub(super) fn item(cx: &mut Cx, b: u32, is_row: bool, inner: Space, fit: bool) -
     it.max = size(max, base).map_or(Au::MAX, |v| content_size(s, v, bp));
     it.min = match size(min, base) {
         Some(v) => content_size(s, v, bp),
-        // the automatic minimum: no smaller than its min-content width, unless it scrolls
+        // the automatic minimum: no smaller than its min-content width, unless it scrolls, and no larger than
+        // its specified width or its maximum
         None if is_row && s.place.overflow_x == Overflow::Visible => {
             let lo = intrinsic::content_widths(cx, b, inner.width).0;
-            size(s.boxm.width, base).map_or(lo, |w| lo.min(content_size(s, w, bp)))
+            size(s.boxm.width, base)
+                .map_or(lo, |w| lo.min(content_size(s, w, bp)))
+                .min(it.max)
         }
         None => Au::ZERO,
     };

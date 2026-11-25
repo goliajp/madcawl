@@ -45,7 +45,11 @@ fn element_style<'s>(
     tree: &BoxTree,
     b: u32,
 ) -> Option<&'s ComputedStyle> {
-    let n = tree.get(b).node;
+    let bx = tree.get(b);
+    if bx.pseudo != 0 {
+        return styles.pseudo(bx.node, bx.pseudo == 2);
+    }
+    let n = bx.node;
     let el = if dom.kind(n) == NodeKind::Element {
         Some(n)
     } else {
@@ -90,7 +94,7 @@ fn answers(cx: &Cx, b: u32, have: &Space, laid: &Laid, want: &Space) -> bool {
         return false;
     }
     let e = if cx.has_edges(b) {
-        Edges::of(cx.style(b), have.width)
+        cx.edges(cx.style(b), have.width)
     } else {
         Edges::default()
     };

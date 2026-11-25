@@ -12,8 +12,8 @@ use crate::position;
 
 mod item;
 
-pub use item::{content_widths, is_item};
 use item::{Item, break_into_lines, item, item_style, resolve};
+pub use item::{content_widths, is_item};
 
 /// What a flex container's content came to.
 pub struct Flexed {
@@ -45,8 +45,9 @@ fn align_self(s: &ComputedStyle, parent: &ComputedStyle) -> Align {
     }
 }
 
-/// Lays out the items of flex container `b` in its content box `inner`.
-pub fn layout(cx: &mut Cx, b: u32, inner: Space) -> Flexed {
+/// Lays out the items of flex container `b` in its content box `inner`, whose height has the minimum and
+/// maximum `limits` when it is not definite.
+pub fn layout(cx: &mut Cx, b: u32, inner: Space, limits: (Au, Au)) -> Flexed {
     let s = cx.style(b);
     let is_row = row(s);
     let mut statics = Vec::new();
@@ -115,16 +116,16 @@ pub fn layout(cx: &mut Cx, b: u32, inner: Space) -> Flexed {
         if n > 0 {
             cross_at += cross_gap;
         }
-        let fixed_cross = if single {
-            if is_row {
+        let fixed_cross = single
+            .then_some(if is_row {
                 inner.height
             } else {
                 Some(inner.width)
-            }
-        } else {
-            None
-        };
-        let line_cross = cross_sizes(cx, b, &mut items[line.clone()], is_row, inner, fixed_cross);
+            })
+            .flatten();
+        // a single line is as tall as the container's limits let it be
+        let cross = (fixed_cross, (single && is_row).then_some(limits));
+        let line_cross = cross_sizes(cx, b, &mut items[line.clone()], is_row, inner, cross);
         let at = (avail, main_gap, cross_at, line_cross);
         let placed = (&mut out, &mut statics, &mut baseline);
         place_line(cx, b, &mut items[line], is_row, at, placed);
@@ -156,7 +157,7 @@ fn cross_sizes(
     items: &mut [Item],
     is_row: bool,
     inner: Space,
-    fixed: Option<Au>,
+    (fixed, clamp): (Option<Au>, Option<(Au, Au)>),
 ) -> Au {
     let parent = cx.style(b);
     let mut line = Au::ZERO;
@@ -173,7 +174,10 @@ fn cross_sizes(
         );
         it.laid = Some(r);
     }
-    let line = fixed.unwrap_or(line);
+    let line = fixed.unwrap_or(match clamp {
+        Some((lo, hi)) => line.clamp_lo_hi(lo, hi),
+        None => line,
+    });
     for it in items.iter_mut() {
         let s = item_style(cx, it.b);
         let auto_cross = matches!(
@@ -278,8 +282,9 @@ fn place_line(
         } else {
             Point { x: c, y: m }
         };
+        // the first item's baseline, or one synthesized from its border box bottom
         if baseline.is_none() {
-            *baseline = r.baseline.map(|bl| offset.y + bl);
+            *baseline = Some(offset.y + r.baseline.unwrap_or(r.frag.size.h));
         }
         let rel = position::relative_offset(s, Space::new(avail, None), true);
         let pos = offset + rel;

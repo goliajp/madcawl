@@ -6,11 +6,11 @@ use madcawl_text::Kind as SegKind;
 use super::LineRange;
 use super::collect::ItemKind;
 use super::line::Builder;
-use super::line::valign_shift;
+use super::shift::valign_shift;
 use crate::au::{Au, Point, Size};
 use crate::cx::Cx;
 use crate::fragment::{Child, FragKind, Fragment};
-use crate::style::{Edges, line_height};
+use crate::style::line_height;
 use crate::tree::Kind;
 use madcawl_css::style::{Overflow, VAlign, VerticalAlign};
 
@@ -22,10 +22,12 @@ impl Builder<'_> {
             .expect("an atomic item is laid out");
         let b = self.ifc.items[item].b;
         let s = cx.style(b);
-        let e = Edges::of(s, self.inner.width);
+        let e = cx.edges(s, self.inner.width);
         let h = e.m(0) + r.frag.size.h + e.m(2);
-        let own =
-            cx.tree.get(b).kind == Kind::InlineBlock && s.place.overflow_y == Overflow::Visible;
+        // an inline-block that scrolls takes its bottom margin edge for a baseline; a flex container keeps
+        // its items' whatever its overflow
+        let own = cx.tree.get(b).kind == Kind::InlineBlock
+            && (s.place.overflow_y == Overflow::Visible || crate::flex::is_flex(s));
         let bl = match r.baseline {
             Some(bl) if own => e.m(0) + bl,
             _ => h,
@@ -112,14 +114,18 @@ impl Builder<'_> {
             }
             let it = &self.ifc.items[item];
             let p = self.parent_box(item);
-            let y = baseline + self.item_shift[item] - p.asc;
+            let off = self.item_off(item);
+            let y = baseline + self.item_shift[item] - p.asc + off.y;
             if it.kind == ItemKind::Break {
                 let size = Size {
                     w: Au::ZERO,
                     h: p.asc + p.desc,
                 };
                 kids.push(Child {
-                    offset: Point { x: xs[start].1, y },
+                    offset: Point {
+                        x: xs[start].1 + off.x,
+                        y,
+                    },
                     frag: Fragment::new(FragKind::Box, Some(it.node), size, Vec::new()),
                 });
             }
@@ -132,8 +138,8 @@ impl Builder<'_> {
             };
             kids.push(Child {
                 offset: Point {
-                    x: xs[start].1,
-                    y: baseline + self.item_shift[item] - p.asc,
+                    x: xs[start].1 + off.x,
+                    y,
                 },
                 frag: Fragment::new(FragKind::Text, Some(it.node), size, Vec::new()),
             });
@@ -194,12 +200,13 @@ impl Builder<'_> {
                 w: right - left,
                 h: v.asc + v.desc + v.bp_top + v.bp_bottom,
             };
+            let off = self.box_off(k);
             kids.push(Child {
                 offset: Point {
-                    x: left,
-                    y: baseline + v.shift - v.asc - v.bp_top,
+                    x: left + off.x,
+                    y: baseline + v.shift - v.asc - v.bp_top + off.y,
                 },
-                frag: Fragment::new(FragKind::Box, Some(ib.node), size, Vec::new()),
+                frag: Fragment::new(FragKind::Box, ib.node, size, Vec::new()),
             });
         }
     }
@@ -225,12 +232,13 @@ impl Builder<'_> {
                 w: ib.start.1 + ib.end.1,
                 h: v.asc + v.desc + v.bp_top + v.bp_bottom,
             };
+            let off = self.box_off(k);
             kids.push(Child {
                 offset: Point {
-                    x: x + ib.start.0,
-                    y: baseline + v.shift - v.asc - v.bp_top,
+                    x: x + ib.start.0 + off.x,
+                    y: baseline + v.shift - v.asc - v.bp_top + off.y,
                 },
-                frag: Fragment::new(FragKind::Box, Some(ib.node), size, Vec::new()),
+                frag: Fragment::new(FragKind::Box, ib.node, size, Vec::new()),
             });
         }
     }

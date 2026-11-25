@@ -11,7 +11,6 @@ use madcawl_dom::NodeId;
 
 use crate::au::Au;
 use crate::cx::Cx;
-use crate::style::Edges;
 use crate::tree::{Kind, NONE};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,7 +38,8 @@ pub struct Item {
 #[derive(Clone, Debug)]
 pub struct InlineBox {
     pub b: u32,
-    pub node: NodeId,
+    /// The element its fragments are of; none for a pseudo-element's
+    pub node: Option<NodeId>,
     pub parent: u32,
     pub range: Range<usize>,
     /// The segments it starts and ends in, when it covers any
@@ -61,6 +61,9 @@ pub struct Seg {
     /// Inline-start and inline-end margins, borders and padding of the inline boxes starting and ending here
     pub lead: Au,
     pub trail: Au,
+    /// Above and below the baseline, the most the faces its text falls back to take, when its line height
+    /// is `normal`
+    pub fallback: Option<(Au, Au)>,
 }
 
 #[derive(Default)]
@@ -160,15 +163,25 @@ pub fn collect(cx: &mut Cx, root: u32, out: &mut Ifc) {
                 }
                 out.item(ItemKind::Text, bn, start, parent, wrap);
             }
+            Kind::Generated(i) => {
+                let t = &cx.tree.generated[i as usize];
+                out.push_text(t.iter().copied(), s.text.white_space_collapse);
+                out.item(ItemKind::Text, bn, start, parent, wrap);
+            }
+            // `<wbr>` is a break opportunity with no box: a zero width space
+            Kind::Break if cx.dom.local_name(node) == Some(madcawl_str::atom!("wbr")) => {
+                out.text.push(0x200b);
+                out.item(ItemKind::Text, bn, start, parent, wrap);
+            }
             Kind::Break => {
                 out.text.push(0x0a);
                 out.item(ItemKind::Break, bn, start, parent, wrap);
             }
             Kind::Inline => {
-                let e = Edges::of(s, Au::ZERO);
+                let e = cx.edges(s, Au::ZERO);
                 out.boxes.push(InlineBox {
                     b,
-                    node,
+                    node: cx.frag_node(b),
                     parent,
                     range: start..start,
                     segs: None,
@@ -233,7 +246,15 @@ pub fn shape(cx: &mut Cx, root: u32, ifc: &mut Ifc, atomic: &[Au]) {
             adv,
             lead: Au::ZERO,
             trail: Au::ZERO,
+            fallback: None,
         });
+    }
+    for k in 0..ifc.segs.len() {
+        let it = &ifc.items[ifc.segs[k].item];
+        if it.kind == ItemKind::Text {
+            let shaped = cx.para.segments()[k].shaped.clone();
+            ifc.segs[k].fallback = crate::style::fallback_extent(cx, it.b, shaped);
+        }
     }
     for k in 0..ifc.boxes.len() {
         let r = ifc.boxes[k].range.clone();

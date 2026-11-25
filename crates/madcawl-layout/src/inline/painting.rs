@@ -70,6 +70,7 @@ impl Layout<'_> {
             excl: &mut Vec::new(),
             counters: &mut crate::Counters::default(),
             reuse: self.reuse,
+            scale: self.scale,
         };
         let mut ifc = Ifc::default();
         collect::collect(&mut cx, root, &mut ifc);

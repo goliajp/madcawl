@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use madcawl_dom::NodeId;
 
-use crate::au::{Point, Size};
+use crate::au::{Au, Point, Rect, Size};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FragKind {
@@ -25,6 +25,11 @@ pub struct Fragment {
     pub node: Option<NodeId>,
     pub size: Size,
     pub children: Box<[Child]>,
+    /// It is a scroll container: what overflows it is scrolled to, and reaches nothing above it
+    pub scroller: bool,
+    /// From its corner, its border box and what of its descendants overflows it, a scroll container's
+    /// stopping at their border boxes: for a scroll container, its scrollable overflow area
+    pub overflow: Rect,
 }
 
 #[derive(Clone, Debug)]
@@ -40,12 +45,53 @@ impl Fragment {
         size: Size,
         children: Vec<Child>,
     ) -> Arc<Fragment> {
+        Fragment::with_scroller(kind, node, size, children, false)
+    }
+
+    /// The same for a box that is a scroll container (`scroller`) or not.
+    pub fn with_scroller(
+        kind: FragKind,
+        node: Option<NodeId>,
+        size: Size,
+        children: Vec<Child>,
+        scroller: bool,
+    ) -> Arc<Fragment> {
+        let mut overflow = Rect {
+            x: Au::ZERO,
+            y: Au::ZERO,
+            w: size.w,
+            h: size.h,
+        };
+        for c in &children {
+            let r = c.frag.reach();
+            overflow = overflow.union(Rect {
+                x: r.x + c.offset.x,
+                y: r.y + c.offset.y,
+                ..r
+            });
+        }
         Arc::new(Fragment {
             kind,
             node,
             size,
             children: children.into_boxed_slice(),
+            scroller,
+            overflow,
         })
+    }
+
+    /// What of it its parent's overflow takes: its border box if it scrolls, else its overflow.
+    fn reach(&self) -> Rect {
+        if self.scroller {
+            Rect {
+                x: Au::ZERO,
+                y: Au::ZERO,
+                w: self.size.w,
+                h: self.size.h,
+            }
+        } else {
+            self.overflow
+        }
     }
 
     /// Every fragment below and including this one with its offset from this one's corner, in tree order;

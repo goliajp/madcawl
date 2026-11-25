@@ -1,32 +1,19 @@
 //! Building the box tree from the DOM and the computed values, in one walk with an explicit stack.
 
-use madcawl_css::style::{ComputedStyle, Display, Float, Position, Styles, WhiteSpaceCollapse};
+use madcawl_css::style::{Display, Float, Position, Styles, WhiteSpaceCollapse};
 use madcawl_dom::{Dom, NodeId, NodeKind};
-use madcawl_html::Namespace;
-use madcawl_str::{Atom, atom};
 
+use super::kind::kind_of;
 use super::{BoxNode, BoxTree, Kind, NONE};
 
 /// Elements nested deeper than this generate no boxes of their own, as if `display: contents`: their text
 /// still lays out, and layout, which recurses over the box tree, stays within a bounded depth.
 pub const MAX_DEPTH: usize = 256;
 
-const REPLACED: [Atom; 9] = [
-    atom!("img"),
-    atom!("iframe"),
-    atom!("video"),
-    atom!("canvas"),
-    atom!("embed"),
-    atom!("input"),
-    atom!("textarea"),
-    atom!("select"),
-    atom!("object"),
-];
-
-struct Builder<'a> {
-    dom: &'a Dom,
-    styles: &'a Styles,
-    t: BoxTree,
+pub(super) struct Builder<'a> {
+    pub(super) dom: &'a Dom,
+    pub(super) styles: &'a Styles,
+    pub(super) t: BoxTree,
     /// Where a split inline box's later children go: its next piece
     forward: Vec<u32>,
     /// Whether an anonymous block may take more inline content
@@ -35,45 +22,8 @@ struct Builder<'a> {
     steps: u64,
 }
 
-fn is_html(dom: &Dom, n: NodeId, names: &[Atom]) -> bool {
-    dom.namespace(n) == Some(Namespace::Html)
-        && dom.local_name(n).is_some_and(|l| names.contains(&l))
-}
-
-fn kind_of(dom: &Dom, n: NodeId, s: &ComputedStyle) -> Kind {
-    let inline = {
-        use Display::*;
-        matches!(
-            s.display,
-            Inline
-                | InlineBlock
-                | InlineListItem
-                | InlineTable
-                | InlineFlex
-                | InlineGrid
-                | Ruby
-                | WebkitInlineBox
-        )
-    };
-    let svg_root = dom.namespace(n) == Some(Namespace::Svg)
-        && dom
-            .parent(n)
-            .is_none_or(|p| dom.namespace(p) != Some(Namespace::Svg));
-    if is_html(dom, n, &REPLACED) || svg_root {
-        Kind::Replaced { inline }
-    } else if is_html(dom, n, &[atom!("br")]) {
-        Kind::Break
-    } else if matches!(s.display, Display::Inline | Display::Ruby) {
-        Kind::Inline
-    } else if inline {
-        Kind::InlineBlock
-    } else {
-        Kind::Block
-    }
-}
-
 impl Builder<'_> {
-    fn push(&mut self, kind: Kind, node: NodeId) -> u32 {
+    pub(super) fn push(&mut self, kind: Kind, node: NodeId) -> u32 {
         let i = self.t.boxes.len() as u32;
         self.t.boxes.push(BoxNode {
             kind,
@@ -82,6 +32,7 @@ impl Builder<'_> {
             first: NONE,
             last: NONE,
             next: NONE,
+            pseudo: 0,
         });
         self.t.inline_children.push(false);
         self.forward.push(NONE);
@@ -95,7 +46,7 @@ impl Builder<'_> {
         let b = self.t.boxes[c as usize];
         b.kind.is_inline_level()
             || b.kind == Kind::Block
-                && self.styles.get(b.node).is_some_and(|s| {
+                && self.style_of(c).is_some_and(|s| {
                     s.float != Float::None
                         || matches!(s.position, Position::Absolute | Position::Fixed)
                 })
@@ -165,7 +116,7 @@ impl Builder<'_> {
         self.open_anon[anon as usize] = true;
     }
 
-    fn append(&mut self, p: u32, c: u32) {
+    pub(super) fn append(&mut self, p: u32, c: u32) {
         let p = self.resolve(p);
         let pk = self.t.boxes[p as usize].kind;
         let inline = self.inline_level(c);
@@ -178,11 +129,8 @@ impl Builder<'_> {
         let has_kids = self.t.boxes[p as usize].first != NONE;
         // a flex or grid container's children are all blocks: its items, out-of-flow ones and text in
         // anonymous items
-        let items = pk != Kind::AnonBlock
-            && self
-                .styles
-                .get(self.t.boxes[p as usize].node)
-                .is_some_and(|s| s.display.lays_out_items());
+        let items =
+            pk != Kind::AnonBlock && self.style_of(p).is_some_and(|s| s.display.lays_out_items());
         if items && self.t.boxes[c as usize].kind == Kind::Block {
             let last = self.t.boxes[p as usize].last;
             if last != NONE {
@@ -252,7 +200,8 @@ impl Builder<'_> {
         let Some(s) = self.styles.get(n) else { return };
         let root = p == NONE;
         if !root && (s.display == Display::Contents || depth >= MAX_DEPTH) {
-            stack.push(Frame::new(self.dom, n, p, depth + 1));
+            self.generate(n, p, false);
+            stack.push(Frame::new(self.dom, n, p, depth + 1).with_after(n));
             return;
         }
         let kind = if root {
@@ -261,11 +210,13 @@ impl Builder<'_> {
             kind_of(self.dom, n, s)
         };
         let b = self.push(kind, n);
+        self.t.sticky |= s.position == madcawl_css::style::Position::Sticky;
         if !root {
             self.append(p, b);
         }
         if !matches!(kind, Kind::Replaced { .. } | Kind::Break) {
-            stack.push(Frame::new(self.dom, n, b, depth + 1));
+            self.generate(n, b, false);
+            stack.push(Frame::new(self.dom, n, b, depth + 1).with_after(n));
         }
     }
 }
@@ -274,6 +225,8 @@ struct Frame {
     next: Option<NodeId>,
     parent: u32,
     depth: usize,
+    /// The element whose `::after` comes once its children are done
+    after: Option<NodeId>,
 }
 
 impl Frame {
@@ -282,13 +235,23 @@ impl Frame {
             next: dom.first_child(n),
             parent,
             depth,
+            after: None,
+        }
+    }
+
+    fn with_after(self, n: NodeId) -> Frame {
+        Frame {
+            after: Some(n),
+            ..self
         }
     }
 }
 
 /// The boxes `dom`'s document generates under `styles`.
 pub fn build(dom: &Dom, styles: &Styles) -> BoxTree {
-    run(dom, styles).t
+    let mut t = run(dom, styles).t;
+    crate::table::fix_tree(&mut t, styles);
+    t
 }
 
 fn run<'a>(dom: &'a Dom, styles: &'a Styles) -> Builder<'a> {
@@ -310,6 +273,10 @@ fn run<'a>(dom: &'a Dom, styles: &'a Styles) -> Builder<'a> {
     b.element(root, NONE, 0, &mut stack);
     while let Some(f) = stack.last_mut() {
         let Some(n) = f.next else {
+            if let Some(el) = f.after {
+                let p = f.parent;
+                b.generate(el, p, true);
+            }
             stack.pop();
             continue;
         };

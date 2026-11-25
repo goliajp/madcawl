@@ -49,14 +49,26 @@ fn nested_flex_containers_lay_each_box_out_a_bounded_number_of_times() {
 fn nested_flex_reading_percentages_of_the_height_lays_each_box_out_a_bounded_number_of_times() {
     let cases = [
         ("<div style='display:flex'>", "height:50%"),
-        ("<div style='display:flex;flex-direction:column'>", "height:50%"),
+        (
+            "<div style='display:flex;flex-direction:column'>",
+            "height:50%",
+        ),
         ("<div style='display:flex;min-height:100%'>", ""),
-        ("<div style='display:flex;flex-direction:column;min-height:100%'>", ""),
+        (
+            "<div style='display:flex;flex-direction:column;min-height:100%'>",
+            "",
+        ),
         ("<div style='display:flex;row-gap:1%'>", ""),
-        ("<div style='display:flex;flex-direction:column;min-height:10%'>", ""),
+        (
+            "<div style='display:flex;flex-direction:column;min-height:10%'>",
+            "",
+        ),
     ];
     // the root and body heights definite or not
-    let roots = ["<html style='height:100%'><body style='height:100%'>", "<body>"];
+    let roots = [
+        "<html style='height:100%'><body style='height:100%'>",
+        "<body>",
+    ];
     for ((open, leaf), root) in cases.iter().flat_map(|c| roots.map(|r| (c, r))) {
         let html = |depth: usize| {
             format!(
@@ -66,11 +78,19 @@ fn nested_flex_reading_percentages_of_the_height_lays_each_box_out_a_bounded_num
             )
         };
         same_without_reuse(&html(SHALLOW), 1280.0, 800.0);
+        // twice the depth, about twice the work: no factor per level
+        let laid = |d: usize| counters(&html(d)).laid;
+        let (a, b, c) = (laid(11), laid(22), laid(44));
+        assert!(
+            b <= 5 * a / 2 && c <= 5 * b / 2,
+            "{open} {leaf}: laid {a}, {b}, {c} at depths 11, 22, 44"
+        );
         let depth = 22;
         let c = counters(&html(depth));
         let boxes = depth + 5;
+        // a single line stretched to the container's minimum height lays each item out again at that height
         assert!(
-            c.laid <= 4 * boxes as u64,
+            c.laid <= 10 * boxes as u64,
             "{open} {leaf}: {c:?} for {boxes} boxes"
         );
     }
@@ -112,8 +132,14 @@ fn nested_columns_whose_minimum_is_a_percentage_of_the_height_stay_polynomial() 
     let col = "<div style='display:flex;flex-direction:column;min-height:60%;padding:2px'>";
     let cases = [
         (format!("{col}x"), 1),
-        (format!("{col}<div style='min-height:60%;padding:2px'>x</div>"), 2),
-        (format!("{col}<div style='display:flex;flex-direction:column;min-height:60%'>x</div>"), 2),
+        (
+            format!("{col}<div style='min-height:60%;padding:2px'>x</div>"),
+            2,
+        ),
+        (
+            format!("{col}<div style='display:flex;flex-direction:column;min-height:60%'>x</div>"),
+            2,
+        ),
     ];
     for (open, per_level) in &cases {
         let html = |depth: usize| {
@@ -128,7 +154,10 @@ fn nested_columns_whose_minimum_is_a_percentage_of_the_height_stay_polynomial() 
         let depth = 32;
         let boxes = (per_level * depth + 4) as u64;
         let (half, full) = (counters(&html(depth / 2)).laid, counters(&html(depth)).laid);
-        assert!(full <= boxes * boxes, "{open}: laid {full} for {boxes} boxes");
+        assert!(
+            full <= boxes * boxes,
+            "{open}: laid {full} for {boxes} boxes"
+        );
         // twice the depth: about four times the work, not its square
         assert!(full <= 5 * half, "{open}: laid {half} then {full}");
     }

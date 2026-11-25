@@ -3,8 +3,9 @@
 
 use crate::au::Au;
 use crate::cx::Cx;
-use crate::style::{Edges, content_size, size};
+use crate::style::{content_size, size};
 use crate::tree::Kind;
+use madcawl_css::style::Size as CssSize;
 use crate::{inline, position, replaced};
 
 /// The min-content and max-content widths of the content box of block container `b`.
@@ -12,8 +13,14 @@ pub fn content_widths(cx: &mut Cx, b: u32, cw: Au) -> (Au, Au) {
     if let Some(v) = cx.intrinsic[b as usize] {
         return v;
     }
-    let v = if cx.has_edges(b) && crate::flex::is_flex(cx.style(b)) {
+    let v = if let Kind::Replaced { .. } = cx.tree.get(b).kind {
+        replaced::content_widths(cx, b, cw)
+    } else if cx.has_edges(b) && crate::flex::is_flex(cx.style(b)) {
         crate::flex::content_widths(cx, b, cw)
+    } else if cx.has_edges(b) && crate::grid::is_grid(cx.style(b)) {
+        crate::grid::content_widths(cx, b, cw)
+    } else if crate::table::is_table(cx, b) {
+        crate::table::content_widths(cx, b, cw)
     } else if cx.tree.has_inline_children(b) {
         inline::content_widths(cx, b, cw)
     } else {
@@ -39,22 +46,28 @@ pub fn margin_box_widths(cx: &mut Cx, b: u32, cw: Au) -> (Au, Au) {
         return content_widths(cx, b, cw);
     }
     let s = cx.style(b);
-    let e = Edges::of(s, Au::ZERO);
+    let e = cx.edges(s, Au::ZERO);
     let bp = e.bp_inline();
     let outer = e.m(1) + e.m(3) + bp;
     let fixed = size(s.boxm.width, None).map(|v| content_size(s, v, bp));
-    let (lo, hi) = match (fixed, cx.tree.get(b).kind) {
-        (Some(w), _) => (w, w),
-        (None, Kind::Replaced { .. }) => {
-            let w = replaced::natural_size(cx, b).w;
-            (w, w)
-        }
-        (None, _) => content_widths(cx, b, cw),
+    let replaced = matches!(cx.tree.get(b).kind, Kind::Replaced { .. });
+    let (lo, hi) = match fixed {
+        Some(w) => (w, w),
+        None if replaced => replaced::content_widths(cx, b, cw),
+        None => content_widths(cx, b, cw),
     };
+    let lo = if replaced && compressible(s) { Au::ZERO } else { lo };
     let min = size(s.boxm.min_width, None).map_or(Au::ZERO, |v| content_size(s, v, bp));
     let max = size(s.boxm.max_width, None).map_or(Au::MAX, |v| content_size(s, v, bp));
     (
         lo.clamp_lo_hi(min, max) + outer,
         hi.clamp_lo_hi(min, max) + outer,
     )
+}
+
+// a replaced box sized by a percentage of its container's width can shrink to nothing at min-content
+// (css sizing 3 5.2.2); webkit does the same for a percentage max-width
+fn compressible(s: &madcawl_css::style::ComputedStyle) -> bool {
+    let pct = |v: CssSize| matches!(v, CssSize::Lp(l) if l.has_pct());
+    pct(s.boxm.width) || pct(s.boxm.max_width)
 }

@@ -8,7 +8,7 @@ use crate::fragment::{Child, FragKind, Fragment};
 use crate::sizing::{Inline, used_height, used_width};
 use crate::style::{Edges, new_formatting_context};
 use crate::tree::Kind;
-use crate::{cache, flex, inline, position, replaced};
+use crate::{cache, flex, grid, inline, position, replaced, sizing, table};
 
 /// The block-level box `b` in `space`, or the last result when nothing changed; `at` is where its border box
 /// is in its block formatting context, which floats are placed in.
@@ -27,13 +27,14 @@ pub fn layout_at(cx: &mut Cx, b: u32, space: Space, at: Point) -> Laid {
     let kind = cx.tree.get(b).kind;
     let mut laid = match kind {
         Kind::Replaced { .. } => replaced::layout(cx, b, space),
+        _ if table::is_table(cx, b) => table::layout(cx, b, space),
         _ => block(cx, b, space, at),
     };
     // floats it placed in the formatting context around it are placed again only by laying it out again
     laid.floats |= !no_floats || cx.excl.last().map_or(0, |e| e.len()) > floats_before;
     // an atomic inline's auto margins are zero
     if kind.is_inline_level() || cx.style(b).float != madcawl_css::style::Float::None {
-        let e = Edges::of(cx.style(b), space.width);
+        let e = cx.edges(cx.style(b), space.width);
         (laid.ml, laid.mr) = (e.m(3), e.m(1));
     }
     cache::store(cx, b, space, &laid);
@@ -62,12 +63,14 @@ fn block(cx: &mut Cx, b: u32, space: Space, at: Point) -> Laid {
     let s = cx.style(b);
     let edges = cx.has_edges(b);
     let e = if edges {
-        Edges::of(s, space.width)
+        cx.edges(s, space.width)
     } else {
         Edges::default()
     };
     let root = cx.tree.get(b).parent == crate::tree::NONE;
-    let fc = edges && new_formatting_context(s, root) || flex::is_item(cx, b);
+    let fc = edges && (new_formatting_context(s, root) && !sizing::body_overflow(cx, b, s))
+        || flex::is_item(cx, b)
+        || grid::is_item(cx, b);
     let shrink = cx.tree.get(b).kind == Kind::InlineBlock || position::shrinks(s);
     let iw = if edges {
         used_width(cx, b, s, space, &e, shrink)
@@ -81,7 +84,8 @@ fn block(cx: &mut Cx, b: u32, space: Space, at: Point) -> Laid {
     let (h, min_h, max_h) = if let Some(h) = space.fixed[1] {
         (Some(h), h, h)
     } else if edges {
-        used_height(s, space.height, e.bp_block())
+        let (h, lo, hi) = used_height(s, space.height, e.bp_block());
+        (h.or_else(|| sizing::ratio_height(s, iw.w, &e)), lo, hi)
     } else {
         (None, Au::ZERO, Au::MAX)
     };
@@ -106,7 +110,15 @@ fn block(cx: &mut Cx, b: u32, space: Space, at: Point) -> Laid {
     }
     let absorb_top = !fc && e.bp(0) == Au::ZERO;
     if edges && flex::is_flex(s) {
-        let r = flex::layout(cx, b, inner);
+        let r = flex::layout(cx, b, inner, (min_h, max_h));
+        flow.first = r.children.is_empty();
+        flow.cursor = r.height;
+        flow.baseline = r.baseline.map(|v| v + origin.y);
+        flow.children = r.children;
+        flow.statics = r.statics;
+        from_content(&mut flow, origin);
+    } else if edges && grid::is_grid(s) {
+        let r = grid::layout(cx, b, inner);
         flow.first = r.children.is_empty();
         flow.cursor = r.height;
         flow.baseline = r.baseline.map(|v| v + origin.y);
@@ -150,11 +162,11 @@ fn block(cx: &mut Cx, b: u32, space: Space, at: Point) -> Laid {
         w: iw.w + e.bp_inline(),
         h: ch + e.bp_block(),
     };
-    let node = edges.then(|| cx.tree.get(b).node);
+    let node = if edges { cx.frag_node(b) } else { None };
     let mut kids = flow.children;
     let statics = position::place_absolute(cx, b, size, &e, &mut kids, flow.statics);
     Laid {
-        frag: Fragment::new(FragKind::Box, node, size, kids),
+        frag: Fragment::with_scroller(FragKind::Box, node, size, kids, cx.scroller(b)),
         mt,
         mb,
         ml: iw.ml,
@@ -223,7 +235,7 @@ fn children(
             continue;
         }
         let ce = if edges {
-            Edges::of(cs, inner.width)
+            cx.edges(cs, inner.width)
         } else {
             Edges::default()
         };

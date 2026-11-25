@@ -4,6 +4,8 @@
 //! anonymous blocks, and a block inside an inline box splits the inline box around it.
 
 mod build;
+mod generated;
+mod kind;
 
 use madcawl_dom::NodeId;
 
@@ -24,6 +26,8 @@ pub enum Kind {
     Inline,
     /// The text of a text node
     Text,
+    /// The text a `::before` or `::after` generates, by its index among the tree's generated texts
+    Generated(u32),
     /// `<br>`
     Break,
     /// A replaced element: its contents are not laid out here
@@ -37,6 +41,7 @@ impl Kind {
             Kind::InlineBlock
                 | Kind::Inline
                 | Kind::Text
+                | Kind::Generated(_)
                 | Kind::Break
                 | Kind::Replaced { inline: true }
         )
@@ -57,6 +62,8 @@ pub struct BoxNode {
     pub first: u32,
     pub last: u32,
     pub next: u32,
+    /// 1 for a box of the element's `::before` and the text in it, 2 for `::after`, else 0
+    pub pseudo: u8,
 }
 
 /// The boxes of a document; box 0 is the root element's, if it has one.
@@ -68,6 +75,12 @@ pub struct BoxTree {
     /// Blocks that split inline boxes, with each element whose box they split: its client rectangles
     /// include theirs
     pub(crate) hoisted: Vec<(u32, NodeId)>,
+    /// The anonymous table boxes and what each is
+    pub(crate) table_roles: crate::table::Roles,
+    /// The texts of `Kind::Generated` boxes
+    pub(crate) generated: Vec<Box<[u16]>>,
+    /// Some box is `position: sticky`
+    pub(crate) sticky: bool,
 }
 
 impl BoxTree {

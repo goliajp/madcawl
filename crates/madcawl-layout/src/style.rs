@@ -126,7 +126,8 @@ pub fn line_height(s: &ComputedStyle, f: &FontInfo) -> Au {
     }
 }
 
-// the families of a serialized family list, unquoted, the system font's aliases as `system-ui`, and last
+// the families of a serialized family list, unquoted, the system font's aliases as `system-ui` (`ui-monospace`
+// is its monospaced design), and last
 // the standard font, which WebKit uses when no family of the list is installed
 fn families(list: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -134,7 +135,6 @@ fn families(list: &str) -> Vec<String> {
         let f = f.trim().trim_matches(|c| c == '"' || c == '\'').trim();
         let f = match f.to_ascii_lowercase().as_str() {
             "-apple-system" | "blinkmacsystemfont" | "ui-sans-serif" => "system-ui".to_owned(),
-            "ui-monospace" => "monospace".to_owned(),
             "ui-serif" | "-webkit-standard" | "-webkit-body" => "serif".to_owned(),
             _ => f.to_owned(),
         };
@@ -154,6 +154,8 @@ const ADJUSTED: [&str; 3] = ["Times", "Helvetica", "Courier"];
 #[derive(Default)]
 pub struct FontTable {
     by_group: HashMap<usize, FontInfo>,
+    /// By face and size: the faces of the groups and those text falls back to, at the sizes they are used
+    by_face: HashMap<(FaceId, u32), FontInfo>,
 }
 
 impl FontTable {
@@ -165,8 +167,17 @@ impl FontTable {
         let fams = families(&font.family);
         let refs: Vec<&str> = fams.iter().map(String::as_str).collect();
         let face = fonts.select(&refs, font.weight as f32, font.style != FontStyle::Normal);
+        let info = self.face(fonts, face, font.size());
+        self.by_group.insert(key, info);
+        info
+    }
+
+    /// The metrics of `face` at `size` px.
+    pub fn face(&mut self, fonts: &Fonts, face: FaceId, size: f32) -> FontInfo {
+        if let Some(f) = self.by_face.get(&(face, size.to_bits())) {
+            return *f;
+        }
         let m = fonts.metrics(face);
-        let size = font.size();
         let (mut ascent, descent, gap) = (m.ascent * size, m.descent * size, m.leading * size);
         if ADJUSTED.contains(&fonts.family_name(face)) {
             ascent += ((ascent + descent) * 0.15).round();
@@ -179,7 +190,40 @@ impl FontTable {
             x_height: Au::from_px(m.x_height * size),
             normal: Au::from_px(ascent.round() + descent.round() + gap.round()),
         };
-        self.by_group.insert(key, info);
+        self.by_face.insert((face, size.to_bits()), info);
         info
     }
+}
+
+/// Above and below the baseline, the line height `lh` of text in `f` takes, half the leading each side.
+pub fn half_leading(f: &FontInfo, lh: Au) -> (Au, Au) {
+    let lead = lh - (f.ascent + f.descent);
+    let top = lead.half();
+    (f.ascent + top, f.descent + (lead - top))
+}
+
+// a line with text in a face other than its style's takes that face's normal line height too, as WebKit
+// lays out a line whose line height is `normal`
+pub fn fallback_extent(
+    cx: &mut crate::cx::Cx,
+    b: u32,
+    shaped: Option<std::sync::Arc<madcawl_text::Shaped>>,
+) -> Option<(Au, Au)> {
+    let shaped = shaped?;
+    let f = cx.font(b);
+    if cx.style(b).font.line_height != madcawl_css::style::LineHeight::Normal {
+        return None;
+    }
+    let mut out: Option<(Au, Au)> = None;
+    let mut last = f.face;
+    for g in shaped.glyphs.iter() {
+        if g.face == f.face || g.face == last {
+            continue;
+        }
+        last = g.face;
+        let fi = cx.fonts.face(&cx.shaper.fonts, g.face, f.size);
+        let (a, d) = half_leading(&fi, fi.normal_line_height());
+        out = Some(out.map_or((a, d), |(x, y)| (x.max(a), y.max(d))));
+    }
+    out
 }

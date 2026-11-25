@@ -10,7 +10,7 @@ use madcawl_text::{Paragraph, Shaper};
 use crate::au::{Au, Point, Size};
 use crate::float::Exclusions;
 use crate::fragment::Fragment;
-use crate::style::{FontInfo, FontTable};
+use crate::style::{Edges, FontInfo, FontTable};
 use crate::tree::{BoxTree, Kind};
 
 /// The constraint space a box is laid out in.
@@ -108,6 +108,8 @@ pub struct Cx<'a> {
     pub counters: &'a mut Counters,
     /// Whether a box may be handed its last result instead of being laid out
     pub reuse: bool,
+    /// Device pixels per CSS px
+    pub scale: f32,
 }
 
 /// What a layout did: boxes laid out, how many of them reused the last result, and the float and inline box
@@ -121,9 +123,17 @@ pub struct Counters {
 }
 
 impl<'a> Cx<'a> {
-    /// The computed values a box takes: its element's, or for text and anonymous boxes the parent's.
+    /// The computed values a box takes: its element's, or for text and anonymous boxes the parent's; a
+    /// pseudo-element's own for its box and text.
     pub fn style(&self, b: u32) -> &'a ComputedStyle {
-        let n = self.tree.get(b).node;
+        let bx = self.tree.get(b);
+        if bx.pseudo != 0 {
+            return self
+                .styles
+                .pseudo(bx.node, bx.pseudo == 2)
+                .unwrap_or_else(|| ComputedStyle::initial());
+        }
+        let n = bx.node;
         let el = if self.dom.kind(n) == NodeKind::Element {
             Some(n)
         } else {
@@ -135,11 +145,67 @@ impl<'a> Cx<'a> {
 
     /// Whether the box has a box model of its own: anonymous and text boxes have none.
     pub fn has_edges(&self, b: u32) -> bool {
-        !matches!(self.tree.get(b).kind, Kind::AnonBlock | Kind::Text)
+        !matches!(
+            self.tree.get(b).kind,
+            Kind::AnonBlock | Kind::Text | Kind::Generated(_)
+        )
+    }
+
+    /// Whether the box's `overflow` is the viewport's instead of its own: the root's, and the body's when
+    /// the root's is `visible`.
+    pub fn overflow_propagated(&self, b: u32) -> bool {
+        let bx = self.tree.get(b);
+        if bx.parent == crate::tree::NONE {
+            return true;
+        }
+        let root = self.tree.get(bx.parent);
+        root.parent == crate::tree::NONE
+            && bx.pseudo == 0
+            && self.dom.namespace(bx.node) == Some(madcawl_html::Namespace::Html)
+            && self.dom.local_name(bx.node) == Some(madcawl_str::atom!("body"))
+            && {
+                let rs = self.style(bx.parent);
+                rs.place.overflow_x == madcawl_css::style::Overflow::Visible
+                    && rs.place.overflow_y == madcawl_css::style::Overflow::Visible
+            }
+    }
+
+    /// Whether the box clips or scrolls what overflows it.
+    pub fn scroller(&self, b: u32) -> bool {
+        use madcawl_css::style::Overflow;
+        let s = self.style(b);
+        self.has_edges(b)
+            && (s.place.overflow_x != Overflow::Visible || s.place.overflow_y != Overflow::Visible)
+            && !self.overflow_propagated(b)
+    }
+
+    /// The node a box's fragments are of: none for a pseudo-element's, whose boxes are not its element's.
+    pub fn frag_node(&self, b: u32) -> Option<madcawl_dom::NodeId> {
+        let bx = self.tree.get(b);
+        (bx.pseudo == 0).then_some(bx.node)
+    }
+
+    /// A box's margins, borders and padding against `cw`, its border widths whole device pixels: a border
+    /// narrower than one device pixel takes one, as WebKit draws them.
+    pub fn edges(&self, s: &ComputedStyle, cw: Au) -> Edges {
+        let mut e = Edges::of(s, cw);
+        for b in &mut e.border {
+            *b = device_floor(*b, self.scale);
+        }
+        e
     }
 
     pub fn font(&mut self, b: u32) -> FontInfo {
         let font = self.style(b).font.clone();
         self.fonts.get(&mut self.shaper.fonts, &font)
     }
+}
+
+/// A non-zero length floored to whole device pixels at `scale`, and at least one.
+pub fn device_floor(v: Au, scale: f32) -> Au {
+    if v <= Au::ZERO || scale <= 0.0 {
+        return v;
+    }
+    let dev = (v.px() * scale).floor().max(1.0);
+    Au::from_px(dev / scale)
 }

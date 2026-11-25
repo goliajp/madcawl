@@ -3,7 +3,7 @@
 
 use madcawl_css::style::{ComputedStyle, Float, Position};
 
-use crate::au::{Au, Point, Size};
+use crate::au::{Au, Point, Rect, Size};
 use crate::block;
 use crate::cx::{Cx, Space};
 use crate::fragment::Child;
@@ -70,19 +70,34 @@ pub fn place_absolute(
     {
         return statics;
     }
-    let (cbx, cby) = if root {
-        (Au::ZERO, Au::ZERO)
+    let cb = if root {
+        Rect {
+            x: Au::ZERO,
+            y: Au::ZERO,
+            w: cx.icb.w,
+            h: cx.icb.h,
+        }
     } else {
-        (e.border[3], e.border[0])
+        Rect {
+            x: e.border[3],
+            y: e.border[0],
+            w: size_b.w - e.border[1] - e.border[3],
+            h: size_b.h - e.border[0] - e.border[2],
+        }
     };
-    let (cw, ch) = if root {
-        (cx.icb.w, cx.icb.h)
-    } else {
-        (
-            size_b.w - e.border[1] - e.border[3],
-            size_b.h - e.border[0] - e.border[2],
-        )
-    };
+    place_in(cx, cb, root, kids, statics)
+}
+
+/// Lays out the out-of-flow boxes in `statics` against the containing block `cb`, in the coordinates of
+/// `kids`, which they are added to; the fixed ones, unless `root`, are left for the viewport.
+pub fn place_in(
+    cx: &mut Cx,
+    cb: Rect,
+    root: bool,
+    kids: &mut Vec<Child>,
+    statics: Vec<(u32, Point)>,
+) -> Vec<(u32, Point)> {
+    let (cbx, cby, cw, ch) = (cb.x, cb.y, cb.w, cb.h);
     let (mut pending, mut up, mut k) = (statics, Vec::new(), 0);
     while let Some(&(a, st)) = pending.get(k) {
         k += 1;
@@ -93,7 +108,7 @@ pub fn place_absolute(
             continue;
         }
         let i = &s.place.inset;
-        let me = Edges::of(s, cw);
+        let me = cx.edges(s, cw);
         let mut space = Space::new(cw, Some(ch));
         // `top` and `bottom` both set and no height: the height is what they leave
         if is_auto(s.boxm.height)
