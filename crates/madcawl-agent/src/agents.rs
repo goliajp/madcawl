@@ -2,6 +2,8 @@
 //! of changes, and the semantic tree they share. With no session there
 //! is no tree, no change record in the DOM, nothing allocated.
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use madcawl_dom::{Dom, NodeId};
 
 use crate::refs::{Ref, RefError};
@@ -63,6 +65,9 @@ pub struct Agents {
     sessions: Vec<Session>,
     next: SessionId,
     page_gen: u32,
+    /// Where page generations come from when they are shared with other
+    /// pages; else they count up from this page's own
+    gens: Option<&'static AtomicU32>,
     seq: u64,
     deltas: Vec<(u32, u32, Delta)>,
 }
@@ -72,14 +77,29 @@ impl Agents {
         Agents::default()
     }
 
+    /// Agents whose page generations are drawn from `gens`, which every
+    /// page of a host shares: a reference handed out on one page is then
+    /// stale on every other, not just on this page's later documents.
+    pub fn sharing_generations(gens: &'static AtomicU32) -> Self {
+        Agents { gens: Some(gens), ..Agents::default() }
+    }
+
+    fn next_gen(&mut self) -> u32 {
+        self.page_gen = match self.gens {
+            Some(g) => g.fetch_add(1, Ordering::Relaxed).wrapping_add(1),
+            None => self.page_gen + 1,
+        };
+        self.page_gen
+    }
+
     /// A new session; the first builds the semantic tree.
     pub fn attach(&mut self, dom: &mut Dom, inputs: Inputs) -> Result<SessionId, AgentError> {
         if self.sessions.len() >= MAX_SESSIONS {
             return Err(AgentError::TooManySessions);
         }
         if self.tree.is_none() {
-            self.page_gen += 1;
-            self.tree = Some(SemTree::build(dom, inputs, self.page_gen));
+            let g = self.next_gen();
+            self.tree = Some(SemTree::build(dom, inputs, g));
         }
         self.next += 1;
         self.sessions.push(Session {
@@ -114,8 +134,8 @@ impl Agents {
     /// A new tree under a new page generation: every reference handed out
     /// goes stale, every session's ring starts again.
     fn rebuild(&mut self, dom: &mut Dom, inputs: Inputs) {
-        self.page_gen += 1;
-        self.tree = Some(SemTree::build(dom, inputs, self.page_gen));
+        let g = self.next_gen();
+        self.tree = Some(SemTree::build(dom, inputs, g));
         self.seq += 1;
         for s in &mut self.sessions {
             s.ring = Ring::new(RING_CAP, self.seq);
@@ -128,6 +148,14 @@ impl Agents {
 
     pub fn tree(&self) -> Option<&SemTree> {
         self.tree.as_ref()
+    }
+
+    pub(crate) fn tree_mut(&mut self) -> Option<&mut SemTree> {
+        self.tree.as_mut()
+    }
+
+    pub(crate) fn has_session(&self, id: SessionId) -> bool {
+        self.sessions.iter().any(|s| s.id == id)
     }
 
     /// The bytes the agents' structures hold: 0 with no session.

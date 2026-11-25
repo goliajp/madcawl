@@ -9,6 +9,7 @@ use madcawl_css::style::Styles;
 use madcawl_dom::{Dom, Mutation, NodeId, NodeKind};
 use madcawl_str::atom;
 
+use crate::controls::Controls;
 use crate::cx::Cx;
 use crate::geom::Geometry;
 use crate::index::AttrIndex;
@@ -56,6 +57,8 @@ pub struct SemTree {
     pub(crate) muts: Vec<Mutation>,
     /// The `Inputs::versions` the visibility was last read under
     pub(crate) inputs_versions: (u64, u64),
+    /// Control state an agent's actions set
+    pub(crate) controls: Controls,
 }
 
 impl SemTree {
@@ -75,6 +78,7 @@ impl SemTree {
             page_gen,
             muts: Vec::new(),
             inputs_versions: inputs.versions(),
+            controls: Controls::default(),
         };
         let doc = dom.document();
         t.ids.add_subtree(dom, doc, &mut Vec::new());
@@ -143,6 +147,7 @@ impl SemTree {
             styles: inputs.styles,
             ids: &self.ids,
             label_for: &self.label_for,
+            controls: Some(&self.controls),
         }
     }
 
@@ -264,5 +269,6 @@ impl SemTree {
             + self.label_for.bytes()
             + refs * 2
             + self.muts.capacity() * size_of::<Mutation>()
+            + self.controls.bytes()
     }
 }

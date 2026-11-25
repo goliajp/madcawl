@@ -41,7 +41,7 @@ pub(crate) fn live(dom: &Dom, n: NodeId) -> bool {
 }
 
 impl SemTree {
-    fn mark(&mut self, n: NodeId) {
+    pub(crate) fn mark(&mut self, n: NodeId) {
         if !bit(&mut self.dirty, n.index()) {
             self.dirty_list.push(n.index());
         }
@@ -58,7 +58,7 @@ impl SemTree {
     }
 
     /// What a change at `from` reaches above it.
-    fn mark_up(&mut self, dom: &Dom, from: Option<NodeId>) {
+    pub(crate) fn mark_up(&mut self, dom: &Dom, from: Option<NodeId>) {
         let mut up = from.filter(|&n| live(dom, n));
         while let Some(a) = up {
             let r = self
@@ -160,6 +160,7 @@ impl SemTree {
                 self.ids.forget(n);
                 self.label_for.forget(n);
                 self.unregister_refs(n);
+                self.controls.forget(n);
                 self.mark(n);
             }
             _ => {}

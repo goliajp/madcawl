@@ -5,7 +5,10 @@
 //! scopes and token budgets, diffs from a session's bounded ring of
 //! changes, structured extraction (tables, repeated items, links,
 //! images, form fields), the envelope page content is handed over in,
-//! and the frames of the agent protocol.
+//! the frames of the agent protocol, and what actions need of a page:
+//! their requests parsed and bounded, the checks of their target by hit
+//! testing, what a click does without script, and the state of controls
+//! that typing, ticking and choosing leave.
 //!
 //! None of it exists until an agent attaches: `Agents` holds no tree,
 //! the DOM records no changes, nothing is allocated. The first session
@@ -17,7 +20,10 @@
 //! names the accname algorithm. Shadow trees and frames are not read:
 //! the DOM has neither yet.
 
+pub mod act;
+pub mod activate;
 mod agents;
+pub mod controls;
 mod cx;
 mod diff;
 mod envelope;
@@ -31,12 +37,13 @@ mod name;
 mod native;
 mod pool;
 mod protocol;
-mod record;
+pub mod record;
 mod refs;
 mod ring;
 mod role;
 mod states;
 mod sync;
+mod target;
 mod text;
 mod tree;
 mod view;
@@ -51,6 +58,7 @@ pub use record::Record;
 pub use refs::{Ref, RefError, push_page_text, push_quoted};
 pub use role::Role;
 pub use sync::Delta;
+pub use target::{Check, pick_point, scroll_into_view};
 pub use text::estimate_tokens;
 pub use tree::{Inputs, MUTATION_CAP, SemTree};
 pub use view::{Query, Scope, View, ViewOpts};

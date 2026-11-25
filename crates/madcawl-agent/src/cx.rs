@@ -5,6 +5,7 @@ use madcawl_css::style::{Display, Styles};
 use madcawl_dom::{Dom, NodeId, NodeKind};
 use madcawl_str::atom;
 
+use crate::controls::Controls;
 use crate::index::AttrIndex;
 use crate::text::attr_string;
 
@@ -13,6 +14,7 @@ pub(crate) struct Cx<'a> {
     pub styles: Option<&'a Styles>,
     pub ids: &'a AttrIndex,
     pub label_for: &'a AttrIndex,
+    pub controls: Option<&'a Controls>,
 }
 
 impl Cx<'_> {

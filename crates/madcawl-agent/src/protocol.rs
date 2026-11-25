@@ -18,6 +18,11 @@ pub mod kind {
     pub const DETACH: u16 = 3;
     pub const READ: u16 = 10;
     pub const DIFF: u16 = 11;
+    /// An action on the page by reference (`act::Action`), answered once
+    /// the page is stable or the wait ran out
+    pub const ACT: u16 = 12;
+    /// Waiting for the page to be stable, with no action
+    pub const WAIT: u16 = 13;
     pub const RESULT: u16 = 20;
     pub const ERROR: u16 = 21;
     /// The host's own requests, answered by the proxy, not by a page
@@ -25,6 +30,8 @@ pub mod kind {
     pub const OPENED: u16 = 31;
     pub const CLOSE: u16 = 32;
     pub const PAGES: u16 = 33;
+    /// A page's log of requests and load errors
+    pub const REQUESTS: u16 = 34;
 }
 
 pub mod tag {
@@ -57,6 +64,33 @@ pub mod tag {
     pub const FORMAT: u8 = 21;
     /// Records an extraction skips
     pub const OFFSET: u8 = 22;
+    /// An action's name: `navigate`, `back`, `forward`, `reload`,
+    /// `scroll`, `click`, `hover`, `type`, `press`, `select`, `check`,
+    /// `upload`, `fill_form`, `submit`
+    pub const ACTION: u8 = 23;
+    /// What an action takes: text to type, a key, a URL, an option, a
+    /// path, a scroll direction
+    pub const VALUE: u8 = 24;
+    /// One field of a `fill_form`, repeated: the reference, a NUL, the
+    /// value
+    pub const FIELD: u8 = 25;
+    /// How long to wait for the page to be stable, in milliseconds
+    pub const TIMEOUT: u8 = 26;
+    /// Wait also until this reference names a node
+    pub const UNTIL_REF: u8 = 27;
+    /// Wait also until this text is on the page
+    pub const UNTIL_TEXT: u8 = 28;
+    /// Viewports to scroll by
+    pub const AMOUNT: u8 = 29;
+    /// 1 to tick a box, 0 to clear it; for `fill_form`, 1 to submit
+    pub const ON: u8 = 30;
+    /// 1 when the page was stable when the reply was made
+    pub const STABLE: u8 = 31;
+    /// Microseconds from the request to the action started, of waiting
+    /// for the page to be stable, of writing the diff
+    pub const DISPATCH_US: u8 = 32;
+    pub const WAIT_US: u8 = 33;
+    pub const DIFF_US: u8 = 34;
 }
 
 /// The views by number on the wire; `extract` is a view of records.

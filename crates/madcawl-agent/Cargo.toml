@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 madcawl-css = { path = "../madcawl-css" }
 madcawl-dom = { path = "../madcawl-dom" }
+madcawl-form = { path = "../madcawl-form" }
 madcawl-html = { path = "../madcawl-html" }
 madcawl-layout = { path = "../madcawl-layout" }
 madcawl-str = { path = "../madcawl-str" }

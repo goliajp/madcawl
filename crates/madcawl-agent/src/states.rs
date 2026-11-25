@@ -35,7 +35,7 @@ impl Cx<'_> {
         let input_ty =
             is_html(dom, n, atom!("input")).then(|| aria(atom!("type")).unwrap_or_default());
         let native_check =
-            matches!(input_ty.as_deref(), Some("checkbox" | "radio")) && has(atom!("checked"));
+            matches!(input_ty.as_deref(), Some("checkbox" | "radio")) && self.ticked(n);
         match aria(atom!("aria-checked")).as_deref() {
             Some("true") => set(true, CHECKED),
             Some("mixed") => set(true, MIXED),
@@ -63,7 +63,7 @@ impl Cx<'_> {
             has(atom!("readonly")) || aria(atom!("aria-readonly")).as_deref() == Some("true"),
             READONLY,
         );
-        let selected = role == Role::Option && has(atom!("selected"))
+        let selected = role == Role::Option && self.option_selected(n)
             || aria(atom!("aria-selected")).as_deref() == Some("true");
         set(selected, SELECTED);
         set(
@@ -115,6 +115,9 @@ impl Cx<'_> {
         match role {
             Role::Link => attr_string(dom, n, atom!("href")),
             Role::TextBox | Role::SearchBox | Role::Combobox | Role::SpinButton => {
+                if let Some(v) = self.controls.and_then(|c| c.value(n)) {
+                    return Some(v.to_owned()).filter(|v| !v.is_empty());
+                }
                 if is_html(dom, n, atom!("textarea")) {
                     return Some(text_content(dom, n)).filter(|v| !v.is_empty());
                 }
@@ -133,6 +136,20 @@ impl Cx<'_> {
         }
     }
 
+    /// A box an action ticked or cleared, else as its markup says.
+    fn ticked(&self, n: NodeId) -> bool {
+        self.controls
+            .and_then(|c| c.checked(n))
+            .unwrap_or_else(|| self.dom.attribute(n, atom!("checked")).is_some())
+    }
+
+    /// An option chosen by an action, else one its markup selects.
+    fn option_selected(&self, o: NodeId) -> bool {
+        self.controls
+            .and_then(|c| c.selected(o))
+            .unwrap_or_else(|| self.dom.attribute(o, atom!("selected")).is_some())
+    }
+
     fn selected_text(&self, n: NodeId) -> Option<String> {
         let dom = self.dom;
         let mut first = None;
@@ -140,7 +157,7 @@ impl Cx<'_> {
             if !is_html(dom, o, atom!("option")) {
                 continue;
             }
-            if dom.attribute(o, atom!("selected")).is_some() {
+            if self.option_selected(o) {
                 return Some(collapsed(&text_content(dom, o)));
             }
             first.get_or_insert(o);

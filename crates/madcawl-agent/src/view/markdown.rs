@@ -131,6 +131,7 @@ impl Md<'_, '_> {
             styles: self.r.inputs.styles,
             ids: &self.r.tree.ids,
             label_for: &self.r.tree.label_for,
+            controls: None,
         };
         if self.r.inputs.styles.is_some() {
             return cx.block_level(n);
