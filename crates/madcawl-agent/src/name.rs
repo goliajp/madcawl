@@ -188,6 +188,13 @@ impl Walk<'_, '_> {
     /// The value of a control inside another's label (accname 2C).
     fn embedded_value(&mut self, n: NodeId, role: Role) -> Option<String> {
         let dom = self.dom();
+        if is_html(dom, n, atom!("input"))
+            && attr_string(dom, n, atom!("type"))
+                .is_some_and(|t| t.trim().eq_ignore_ascii_case("password"))
+        {
+            // a password names nothing by its value, whatever its role
+            return Some(crate::states::MASK.to_owned());
+        }
         match role {
             Role::TextBox | Role::SearchBox => {
                 if is_html(dom, n, atom!("textarea")) {
