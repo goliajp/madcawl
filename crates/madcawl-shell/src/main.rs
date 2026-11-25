@@ -4,7 +4,8 @@
 //! checks that nothing hidden made it into the text; `madcawl-shell shot
 //! <file|-> -o <out.png>` lays it out in a 1280x800 viewport and paints
 //! the first screen (`--full`: the whole page) offscreen at device scale
-//! 2 (`--scale 1` for 1).
+//! 2 (`--scale 1` for 1); `madcawl-shell --serve <socket>` serves
+//! windowless pages to agents over a Unix socket.
 
 use std::io::{Read as _, Write as _};
 use std::path::Path;
@@ -14,11 +15,12 @@ use std::time::{Duration, Instant};
 use madcawl_dom::{Dom, NodeKind};
 use madcawl_html::Encoding;
 use madcawl_shell::load::{self, Sheets};
-use madcawl_shell::{Read, Shown, audit, read, rusage, shot};
+use madcawl_shell::{Read, Shown, audit, read, rusage, serve, shot};
 
 const USAGE: &str = "usage: madcawl-shell read <file|-> [--charset <label>] [--stats <file>]
        madcawl-shell audit <file|-> [--charset <label>]
-       madcawl-shell shot <file|-> -o <out.png> [--charset <label>] [--scale 1|2] [--full]";
+       madcawl-shell shot <file|-> -o <out.png> [--charset <label>] [--scale 1|2] [--full]
+       ";
 
 /// What the command line asked for.
 struct Args<'a> {
@@ -247,11 +249,28 @@ fn cmd_shot(a: &Args) -> std::io::Result<()> {
     std::io::stderr().write_all(e.as_bytes())
 }
 
+fn cmd_serve(args: &[&str]) -> ExitCode {
+    let Some(c) = serve::parse_args(args) else {
+        eprintln!("{USAGE}{}", serve::USAGE);
+        return ExitCode::from(2);
+    };
+    match serve::Server::bind(c).and_then(serve::Server::run) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("madcawl-shell: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    if let ["--serve", rest @ ..] = args.as_slice() {
+        return cmd_serve(rest);
+    }
     let Some(a) = parse_args(&args) else {
-        eprintln!("{USAGE}");
+        eprintln!("{USAGE}{}", serve::USAGE);
         return ExitCode::from(2);
     };
     let done = match a.cmd {

@@ -16,9 +16,13 @@ name = "madcawl-shell"
 path = "src/main.rs"
 
 [dependencies]
+madcawl-agent = { path = "../madcawl-agent" }
 madcawl-css = { path = "../madcawl-css" }
 madcawl-dom = { path = "../madcawl-dom" }
 madcawl-html = { path = "../madcawl-html" }
 madcawl-layout = { path = "../madcawl-layout" }
 madcawl-paint = { path = "../madcawl-paint" }
 madcawl-str = { path = "../madcawl-str" }
+
+[dev-dependencies]
+madcawl-mcp = { path = "../madcawl-mcp" }

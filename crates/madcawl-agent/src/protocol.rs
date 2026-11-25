@@ -19,6 +19,11 @@ pub mod kind {
     pub const DIFF: u16 = 11;
     pub const RESULT: u16 = 20;
     pub const ERROR: u16 = 21;
+    /// The host's own requests, answered by the proxy, not by a page
+    pub const OPEN: u16 = 30;
+    pub const OPENED: u16 = 31;
+    pub const CLOSE: u16 = 32;
+    pub const PAGES: u16 = 33;
 }
 
 pub mod tag {
@@ -36,6 +41,14 @@ pub mod tag {
     pub const TOKENS: u8 = 12;
     pub const FOLDED: u8 = 13;
     pub const CODE: u8 = 14;
+    /// The page a request is for, by the number `OPENED` gave
+    pub const PAGE: u8 = 15;
+    /// What to open: an absolute path or a `file:` URL
+    pub const URL: u8 = 16;
+    pub const WIDTH: u8 = 17;
+    pub const HEIGHT: u8 = 18;
+    /// The charset label a transport would have given
+    pub const CHARSET: u8 = 19;
 }
 
 /// The views by number on the wire.

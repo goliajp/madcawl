@@ -2,12 +2,14 @@
 //! reading it back as a line-oriented structure an agent can read and
 //! later act on by reference (`read`), with the checks that what the
 //! cascade hides stays out of it (`audit`); and painting it offscreen
-//! to a PNG (`shot`).
+//! to a PNG (`shot`); and serving windowless pages to agents over a
+//! Unix socket (`serve`).
 
 pub mod audit;
 pub mod load;
 pub mod read;
 pub mod rusage;
+pub mod serve;
 pub mod shot;
 pub mod shown;
 
