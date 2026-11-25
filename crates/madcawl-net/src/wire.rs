@@ -38,13 +38,19 @@ pub mod kind {
     pub const HELLO: u16 = 32;
     /// host → network on the control channel only: a document's URL, with
     /// `TOKEN` to change an existing registration, or `NAVIGATION` set for
-    /// the host's own connection; answered with REGISTERED
+    /// the host's own connection, and with `PARTITION` the cookie
+    /// partition it is in (none: the profile's own jar), opened if it is
+    /// not; answered with REGISTERED
     pub const REGISTER: u16 = 33;
     pub const UNREGISTER: u16 = 34;
     /// host → network: refusals counted, all or for one `TOKEN`; answered
     /// with STATS and `COUNT`
     pub const STATS: u16 = 35;
     pub const REGISTERED: u16 = 36;
+    /// host → network: drops the cookie partition `PARTITION`, its cookies
+    /// and every registration in it; answered with the same kind, `OK`
+    /// when it was open and `COUNT` registrations dropped
+    pub const PARTITION_DROP: u16 = 37;
 }
 
 pub mod tag {
@@ -78,6 +84,10 @@ pub mod tag {
     /// on an ERROR: the network process refused what the content process
     /// claimed
     pub const REFUSED: u8 = 34;
+    /// the cookie partition a registration or a frame is in; on a frame
+    /// from a content process it must be its registration's, and the
+    /// network process sets it to that
+    pub const PARTITION: u8 = 35;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

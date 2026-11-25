@@ -6,20 +6,23 @@
 mod exchange;
 mod forbidden;
 mod hop;
+mod redirect;
 
 pub use forbidden::{is_forbidden, is_forbidden_method, normalize_method};
 pub use hop::Sink;
 
 use hop::Hop;
+use redirect::{redirect_url, rewrite_for_redirect};
 
 use crate::cookie::{CookieJar, JarLimits, SiteContext, site_of};
 use crate::dns::DnsCache;
 use crate::error::NetError;
+use crate::partition::{self, PROFILE, PartitionId, Partitions, SharedJar};
 use crate::pool::{Pool, PoolLimits};
 use crate::sock::Cancel;
 use crate::trust::{Trust, TrustSource};
 use alt_url::Url;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug)]
@@ -37,6 +40,9 @@ pub struct Config {
     pub dns_cache: usize,
     pub pool: PoolLimits,
     pub jar: JarLimits,
+    /// cookie partitions open at a time, and each one's jar
+    pub partitions: usize,
+    pub partition_jar: JarLimits,
     pub trust: TrustSource,
     pub user_agent: String,
 }
@@ -54,6 +60,8 @@ impl Default for Config {
             dns_cache: 256,
             pool: PoolLimits::default(),
             jar: JarLimits::default(),
+            partitions: 32,
+            partition_jar: JarLimits { per_domain: 180, total: 500 },
             trust: TrustSource::System,
             user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) madcawl/0.0.1".into(),
         }
@@ -81,6 +89,9 @@ pub struct Request {
     /// the document that made the request; `None` for the user
     pub initiator: Option<Url>,
     pub credentials: bool,
+    /// the cookie jar it reads and stores: the client's own (`PROFILE`)
+    /// or an open partition's
+    pub partition: PartitionId,
     pub redirect: Redirect,
     /// when not empty, the only origins (as `Url::origin` writes them)
     /// a redirect may carry the body to
@@ -99,6 +110,7 @@ impl Request {
             navigation: true,
             initiator: None,
             credentials: true,
+            partition: PROFILE,
             redirect: Redirect::Follow,
             body_origins: Vec::new(),
             cancel: None,
@@ -131,12 +143,14 @@ pub fn now_secs() -> i64 {
 }
 
 /// The network state one network process owns: the DNS cache, the
-/// connection pool, the cookie jar and the trust verdicts, all bounded.
+/// connection pool, the cookie jar, the cookie partitions and the trust
+/// verdicts, all bounded.
 pub struct Client {
     pub config: Config,
     dns: DnsCache,
     pool: Pool,
-    jar: Mutex<CookieJar>,
+    jar: SharedJar,
+    partitions: Partitions,
     trust: Arc<Trust>,
 }
 
@@ -160,7 +174,8 @@ impl Client {
         Client {
             dns: DnsCache::new(config.dns_cache),
             pool: Pool::new(config.pool),
-            jar: Mutex::new(CookieJar::new(config.jar)),
+            jar: Arc::new(Mutex::new(CookieJar::new(config.jar))),
+            partitions: Partitions::new(config.partitions, config.partition_jar),
             trust: Arc::new(Trust::new(config.trust.clone())),
             config,
         }
@@ -168,6 +183,19 @@ impl Client {
 
     pub fn jar(&self) -> &Mutex<CookieJar> {
         &self.jar
+    }
+
+    pub fn partitions(&self) -> &Partitions {
+        &self.partitions
+    }
+
+    /// The jar of `partition`: the client's own for `PROFILE`, `None` for
+    /// a partition that is not open.
+    pub fn jar_of(&self, partition: PartitionId) -> Option<SharedJar> {
+        match partition {
+            PROFILE => Some(self.jar.clone()),
+            p => self.partitions.get(p),
+        }
     }
 
     pub fn pool(&self) -> &Pool {
@@ -181,7 +209,7 @@ impl Client {
     /// The cookie jar; a lock poisoned by a panic elsewhere is taken over,
     /// since every change to the jar leaves it consistent.
     pub fn lock_jar(&self) -> MutexGuard<'_, CookieJar> {
-        self.jar.lock().unwrap_or_else(PoisonError::into_inner)
+        partition::lock(&self.jar)
     }
 
     /// The whole response, its body decoded and held in memory up to the
@@ -211,6 +239,7 @@ impl Client {
         if is_forbidden_method(&req.method) {
             return Err(NetError::Refused(format!("forbidden method {}", req.method)));
         }
+        let jar = self.jar_of(req.partition).ok_or_else(|| NetError::Refused(format!("no cookie partition {}", req.partition)))?;
         let deadline = Instant::now() + self.config.request_timeout;
         let mut url = req.url.clone();
         let mut method = normalize_method(&req.method);
@@ -229,11 +258,11 @@ impl Client {
                 return Err(NetError::Deadline);
             }
             let ctx = site_context(req, &url, &method);
-            let cookie = if req.credentials { self.lock_jar().header(&url, ctx, now_secs()) } else { None };
+            let cookie = if req.credentials { partition::lock(&jar).header(&url, ctx, now_secs()) } else { None };
             let origin = (!matches!(method.as_str(), "GET" | "HEAD"))
                 .then(|| req.initiator.as_ref().map_or("null".into(), |i| i.origin().ascii_serialization()));
             let extra = exchange::Extra { cookie: cookie.as_deref(), origin: origin.as_deref(), body, deadline, cancel: req.cancel.as_ref() };
-            let mut hop = Hop { client: self, req, url: &url, url_list: &url_list, method: &method, sink: &mut *sink, decoder: None, delivered: false };
+            let mut hop = Hop { client: self, jar: &jar, req, url: &url, url_list: &url_list, method: &method, sink: &mut *sink, decoder: None, delivered: false };
             let raw = self.exchange(&method, &url, &headers, extra, &mut hop)?;
             if hop.delivered {
                 let Hop { decoder, sink, .. } = hop;
@@ -261,28 +290,5 @@ impl Client {
             url = next;
             url_list.push(url.clone());
         }
-    }
-}
-
-/// The redirect target, keeping the fragment when the target has none.
-fn redirect_url(url: &Url, location: &str) -> Result<Url, NetError> {
-    let next = url.join(location).map_err(|e| NetError::BadUrl(format!("{location}: {e:?}")))?;
-    match (next.fragment(), url.fragment()) {
-        (None, Some(f)) => Ok(next.join(&format!("#{f}")).unwrap_or(next)),
-        _ => Ok(next),
-    }
-}
-
-/// 301 and 302 turn POST into GET, 303 turns anything but GET and HEAD
-/// into GET; the body and its headers go with the old method.
-fn rewrite_for_redirect(status: u16, method: &mut String, body: &mut Option<&[u8]>, headers: &mut Vec<(String, Vec<u8>)>) {
-    let rewrite = (matches!(status, 301 | 302) && method == "POST") || (status == 303 && !matches!(method.as_str(), "GET" | "HEAD"));
-    if rewrite {
-        *method = "GET".into();
-        *body = None;
-        headers.retain(|(n, _)| {
-            let n = n.to_ascii_lowercase();
-            !matches!(n.as_str(), "content-encoding" | "content-language" | "content-location" | "content-type")
-        });
     }
 }
