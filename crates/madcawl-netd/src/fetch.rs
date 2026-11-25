@@ -4,6 +4,7 @@
 use crate::download::{Downloads, Tee};
 use crate::{Writer, error, is_hidden_response_header, parse_url, send};
 use madcawl_net::fetch::{Redirect, Request, Sink, is_forbidden_method};
+use madcawl_net::partition::PROFILE;
 use madcawl_net::sock::Cancel;
 use madcawl_net::wire::{BODY_CHUNK, Frame, kind, tag};
 use madcawl_net::{Client, NetError, Response};
@@ -24,6 +25,7 @@ fn request_of(mut frame: Frame) -> Result<Request, String> {
     req.navigation = frame.get_num(tag::NAVIGATION).unwrap_or(0) != 0;
     req.initiator = parse_url(&frame, tag::INITIATOR);
     req.credentials = frame.get_num(tag::CREDENTIALS).unwrap_or(1) != 0;
+    req.partition = frame.get_num(tag::PARTITION).unwrap_or(PROFILE);
     req.body_origins = frame.all(tag::BODY_ORIGIN).map(|o| String::from_utf8_lossy(o).into_owned()).collect();
     req.redirect = match frame.get_num(tag::REDIRECT).unwrap_or(0) {
         1 => Redirect::Manual,

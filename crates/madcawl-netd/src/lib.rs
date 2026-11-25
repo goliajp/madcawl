@@ -20,7 +20,9 @@
 //!
 //! Served with a control channel (`serve_guarded`), every connection
 //! speaks for one document its host registered, and what it claims is
-//! checked against that document (`guard`).
+//! checked against that document (`guard`). Its fetches and cookie calls
+//! use the jar of the cookie partition the host put the registration in:
+//! an agent session's own, in memory only, or the profile's.
 //!
 //! Given a profile's downloads directory, a navigation's response that is
 //! an attachment or of a type not shown as a page, and the response to a
@@ -45,6 +47,7 @@ use guard::{Binding, Screened};
 use hello::read_next;
 use madcawl_net::cookie::{Api, SiteContext, serialize};
 use madcawl_net::fetch::now_secs;
+use madcawl_net::partition::{self, PROFILE};
 use madcawl_net::sock::Cancel;
 use madcawl_net::wire::{Frame, kind, tag};
 use madcawl_net::{Client, Url};
@@ -110,7 +113,7 @@ pub fn serve_guarded(
     downloads: Option<Arc<Downloads>>,
 ) -> io::Result<()> {
     control.peer_addr()?;
-    let guard = Arc::new(Guard::new(limits.clients));
+    let guard = Arc::new(Guard::new(limits.clients, client.clone()));
     let g = guard.clone();
     std::thread::Builder::new().name("netd-control".into()).spawn(move || {
         if let Err(e) = g.serve_control(control) {
@@ -202,7 +205,12 @@ fn serve_client(stream: UnixStream, slot: Slot, service: &Service, shared: &Shar
                 }
                 Screened::Close(r) => return send(&writer, &r),
             },
-            None => frame,
+            // without a guard no host opens partitions: every frame is the profile's
+            None => {
+                let mut f = frame;
+                f.fields.retain(|(t, _)| *t != tag::PARTITION);
+                f
+            }
         };
         match frame.kind {
             kind::FETCH => {
@@ -238,7 +246,9 @@ pub(crate) fn parse_url(frame: &Frame, t: u8) -> Option<Url> {
 /// script may see, writing stores one `Set-Cookie`-style line as script.
 fn cookies(client: &Client, id: u64, frame: &Frame) -> Frame {
     let Some(url) = parse_url(frame, tag::URL) else { return error(id, "missing or bad url") };
-    let mut jar = client.lock_jar();
+    let p = frame.get_num(tag::PARTITION).unwrap_or(PROFILE);
+    let Some(jar) = client.jar_of(p) else { return error(id, &format!("no cookie partition {p}")) };
+    let mut jar = partition::lock(&jar);
     let reply = Frame::new(kind::COOKIES).num(tag::ID, id);
     if frame.kind == kind::COOKIE_SET {
         let line = frame.get_str(tag::TEXT).unwrap_or("");

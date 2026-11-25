@@ -30,6 +30,10 @@
 //! host. Same-site frames of another origin share the document's
 //! registration until frames are registered on their own.
 //!
+//! Each registration is in a cookie partition the host names, the
+//! profile's own jar when it names none (`partition`). Dropping a
+//! partition drops its cookies and its registrations with it.
+//!
 //! A connection must open with a HELLO that shows a registered token;
 //! any other first frame, a refused HELLO, a second HELLO or any frame
 //! after the host dropped the registration is answered with one refusal
@@ -41,17 +45,18 @@
 //! all connections without one, since a client may reconnect to be
 //! refused again. Registrations are bounded by the client limit.
 
+mod control;
 mod fetch;
+mod partition;
 
 use crate::error;
-use madcawl_net::Url;
 use madcawl_net::cookie::site_of;
+use madcawl_net::partition::PartitionId;
+use madcawl_net::{Client, Url};
 use madcawl_net::wire::{Frame, kind, tag};
 use std::collections::HashMap;
-use std::io;
-use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 pub const TOKEN_LEN: usize = 16;
@@ -62,6 +67,7 @@ const LOG_INTERVAL: Duration = Duration::from_secs(1);
 struct Doc {
     /// `None` for the host's own connection
     url: Option<Url>,
+    partition: PartitionId,
     refused: u64,
     /// when a refusal for it was last logged, as `Guard::now` gives it
     logged: u64,
@@ -70,6 +76,8 @@ struct Doc {
 pub struct Guard {
     docs: Mutex<HashMap<Token, Doc>>,
     max: usize,
+    /// whose cookie partitions registrations open and drop
+    client: Arc<Client>,
     refused: AtomicU64,
     born: Instant,
     /// when a refusal without a document was last logged, as `now` gives it
@@ -142,12 +150,27 @@ fn same_site(a: &Url, b: &Url) -> bool {
     }
 }
 
+/// A FETCH or cookie frame checked against the registered document; the
+/// host's own connection, which has none, sends what it means.
+fn for_document(doc: Option<&Url>, frame: Frame) -> Result<Frame, &'static str> {
+    let Some(url) = doc else { return Ok(frame) };
+    if frame.kind == kind::FETCH {
+        return fetch::screen(url, frame);
+    }
+    match frame.get_str(tag::URL).and_then(|s| Url::parse(s).ok()) {
+        Some(u) if same_site(&u, url) => Ok(frame),
+        _ => Err("cookies of another site than the document"),
+    }
+}
+
 impl Guard {
-    /// A guard that holds at most `max` registered documents.
-    pub fn new(max: usize) -> Self {
+    /// A guard that holds at most `max` registered documents, in the
+    /// cookie partitions of `client`.
+    pub fn new(max: usize, client: Arc<Client>) -> Self {
         Guard {
             docs: Mutex::new(HashMap::new()),
             max,
+            client,
             refused: AtomicU64::new(0),
             born: Instant::now(),
             unbound_logged: AtomicU64::new(0),
@@ -219,81 +242,29 @@ impl Guard {
         let Some(doc) = docs.get_mut(&token) else {
             return Screened::Close(self.refuse(binding, None, id, "a registration the host has dropped"));
         };
-        let refused = match (frame.kind, &doc.url) {
-            (kind::HELLO, _) => return Screened::Close(self.refuse(binding, Some(doc), id, "a second HELLO")),
-            (kind::REGISTER | kind::UNREGISTER | kind::STATS, _) => "a control frame from a content process",
-            (_, None) => return Screened::Pass(frame),
-            (kind::FETCH, Some(url)) => match fetch::screen(url, frame) {
-                Ok(f) => return Screened::Pass(f),
-                Err(why) => why,
-            },
-            (kind::COOKIE_GET | kind::COOKIE_SET, Some(url)) => match frame.get_str(tag::URL).and_then(|s| Url::parse(s).ok()) {
-                Some(u) if same_site(&u, url) => return Screened::Pass(frame),
-                _ => "cookies of another site than the document",
-            },
+        let refused = match frame.kind {
+            kind::HELLO => return Screened::Close(self.refuse(binding, Some(doc), id, "a second HELLO")),
+            kind::REGISTER | kind::UNREGISTER | kind::STATS | kind::PARTITION_DROP => "a control frame from a content process",
+            kind::FETCH | kind::COOKIE_GET | kind::COOKIE_SET => {
+                match partition::screen(doc.partition, frame).and_then(|f| for_document(doc.url.as_ref(), f)) {
+                    Ok(f) => return Screened::Pass(f),
+                    Err(why) => why,
+                }
+            }
             _ => return Screened::Pass(frame),
         };
         Screened::Reply(self.refuse(binding, Some(doc), id, refused))
-    }
-
-    /// Answers one frame from the host; `None` for a kind it does not know.
-    fn control(&self, f: &Frame) -> Option<Frame> {
-        let id = f.get_num(tag::ID).unwrap_or(0);
-        if !matches!(f.kind, kind::REGISTER | kind::UNREGISTER | kind::STATS) {
-            return None;
-        }
-        let Ok(token) = token_of(f) else { return Some(error(id, "bad token")) };
-        let mut docs = self.lock();
-        let done = |t: &Token| Frame::new(kind::REGISTERED).num(tag::ID, id).bytes(tag::TOKEN, t);
-        Some(match (f.kind, token) {
-            (kind::REGISTER, _) => {
-                let host = f.get_num(tag::NAVIGATION).is_some_and(|n| n != 0);
-                let url = f.get_str(tag::URL).and_then(|s| Url::parse(s).ok());
-                if url.is_none() && !host {
-                    return Some(error(id, "missing or bad url"));
-                }
-                match token {
-                    Some(t) => match docs.get_mut(&t) {
-                        Some(d) if d.url.is_some() && !host => {
-                            d.url = url;
-                            done(&t)
-                        }
-                        Some(_) => error(id, "the host's own registration has no document"),
-                        None => error(id, "unknown token"),
-                    },
-                    None if docs.len() >= self.max => error(id, "too many registered documents"),
-                    None => {
-                        let t = new_token();
-                        docs.insert(t, Doc { url: if host { None } else { url }, refused: 0, logged: 0 });
-                        done(&t)
-                    }
-                }
-            }
-            (kind::UNREGISTER, Some(t)) if docs.remove(&t).is_some() => done(&t),
-            (kind::UNREGISTER, _) => error(id, "unknown token"),
-            (_, Some(t)) => match docs.get(&t) {
-                Some(d) => Frame::new(kind::STATS).num(tag::ID, id).num(tag::COUNT, d.refused),
-                None => error(id, "unknown token"),
-            },
-            (_, None) => Frame::new(kind::STATS).num(tag::ID, id).num(tag::COUNT, self.refused()),
-        })
-    }
-
-    /// Serves the host's control channel until the host closes it; the
-    /// registrations stay as they are.
-    pub fn serve_control(&self, mut control: UnixStream) -> io::Result<()> {
-        while let Some(frame) = Frame::read_from(&mut control)? {
-            if let Some(reply) = self.control(&frame) {
-                reply.write_to(&mut control)?;
-            }
-        }
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use madcawl_net::Config;
+
+    fn client() -> Arc<Client> {
+        Arc::new(Client::new(Config::default()))
+    }
 
     fn register(g: &Guard, url: &str) -> Vec<u8> {
         let reg = g.control(&Frame::new(kind::REGISTER).num(tag::ID, 1).str(tag::URL, url)).unwrap();
@@ -313,7 +284,7 @@ mod tests {
 
     #[test]
     fn refusals_are_all_counted_but_logged_once_per_connection() {
-        let g = Guard::new(4);
+        let g = Guard::new(4, client());
         let mut b = bound(&g, "http://127.0.0.1/");
         for i in 0..5 {
             let f = Frame::new(kind::COOKIE_GET).num(tag::ID, i).str(tag::URL, "https://bank.example.com/");
@@ -329,7 +300,7 @@ mod tests {
 
     #[test]
     fn a_document_that_reconnects_to_be_refused_is_logged_once_per_interval() {
-        let g = Guard::new(4);
+        let g = Guard::new(4, client());
         let token = register(&g, "http://127.0.0.1/");
         for i in 0..5 {
             let mut b = hello(&g, &token);
