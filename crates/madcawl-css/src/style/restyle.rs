@@ -131,6 +131,7 @@ impl Cascade<'_> {
         states: &ElementStates,
         changes: &[Change],
     ) -> Restyled {
+        styles.version = super::styles::Version::next();
         let bound = 2 * dom.node_count() as usize + 1024;
         // each key may hold a whole style attribute, so a count bound
         // alone lets a few elements whose style keeps changing hold the

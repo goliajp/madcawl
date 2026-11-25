@@ -58,6 +58,25 @@ pub struct Styles {
     /// Pseudo-element values by what decides them; restyles add to it, and one finding it past twice the
     /// document's nodes starts over in full
     pub(crate) pseudo_memo: HashMap<super::before_after::PseudoKey, Option<u32>>,
+    /// New for every set of styles made and every restyle (`version`)
+    pub(crate) version: Version,
+}
+
+/// A number no two cascade or restyle runs share, in this process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Version(pub(crate) u64);
+
+impl Version {
+    pub(crate) fn next() -> Version {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Version(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+impl Default for Version {
+    fn default() -> Version {
+        Version::next()
+    }
 }
 
 impl Styles {
@@ -80,6 +99,12 @@ impl Styles {
         self.table.push(s.clone());
         self.interned.insert(s, k);
         k
+    }
+
+    /// Changes whenever these styles are made or restyled: a reader that
+    /// kept something derived from them knows to read them again.
+    pub fn version(&self) -> u64 {
+        self.version.0
     }
 
     /// What the last run of the cascade over these styles did.
