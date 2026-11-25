@@ -88,9 +88,10 @@ fn nested_flex_reading_percentages_of_the_height_lays_each_box_out_a_bounded_num
         let depth = 22;
         let c = counters(&html(depth));
         let boxes = depth + 5;
-        // a single line stretched to the container's minimum height lays each item out again at that height
+        // measuring an item leaves out the stretching below it, so each box is measured and laid out once
+        // per containing block height it is given
         assert!(
-            c.laid <= 10 * boxes as u64,
+            c.laid <= 4 * boxes as u64,
             "{open} {leaf}: {c:?} for {boxes} boxes"
         );
     }

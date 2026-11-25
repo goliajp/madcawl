@@ -69,7 +69,8 @@ pub fn cell(cx: &mut Cx, c: u32, w: Au, borders: Option<[Au; 4]>) -> CellBox {
     let bp_i = used[1] + used[3] + e.padding[1] + e.padding[3];
     let mut sp = Space::new(w, None);
     sp.fixed[0] = Some((w - bp_i).max(Au::ZERO));
-    let r = block::layout(cx, c, sp);
+    // its baseline sets its row's height: not measured
+    let r = cx.measure(false, |cx| block::layout(cx, c, sp));
     // children move from the cell's own borders to the ones it is given
     let d = Point {
         x: used[3] - e.border[3],

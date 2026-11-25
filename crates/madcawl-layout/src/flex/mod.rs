@@ -5,13 +5,14 @@
 use madcawl_css::style::{Align, ComputedStyle, Display, FlexDirection, FlexWrap, SizeKw};
 
 use crate::au::{Au, Point};
-use crate::block;
-use crate::cx::{Cx, Laid, Space};
+use crate::cx::{Cx, Space};
 use crate::fragment::Child;
 use crate::position;
 
+mod cross;
 mod item;
 
+use cross::{cross_sizes, measures};
 use item::{Item, break_into_lines, item, item_style, resolve};
 pub use item::{content_widths, is_item};
 
@@ -66,10 +67,16 @@ pub fn layout(cx: &mut Cx, b: u32, inner: Space, limits: (Au, Au)) -> Flexed {
         .map(|&c| {
             // across a column, an item that does not stretch fits its content
             let cs = item_style(cx, c);
-            let fit = !is_row
-                && !matches!(align_self(cs, s), Align::Stretch | Align::Normal)
-                && matches!(cs.boxm.width, madcawl_css::style::Size::Kw(SizeKw::Auto));
-            item(cx, c, is_row, inner, fit)
+            let auto = |v| matches!(v, madcawl_css::style::Size::Kw(SizeKw::Auto));
+            let aligned = matches!(align_self(cs, s), Align::Stretch | Align::Normal);
+            let fit = !is_row && !aligned && auto(cs.boxm.width);
+            let stretch = aligned
+                && auto(if is_row {
+                    cs.boxm.height
+                } else {
+                    cs.boxm.width
+                });
+            item(cx, c, is_row, inner, (fit, stretch))
         })
         .collect();
     let main_avail = if is_row {
@@ -125,7 +132,7 @@ pub fn layout(cx: &mut Cx, b: u32, inner: Space, limits: (Au, Au)) -> Flexed {
             .flatten();
         // a single line is as tall as the container's limits let it be
         let cross = (fixed_cross, (single && is_row).then_some(limits));
-        let line_cross = cross_sizes(cx, b, &mut items[line.clone()], is_row, inner, cross);
+        let line_cross = cross_sizes(cx, &mut items[line.clone()], is_row, inner, cross);
         let at = (avail, main_gap, cross_at, line_cross);
         let placed = (&mut out, &mut statics, &mut baseline);
         place_line(cx, b, &mut items[line], is_row, at, placed);
@@ -148,60 +155,6 @@ pub fn layout(cx: &mut Cx, b: u32, inner: Space, limits: (Au, Au)) -> Flexed {
         height,
         baseline,
     }
-}
-
-// lays each item out at its flexed main size; the line's cross size, which a stretched item then takes
-fn cross_sizes(
-    cx: &mut Cx,
-    b: u32,
-    items: &mut [Item],
-    is_row: bool,
-    inner: Space,
-    (fixed, clamp): (Option<Au>, Option<(Au, Au)>),
-) -> Au {
-    let parent = cx.style(b);
-    let mut line = Au::ZERO;
-    for it in items.iter_mut() {
-        let r = lay(cx, it, is_row, inner, it.fit);
-        it.cross = if is_row { r.frag.size.h } else { r.frag.size.w };
-        line = line.max(
-            it.cross
-                + if is_row {
-                    it.e.m(0) + it.e.m(2)
-                } else {
-                    it.e.m(1) + it.e.m(3)
-                },
-        );
-        it.laid = Some(r);
-    }
-    let line = fixed.unwrap_or(match clamp {
-        Some((lo, hi)) => line.clamp_lo_hi(lo, hi),
-        None => line,
-    });
-    for it in items.iter_mut() {
-        let s = item_style(cx, it.b);
-        let auto_cross = matches!(
-            if is_row { s.boxm.height } else { s.boxm.width },
-            madcawl_css::style::Size::Kw(SizeKw::Auto)
-        );
-        if matches!(align_self(s, parent), Align::Stretch | Align::Normal) && auto_cross {
-            let c = (line - it.outer_cross).max(Au::ZERO);
-            let r = lay(cx, it, is_row, inner, Some(c));
-            it.cross = if is_row { r.frag.size.h } else { r.frag.size.w };
-            it.laid = Some(r);
-        }
-    }
-    line
-}
-
-fn lay(cx: &mut Cx, it: &Item, is_row: bool, inner: Space, cross: Option<Au>) -> Laid {
-    let mut sp = Space::new(inner.width, inner.height);
-    if is_row {
-        sp.fixed = [Some(it.main), cross];
-    } else {
-        sp.fixed = [cross, Some(it.main)];
-    }
-    block::layout(cx, it.b, sp)
 }
 
 // `at`: the main size available, the gap between items, and where the line is and how big across

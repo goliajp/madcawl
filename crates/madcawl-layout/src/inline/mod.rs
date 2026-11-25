@@ -89,7 +89,8 @@ fn atomics(cx: &mut Cx, ifc: &Ifc, inner: Space) -> (Vec<Option<Laid>>, Vec<Au>)
     let mut widths = Vec::with_capacity(ifc.items.len());
     for it in &ifc.items {
         if it.kind == ItemKind::Atomic {
-            let r = block::layout(cx, it.b, inner);
+            // its baseline places it on the line: not measured
+            let r = cx.measure(false, |cx| block::layout(cx, it.b, inner));
             widths.push(r.frag.size.w + r.ml + r.mr);
             laid.push(Some(r));
         } else {

@@ -26,6 +26,8 @@ pub(super) struct Item {
     pub(super) cross: Au,
     /// Across a column, the width of an item that does not stretch: it fits its content
     pub(super) fit: Option<Au>,
+    /// It takes the line's cross size: measuring its container wants only its size before that
+    pub(super) stretch: bool,
 }
 
 /// The computed values a flex item takes: an anonymous item has the initial ones, not its container's.
@@ -64,12 +66,19 @@ fn base_size(cx: &mut Cx, it: &Item, s: &ComputedStyle, is_row: bool, inner: Spa
         // measured as it is laid out later, so that pass finds this result
         let mut sp = Space::new(inner.width, inner.height);
         sp.fixed[0] = it.fit;
-        let r = block::layout(cx, it.b, sp);
+        let r = cx.measure(super::measures(cx, it), |cx| block::layout(cx, it.b, sp));
         r.frag.size.h - bp
     }
 }
 
-pub(super) fn item(cx: &mut Cx, b: u32, is_row: bool, inner: Space, fit: bool) -> Item {
+// `fit`: it fits its content across a column; `stretch`: it takes the line's cross size
+pub(super) fn item(
+    cx: &mut Cx,
+    b: u32,
+    is_row: bool,
+    inner: Space,
+    (fit, stretch): (bool, bool),
+) -> Item {
     let s = item_style(cx, b);
     let e = if cx.has_edges(b) {
         cx.edges(s, inner.width)
@@ -102,6 +111,7 @@ pub(super) fn item(cx: &mut Cx, b: u32, is_row: bool, inner: Space, fit: bool) -
         laid: None,
         cross: Au::ZERO,
         fit: None,
+        stretch,
     };
     if fit {
         let (lo, hi) = intrinsic::content_widths(cx, b, inner.width);

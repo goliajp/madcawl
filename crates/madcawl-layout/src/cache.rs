@@ -6,7 +6,9 @@
 //! columns, so a box at depth d may be laid out in some 3d spaces. Work is bounded by the distinct spaces
 //! asked, quadratic in the depth and never exponential. A result laid out at the box's own size also answers
 //! a space that fixes the box to that size, so a stretched item whose stretched size is the size it had is
-//! not laid out again.
+//! not laid out again. Results laid out while a flex container only measures its items, with the stretching
+//! inside them left out, are kept apart from the exact ones and answer only further measuring, so measuring
+//! and laying out the same item do not each lay out everything below it again.
 
 use madcawl_css::style::{ComputedStyle, Size as CssSize, Styles};
 use madcawl_dom::{Dom, NodeKind};
@@ -115,21 +117,65 @@ fn answers(cx: &Cx, b: u32, have: &Space, laid: &Laid, want: &Space) -> bool {
     })
 }
 
-/// The last result of `b` that answers `space`.
-pub fn lookup(cx: &mut Cx, b: u32, space: &Space) -> Option<Laid> {
-    let slots = &cx.cache[b as usize];
+// the last result in `b`'s exact or measured entries that answers `space`
+fn find(cx: &mut Cx, measured: bool, b: u32, space: &Space) -> Option<Laid> {
+    let slots = if measured {
+        &cx.measures[b as usize]
+    } else {
+        &cx.cache[b as usize]
+    };
     let k = (0..SLOTS).find(|&k| {
         slots[k]
             .as_ref()
             .is_some_and(|(sp, laid)| answers(cx, b, sp, laid, space))
     })?;
     let laid = slots[k].as_ref().map(|(_, l)| l.clone());
-    cx.cache[b as usize][..=k].rotate_right(1);
+    let slots = if measured {
+        &mut cx.measures[b as usize]
+    } else {
+        &mut cx.cache[b as usize]
+    };
+    slots[..=k].rotate_right(1);
     laid
 }
 
-pub fn store(cx: &mut Cx, b: u32, space: Space, laid: &Laid) {
-    let slots = &mut cx.cache[b as usize];
+/// The last result of `b` that answers `space`: an exact one, or while measuring one that holds only its
+/// size, which leaves what is laid out with it inexact too.
+pub fn lookup(cx: &mut Cx, b: u32, space: &Space) -> Option<Laid> {
+    if let Some(laid) = find(cx, false, b, space) {
+        return Some(laid);
+    }
+    if !cx.measuring {
+        return None;
+    }
+    let laid = find(cx, true, b, space)?;
+    cx.inexact += 1;
+    Some(laid)
+}
+
+/// The last result of `b` that may stand in for laying it out in `space`: reuse is on and floats outside it
+/// had no say in either.
+pub fn reusable(cx: &mut Cx, b: u32, space: &Space) -> Option<Laid> {
+    if !cx.reuse || cx.excl.last().is_some_and(|e| !e.is_empty()) {
+        return None;
+    }
+    let inexact = cx.inexact;
+    let laid = lookup(cx, b, space)?;
+    if laid.floats {
+        cx.inexact = inexact;
+        return None;
+    }
+    cx.counters.reused += 1;
+    Some(laid)
+}
+
+/// Keeps `laid` as `b`'s result in `space`, with the exact ones or with those holding only a size.
+pub fn store(cx: &mut Cx, b: u32, space: Space, laid: &Laid, exact: bool) {
+    let slots = if exact {
+        &mut cx.cache[b as usize]
+    } else {
+        &mut cx.measures[b as usize]
+    };
     // the same space replaces its entry; otherwise the least recently used one goes
     let k = slots
         .iter()

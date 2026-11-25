@@ -97,6 +97,8 @@ pub struct Cx<'a> {
     pub fonts: &'a mut FontTable,
     pub para: &'a mut Paragraph,
     pub cache: &'a mut [crate::cache::Slots],
+    /// By box, its last results laid out while only its size was wanted and whose fragments are not final
+    pub measures: &'a mut [crate::cache::Slots],
     /// By box, whether a different containing block height can change it
     pub height_readers: &'a [bool],
     /// By box, its min-content and max-content widths
@@ -110,6 +112,11 @@ pub struct Cx<'a> {
     pub reuse: bool,
     /// Device pixels per CSS px
     pub scale: f32,
+    /// Only the size of what is laid out is wanted: a flex container leaves out stretching its items, which
+    /// does not change its own size
+    pub measuring: bool,
+    /// Grows each time measuring leaves a result inexact: a box laid out while it grew holds only its size
+    pub inexact: u64,
 }
 
 /// What a layout did: boxes laid out, how many of them reused the last result, and the float and inline box
@@ -141,6 +148,18 @@ impl<'a> Cx<'a> {
         };
         el.and_then(|e| self.styles.get(e))
             .unwrap_or_else(|| ComputedStyle::initial())
+    }
+
+    /// Runs `f` measuring or not; a result laid out not measuring is exact whatever was measured inside it.
+    pub fn measure<T>(&mut self, on: bool, f: impl FnOnce(&mut Self) -> T) -> T {
+        let (was, inexact) = (self.measuring, self.inexact);
+        self.measuring = on;
+        let r = f(self);
+        self.measuring = was;
+        if !on {
+            self.inexact = inexact;
+        }
+        r
     }
 
     /// Whether the box has a box model of its own: anonymous and text boxes have none.

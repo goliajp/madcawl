@@ -13,17 +13,12 @@ use crate::{cache, flex, grid, inline, position, replaced, sizing, table};
 /// The block-level box `b` in `space`, or the last result when nothing changed; `at` is where its border box
 /// is in its block formatting context, which floats are placed in.
 pub fn layout_at(cx: &mut Cx, b: u32, space: Space, at: Point) -> Laid {
-    let no_floats = cx.excl.last().is_none_or(|e| e.is_empty());
-    if cx.reuse
-        && no_floats
-        && let Some(laid) = cache::lookup(cx, b, &space)
-        && !laid.floats
-    {
-        cx.counters.reused += 1;
+    if let Some(laid) = cache::reusable(cx, b, &space) {
         return laid;
     }
+    let no_floats = cx.excl.last().is_none_or(|e| e.is_empty());
     cx.counters.laid += 1;
-    let floats_before = cx.excl.last().map_or(0, |e| e.len());
+    let (floats_before, inexact) = (cx.excl.last().map_or(0, |e| e.len()), cx.inexact);
     let kind = cx.tree.get(b).kind;
     let mut laid = match kind {
         Kind::Replaced { .. } => replaced::layout(cx, b, space),
@@ -37,7 +32,8 @@ pub fn layout_at(cx: &mut Cx, b: u32, space: Space, at: Point) -> Laid {
         let e = cx.edges(cx.style(b), space.width);
         (laid.ml, laid.mr) = (e.m(3), e.m(1));
     }
-    cache::store(cx, b, space, &laid);
+    let exact = !cx.measuring || cx.inexact == inexact;
+    cache::store(cx, b, space, &laid, exact);
     laid
 }
 

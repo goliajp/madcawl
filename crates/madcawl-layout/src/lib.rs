@@ -49,6 +49,7 @@ use style::FontTable;
 struct State {
     tree: BoxTree,
     cache: Vec<cache::Slots>,
+    measures: Vec<cache::Slots>,
     height_readers: Vec<bool>,
     intrinsic: Vec<Option<(Au, Au)>>,
     /// The root element's fragment and where it is on the canvas
@@ -135,6 +136,7 @@ impl<'d> Layout<'d> {
             State {
                 tree,
                 cache: vec![cache::EMPTY; n],
+                measures: vec![cache::EMPTY; n],
                 height_readers,
                 intrinsic: vec![None; n],
                 root: None,
@@ -164,6 +166,7 @@ impl<'d> Layout<'d> {
             fonts: &mut self.fonts,
             para: &mut self.para,
             cache: &mut st.cache,
+            measures: &mut st.measures,
             height_readers: &st.height_readers,
             intrinsic: &mut st.intrinsic,
             icb: self.viewport,
@@ -171,6 +174,8 @@ impl<'d> Layout<'d> {
             counters: &mut self.counters,
             reuse: self.reuse,
             scale: self.scale,
+            measuring: false,
+            inexact: 0,
         };
         let space = Space::new(self.viewport.w, Some(self.viewport.h));
         let r = block::layout(&mut cx, root, space);
@@ -240,6 +245,7 @@ impl<'d> Layout<'d> {
             let mut up = b;
             while up != tree::NONE {
                 st.cache[up as usize] = cache::EMPTY;
+                st.measures[up as usize] = cache::EMPTY;
                 st.intrinsic[up as usize] = None;
                 up = st.tree.get(up).parent;
             }

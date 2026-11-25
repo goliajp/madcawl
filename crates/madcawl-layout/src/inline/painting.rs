@@ -64,6 +64,7 @@ impl Layout<'_> {
             fonts: &mut self.fonts,
             para: &mut self.para,
             cache: &mut st.cache,
+            measures: &mut st.measures,
             height_readers: &st.height_readers,
             intrinsic: &mut st.intrinsic,
             icb: self.viewport,
@@ -71,6 +72,8 @@ impl Layout<'_> {
             counters: &mut crate::Counters::default(),
             reuse: self.reuse,
             scale: self.scale,
+            measuring: false,
+            inexact: 0,
         };
         let mut ifc = Ifc::default();
         collect::collect(&mut cx, root, &mut ifc);
