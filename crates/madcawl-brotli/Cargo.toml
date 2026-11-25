@@ -1,0 +1,12 @@
+[package]
+name = "madcawl-brotli"
+description = "A streaming Brotli decoder (RFC 7932) with a bounded output"
+version.workspace = true
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true

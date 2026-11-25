@@ -1,0 +1,19 @@
+Test vectors for the Brotli decoder.
+
+Files named <name> and <name>.compressed[.NN] are from the reference
+implementation, https://github.com/google/brotli, directory tests/testdata,
+at commit fbadc67bfce560b92e922f5645cc95bbffe38420 (MIT license,
+Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors). Originals that
+are large and repetitive are not copied; the tests build them:
+
+  zeros               262144 zero bytes
+  zerosukkanooa       zeros followed by ukkonooa
+  quickfox_repeated   quickfox repeated 4096 times
+  backward65536       256 zero bytes, 65280 bytes "X", 256 zero bytes
+
+These three were made with the brotli command line tool 1.2.1 to cover
+window sizes the reference vectors do not:
+
+  asyoulik.txt.w10.compressed       brotli -q 11 -w 10 asyoulik.txt
+  quickfox_repeated.w10.compressed  brotli -q 11 -w 10 quickfox_repeated
+  monkey.w24.compressed             brotli -q 11 -w 24 monkey

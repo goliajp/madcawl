@@ -29,6 +29,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "madcawl-brotli"
+version = "0.0.1"
+
+[[package]]
 name = "madcawl-css"
 version = "0.0.1"
 dependencies = [
@@ -89,6 +93,7 @@ name = "madcawl-net"
 version = "0.0.1"
 dependencies = [
  "alt-url",
+ "madcawl-brotli",
  "torajs-flate",
  "torajs-http1",
  "torajs-tls",
