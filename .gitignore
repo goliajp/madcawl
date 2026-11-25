@@ -1,2 +1,3 @@
 /target
 /tools/fuzz/target
+/tools/fuzz-agent/target

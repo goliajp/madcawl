@@ -1,0 +1,23 @@
+[package]
+name = "madcawl-fuzz-agent"
+description = "Deterministic mutation fuzzing of the agent protocol's request frames, as a page and a host answer them"
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# its own workspace, apart from tools/fuzz: this target needs the layout,
+# text and network stack, which build on macOS only and reach crates of
+# other repositories
+[workspace]
+
+[dependencies]
+madcawl-agent = { path = "../../crates/madcawl-agent" }
+madcawl-shell = { path = "../../crates/madcawl-shell" }
+
+[profile.release]
+# a panic is a finding: unwind so the driver can record it and go on
+panic = "unwind"
+debug-assertions = true
+overflow-checks = true
+debug = 1
