@@ -50,6 +50,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "madcawl-form"
+version = "0.0.1"
+dependencies = [
+ "alt-url",
+ "madcawl-dom",
+ "madcawl-html",
+ "madcawl-str",
+]
+
+[[package]]
 name = "madcawl-html"
 version = "0.0.1"
 dependencies = [
@@ -103,7 +113,12 @@ dependencies = [
 name = "madcawl-netd"
 version = "0.0.1"
 dependencies = [
+ "alt-url",
+ "madcawl-dom",
+ "madcawl-form",
+ "madcawl-html",
  "madcawl-net",
+ "madcawl-str",
 ]
 
 [[package]]

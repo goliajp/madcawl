@@ -16,6 +16,7 @@ pub mod pool;
 pub mod psl;
 pub mod sock;
 pub mod stream;
+pub mod submit;
 pub mod tls;
 pub mod trust;
 pub mod wire;

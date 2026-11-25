@@ -1,0 +1,20 @@
+[package]
+name = "madcawl-form"
+description = "Form submission without script: a form's entry list from the DOM, its URL-encoded, multipart and plain-text encodings, and the request it makes"
+version.workspace = true
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+# its own crate so that the shell and the agent can build a submission
+# without the network stack, and the DOM needs no URL parser
+[dependencies]
+alt-url = { path = "../../../alt/crates/alt-url" }
+madcawl-dom = { path = "../madcawl-dom" }
+madcawl-html = { path = "../madcawl-html" }
+madcawl-str = { path = "../madcawl-str" }

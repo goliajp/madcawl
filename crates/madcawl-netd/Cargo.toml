@@ -19,4 +19,11 @@ path = "src/main.rs"
 path = "src/lib.rs"
 
 [dependencies]
+alt-url = { path = "../../../alt/crates/alt-url" }
 madcawl-net = { path = "../madcawl-net" }
+
+[dev-dependencies]
+madcawl-dom = { path = "../madcawl-dom" }
+madcawl-form = { path = "../madcawl-form" }
+madcawl-html = { path = "../madcawl-html" }
+madcawl-str = { path = "../madcawl-str" }
