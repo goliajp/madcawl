@@ -21,6 +21,7 @@ madcawl-css = { path = "../madcawl-css" }
 madcawl-dom = { path = "../madcawl-dom" }
 madcawl-html = { path = "../madcawl-html" }
 madcawl-layout = { path = "../madcawl-layout" }
+madcawl-net = { path = "../madcawl-net" }
 madcawl-paint = { path = "../madcawl-paint" }
 madcawl-str = { path = "../madcawl-str" }
 

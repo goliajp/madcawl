@@ -143,6 +143,7 @@ dependencies = [
  "madcawl-html",
  "madcawl-layout",
  "madcawl-mcp",
+ "madcawl-net",
  "madcawl-paint",
  "madcawl-str",
 ]

@@ -5,7 +5,8 @@
 //! <file|-> -o <out.png>` lays it out in a 1280x800 viewport and paints
 //! the first screen (`--full`: the whole page) offscreen at device scale
 //! 2 (`--scale 1` for 1); `madcawl-shell --serve <socket>` serves
-//! windowless pages to agents over a Unix socket.
+//! windowless pages to agents over a Unix socket; `madcawl-shell fetch
+//! <url> -o <file>` saves a page fetched over the network.
 
 use std::io::{Read as _, Write as _};
 use std::path::Path;
@@ -20,6 +21,7 @@ use madcawl_shell::{Read, Shown, audit, read, rusage, serve, shot};
 const USAGE: &str = "usage: madcawl-shell read <file|-> [--charset <label>] [--stats <file>]
        madcawl-shell audit <file|-> [--charset <label>]
        madcawl-shell shot <file|-> -o <out.png> [--charset <label>] [--scale 1|2] [--full]
+       madcawl-shell fetch <url> -o <file>
        ";
 
 /// What the command line asked for.
@@ -268,6 +270,15 @@ fn main() -> ExitCode {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     if let ["--serve", rest @ ..] = args.as_slice() {
         return cmd_serve(rest);
+    }
+    if let ["fetch", url, "-o", out] = args.as_slice() {
+        return match madcawl_shell::fetch::command(url, out) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("madcawl-shell: {e}");
+                ExitCode::FAILURE
+            }
+        };
     }
     let Some(a) = parse_args(&args) else {
         eprintln!("{USAGE}{}", serve::USAGE);
