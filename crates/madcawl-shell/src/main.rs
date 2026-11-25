@@ -1,7 +1,10 @@
 //! `madcawl-shell read <file|->` reads a local page (no scripts, no
 //! network) as text an agent can read, with how long each stage took
 //! and the peak memory; `madcawl-shell audit <file|->` reads it and
-//! checks that nothing hidden made it into the text.
+//! checks that nothing hidden made it into the text; `madcawl-shell shot
+//! <file|-> -o <out.png>` lays it out in a 1280x800 viewport and paints
+//! the first screen (`--full`: the whole page) offscreen at device scale
+//! 2 (`--scale 1` for 1).
 
 use std::io::{Read as _, Write as _};
 use std::path::Path;
@@ -11,10 +14,11 @@ use std::time::{Duration, Instant};
 use madcawl_dom::{Dom, NodeKind};
 use madcawl_html::Encoding;
 use madcawl_shell::load::{self, Sheets};
-use madcawl_shell::{Read, Shown, audit, read, rusage};
+use madcawl_shell::{Read, Shown, audit, read, rusage, shot};
 
 const USAGE: &str = "usage: madcawl-shell read <file|-> [--charset <label>] [--stats <file>]
-       madcawl-shell audit <file|-> [--charset <label>]";
+       madcawl-shell audit <file|-> [--charset <label>]
+       madcawl-shell shot <file|-> -o <out.png> [--charset <label>] [--scale 1|2] [--full]";
 
 /// What the command line asked for.
 struct Args<'a> {
@@ -22,6 +26,9 @@ struct Args<'a> {
     path: &'a str,
     charset: Option<Encoding>,
     stats: Option<&'a str>,
+    out: Option<&'a str>,
+    scale: f32,
+    full: bool,
 }
 
 fn parse_args<'a>(args: &[&'a str]) -> Option<Args<'a>> {
@@ -33,17 +40,27 @@ fn parse_args<'a>(args: &[&'a str]) -> Option<Args<'a>> {
         path,
         charset: None,
         stats: None,
+        out: None,
+        scale: 2.0,
+        full: false,
     };
     let mut rest = rest.iter();
     while let Some(&opt) = rest.next() {
+        if opt == "--full" && *cmd == "shot" {
+            a.full = true;
+            continue;
+        }
         let v = *rest.next()?;
         match opt {
             "--charset" => a.charset = Some(Encoding::for_label(v.as_bytes())?),
             "--stats" if *cmd == "read" => a.stats = Some(v),
+            "-o" if *cmd == "shot" => a.out = Some(v),
+            "--scale" if *cmd == "shot" && matches!(v, "1" | "2") => a.scale = v.parse().ok()?,
             _ => return None,
         }
     }
-    matches!(*cmd, "read" | "audit").then_some(a)
+    let ok = matches!(*cmd, "read" | "audit") || *cmd == "shot" && a.out.is_some();
+    ok.then_some(a)
 }
 
 struct Run {
@@ -205,6 +222,31 @@ fn cmd_audit(a: &Args) -> std::io::Result<bool> {
     })
 }
 
+fn cmd_shot(a: &Args) -> std::io::Result<()> {
+    let bytes = input(a.path)?;
+    let (dom, encoding) = load::parse(&bytes, a.charset);
+    let base = (a.path != "-").then(|| Path::new(a.path).parent().unwrap_or(Path::new(".")));
+    let device = madcawl_css::style::Device {
+        scale: a.scale as f64,
+        ..Default::default()
+    };
+    let styles = load::style_for(&dom, base, encoding, &mut Sheets::default(), device);
+    let o = shot::Options {
+        scale: a.scale,
+        full: a.full,
+    };
+    let s = shot::shot(&dom, &styles, o);
+    shot::write(&s, Path::new(a.out.unwrap_or("out.png")))?;
+    let mut e = format!(
+        "size {}x{}\npage_height_px {:.0}\nentries {}\nglyphs {}\nculled {}\ndropped {}\n",
+        s.bitmap.width, s.bitmap.height, s.page_height, s.entries, s.glyphs, s.culled, s.dropped
+    );
+    for (k, d) in s.times {
+        e.push_str(&format!("time_ms.{k} {}\n", ms(d)));
+    }
+    std::io::stderr().write_all(e.as_bytes())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -214,6 +256,7 @@ fn main() -> ExitCode {
     };
     let done = match a.cmd {
         "read" => cmd_read(&a).map(|_| true),
+        "shot" => cmd_shot(&a).map(|_| true),
         _ => cmd_audit(&a),
     };
     match done {

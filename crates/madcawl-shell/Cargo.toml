@@ -1,6 +1,6 @@
 [package]
 name = "madcawl-shell"
-description = "The windowless host: loads a page and reads it back as text an agent can act on"
+description = "The windowless host: loads a page and reads it back as text an agent can act on, or paints it to a PNG"
 version.workspace = true
 publish = false
 edition.workspace = true
@@ -19,4 +19,6 @@ path = "src/main.rs"
 madcawl-css = { path = "../madcawl-css" }
 madcawl-dom = { path = "../madcawl-dom" }
 madcawl-html = { path = "../madcawl-html" }
+madcawl-layout = { path = "../madcawl-layout" }
+madcawl-paint = { path = "../madcawl-paint" }
 madcawl-str = { path = "../madcawl-str" }

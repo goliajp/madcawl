@@ -1,0 +1,22 @@
+[package]
+name = "madcawl-paint"
+description = "The fragment tree to a display list in paint order, and an offscreen raster of it to PNG"
+version.workspace = true
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+madcawl-css = { path = "../madcawl-css" }
+madcawl-dom = { path = "../madcawl-dom" }
+madcawl-layout = { path = "../madcawl-layout" }
+madcawl-str = { path = "../madcawl-str" }
+madcawl-text = { path = "../madcawl-text" }
+
+[dev-dependencies]
+madcawl-html = { path = "../madcawl-html" }

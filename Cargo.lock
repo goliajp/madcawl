@@ -66,12 +66,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "madcawl-paint"
+version = "0.0.1"
+dependencies = [
+ "madcawl-css",
+ "madcawl-dom",
+ "madcawl-html",
+ "madcawl-layout",
+ "madcawl-str",
+ "madcawl-text",
+]
+
+[[package]]
 name = "madcawl-shell"
 version = "0.0.1"
 dependencies = [
  "madcawl-css",
  "madcawl-dom",
  "madcawl-html",
+ "madcawl-layout",
+ "madcawl-paint",
  "madcawl-str",
 ]
 
