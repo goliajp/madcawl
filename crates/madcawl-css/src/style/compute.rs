@@ -4,32 +4,27 @@
 //! the parent's values and the initial ones, the computed values.
 
 use std::borrow::Cow;
-use std::cell::Cell;
 use std::collections::HashMap;
 
 use madcawl_dom::{Dom, NodeId, NodeKind};
 use madcawl_str::atom;
 
-use crate::Span;
 use crate::parser::{BlockItem, parse_declaration_list};
 
 use super::Styles;
 use super::ancestors::Ancestors;
 use super::computed::ComputedStyle;
-use super::custom;
 use super::device::Device;
 use super::hints::hints;
 use super::matching::{Matcher, text};
 use super::order::{Cascaded, Key};
 use super::prepared::Prepared;
-use super::props::{self as props, Decl, Prop, Specified, Wide, parse_block};
+use super::props::{Decl, Prop, Specified, Wide, parse_block};
 use super::resolve::{Cx, apply, fix_font, fix_up};
 use super::rules::{NONE, Rules};
-use super::shorthand;
 use super::states::ElementStates;
-use super::vals::items;
+use super::substituted::Made;
 use super::values::{Display, Float, Position};
-use super::var::substitute;
 
 pub(crate) enum Src {
     Block(u32),
@@ -52,9 +47,11 @@ fn parse_list(text: &str) -> Box<[Decl]> {
 pub(crate) struct Run<'r, 'a> {
     pub m: Matcher<'r, 'a>,
     pub prep: &'r Prepared,
+    /// Style attributes parsed; nothing is removed during a run, as the
+    /// custom property sets and `made` name declarations by address
     pub inline: HashMap<String, Box<[Decl]>>,
     /// The presentational hints of the element being styled, and the
-    /// blocks hints parsed to
+    /// blocks hints parsed to, kept for the run as `inline` is
     pub hint: Option<String>,
     pub hinted: HashMap<String, Box<[Decl]>>,
     pub candidates: Vec<u32>,
@@ -74,6 +71,8 @@ pub(crate) struct Run<'r, 'a> {
     pub ancestors: Ancestors,
     /// Every rule of a bucket set is a candidate for every element
     pub every_rule: bool,
+    /// Values with `var()` in them, substituted
+    pub made: Made,
 }
 
 impl<'r, 'a> Run<'r, 'a> {
@@ -107,6 +106,7 @@ impl<'r, 'a> Run<'r, 'a> {
             named: HashMap::new(),
             ancestors: Ancestors::default(),
             every_rule: false,
+            made: Made::default(),
         }
     }
 
@@ -163,31 +163,6 @@ impl<'r, 'a> Run<'r, 'a> {
                 self.matched.push((k, important, Src::Block(e.block)));
             }
         }
-    }
-
-    /// The value `d` declares for `p` once `var()` in it is substituted;
-    /// `None` when that makes it invalid.
-    fn substituted(
-        &self,
-        p: Prop,
-        d: &Decl,
-        sets: &[custom::CustomSet],
-        set: u32,
-        budget: &Cell<usize>,
-    ) -> Option<Specified> {
-        let raw = d.raw.as_deref().expect("the text var() is in");
-        let mut get = |n: &str| custom::lookup(sets, set, n);
-        let t = substitute(raw, true, &mut get, budget)?;
-        let span = Span::new(0, t.len());
-        let v = match d.short {
-            None => props::parse(p, &t, span)?,
-            Some(sh) => {
-                let xs = items(&t, span, 64)?;
-                let all = shorthand::parse(sh, &t, &xs)?;
-                all.into_iter().find(|(w, _)| *w == d.what)?.1
-            }
-        };
-        (v != Specified::Unresolved).then_some(v)
     }
 
     /// The computed values of `el` from what `collect` found; its custom

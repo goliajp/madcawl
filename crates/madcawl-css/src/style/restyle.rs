@@ -122,8 +122,8 @@ impl Cascade<'_> {
     /// `changes`, with the elements in the states `states` gives. Styles
     /// made by another cascade or in another quirks mode, or whose
     /// `PathKey` tables have grown past twice the document in keys or in
-    /// bytes, or whose pseudo-element memo past twice its nodes, are made
-    /// again in full.
+    /// bytes, or whose pseudo-element memo or custom property sets past
+    /// twice its nodes, are made again in full.
     pub fn restyle(
         &self,
         dom: &Dom,
@@ -138,7 +138,7 @@ impl Cascade<'_> {
         // document many times over
         let held = 2 * dom.bytes() + (1 << 20);
         let stale = styles.generation != self.generation || styles.quirks != super::is_quirks(dom);
-        let memo = styles.pseudo_memo.len() > bound;
+        let memo = styles.pseudo_memo.len() > bound || styles.sets.len() > bound;
         if stale || memo || styles.path_keys() > bound || styles.path_key_bytes() > held {
             return self.full(dom, styles, states);
         }

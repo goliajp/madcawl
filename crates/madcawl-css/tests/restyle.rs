@@ -246,3 +246,43 @@ fn an_after_appearing_counts_the_element_as_changed() {
     let r = check(&c, &dom, &mut s, &st, &ch);
     assert_eq!((r.styled, r.changed, r.full), (1, 1, false));
 }
+
+#[test]
+fn a_custom_property_in_a_style_attribute_restyles_to_its_new_value() {
+    // each restyle parses style attributes anew, so the declarations of
+    // one run may sit where another run's were
+    let mut dom = parse("<!doctype html><div id=a style='--k: 0px'><i></i></div>");
+    let (list, st) = (sheets(&dom), ElementStates::new());
+    let c = Pair::new(&list);
+    let mut s = c.compute_with(&dom, &st);
+    let a = by_id(&dom, "a");
+    for i in 1..20 {
+        let v = format!("{i}px");
+        let ch = [set(&mut dom, a, atom!("style"), &format!("--k: {v}"))];
+        check(&c, &dom, &mut s, &st, &ch);
+        assert_eq!(s.custom_property(a, "--k"), Some(v.as_str()), "step {i}");
+    }
+}
+
+#[test]
+fn restyling_custom_properties_again_and_again_starts_over_in_full() {
+    // without `PathKey` every restyle of #a makes it a new set; the sets
+    // a restyle leaves behind are bounded by the document
+    let mut dom = parse("<!doctype html><div id=a style='--k: 0px'><i></i></div>");
+    let st = ElementStates::new();
+    let c = Pair::new(&[]);
+    let mut s = c.plain.compute_with(&dom, &st);
+    let a = by_id(&dom, "a");
+    let mut fulls = 0;
+    for i in 0..3000 {
+        let ch = [set(
+            &mut dom,
+            a,
+            atom!("style"),
+            &format!("--k: {}px", i % 2),
+        )];
+        fulls += usize::from(c.plain.restyle(&dom, &mut s, &st, &ch).full);
+    }
+    assert!((1..10).contains(&fulls), "{fulls} full runs");
+    assert_eq!(s.custom_property(a, "--k"), Some("1px"));
+}

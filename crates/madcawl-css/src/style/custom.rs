@@ -11,9 +11,10 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use super::cycles;
 use super::props::{Decl, Specified, Wide};
 use super::rules::NONE;
-use super::var::{MAX_LEN, has_var, substitute};
+use super::var::{MAX_LEN, substitute};
 
 const MAX_DEPTH: u8 = 8;
 
@@ -46,24 +47,20 @@ pub(crate) fn lookup<'s>(sets: &'s [CustomSet], mut k: u32, name: &str) -> Optio
     None
 }
 
-/// Every name and value of set `k`, the nearest set's winning.
+/// Every name and value of set `k`, by name, the nearest set's winning.
 pub(crate) fn all(sets: &[CustomSet], mut k: u32) -> Vec<(&str, &str)> {
     let mut seen: Vec<(&str, Option<&str>)> = Vec::new();
     while k != NONE {
         let s = &sets[k as usize];
-        for (n, v) in s.vars.iter() {
-            if !seen.iter().any(|(m, _)| *m == &**n) {
-                seen.push((n, v.as_deref()));
-            }
-        }
+        seen.extend(s.vars.iter().map(|(n, v)| (&**n, v.as_deref())));
         k = s.parent;
     }
-    let mut out: Vec<(&str, &str)> = seen
-        .into_iter()
+    // a stable sort keeps the nearest of each name first
+    seen.sort_by(|a, b| a.0.cmp(b.0));
+    seen.dedup_by(|farther, nearer| farther.0 == nearer.0);
+    seen.into_iter()
         .filter_map(|(n, v)| v.map(|v| (n, v)))
-        .collect();
-    out.sort_unstable();
-    out
+        .collect()
 }
 
 #[derive(Clone)]
@@ -90,8 +87,11 @@ enum State<'a> {
 
 /// An element's declared custom properties resolved over its parent's
 /// set: `var()` in them substituted, a cycle making every property in
-/// it guaranteed-invalid, fallbacks or not.
+/// it guaranteed-invalid, fallbacks or not. The cycles are found before
+/// any is resolved (`cycles.rs`), so what is invalid does not depend on
+/// which property resolving starts from.
 struct Resolver<'a> {
+    /// Sorted by name, one of each
     declared: &'a [(&'a str, &'a Decl)],
     state: Vec<State<'a>>,
     /// The properties being resolved, outermost first
@@ -104,13 +104,16 @@ struct Resolver<'a> {
 
 impl<'a> Resolver<'a> {
     fn get(&mut self, name: &str) -> Option<Val<'a>> {
-        match self.declared.iter().position(|(n, _)| *n == name) {
-            Some(i) => self.value(i),
-            None => lookup(self.sets, self.parent, name).map(Val::Ref),
+        match self.declared.binary_search_by(|(n, _)| (*n).cmp(name)) {
+            Ok(i) => self.value(i),
+            Err(_) => lookup(self.sets, self.parent, name).map(Val::Ref),
         }
     }
 
     fn value(&mut self, i: usize) -> Option<Val<'a>> {
+        if self.cyclic[i] {
+            return None;
+        }
         match &self.state[i] {
             State::Done(v) => return v.clone(),
             State::Busy => {
@@ -133,7 +136,7 @@ impl<'a> Resolver<'a> {
         let v = match (&d.value, &d.raw) {
             (Specified::Wide(Wide::Initial), _) => None,
             (Specified::Wide(_), _) => lookup(self.sets, self.parent, name).map(Val::Ref),
-            (_, Some(raw)) if has_var(raw) => {
+            (_, Some(raw)) if d.substitutes => {
                 substitute(raw, false, &mut |n| self.get(n), budget).map(|v| Val::Own(v.into()))
             }
             (_, raw) => Some(Val::Ref(raw.as_deref().unwrap_or_default())),
@@ -146,7 +149,7 @@ impl<'a> Resolver<'a> {
 }
 
 /// What one cascade run keeps from element to element: the sets made
-/// so far, by parent set and declarations, and what is left of `BUDGET`.
+/// in it, by parent set and declarations, and what is left of `BUDGET`.
 pub(crate) struct Memo {
     made: HashMap<(u32, Box<[usize]>), u32>,
     pub budget: Cell<usize>,
@@ -166,12 +169,17 @@ impl Memo {
         }
     }
 
-    /// A new run of the cascade gets the whole budget again.
-    pub fn new_run(&self) {
+    /// A new run of the cascade gets the whole budget again, and
+    /// forgets the declarations it made sets of: the run before parsed
+    /// style attributes and hints of its own, and a new run may parse
+    /// other declarations where those were.
+    pub fn new_run(&mut self) {
         self.budget.set(BUDGET);
+        self.made.clear();
     }
 
     /// The set an element gets: its parent's when it declares none.
+    /// `declared` is sorted by name, one of each.
     pub fn element_set(
         &mut self,
         sets: &mut Vec<CustomSet>,
@@ -203,15 +211,15 @@ fn make_set(
         declared,
         state: declared.iter().map(|_| State::Todo).collect(),
         stack: Vec::new(),
-        cyclic: vec![false; declared.len()],
+        cyclic: cycles::cyclic(declared),
         sets,
         parent,
         budget,
     };
-    let mut vars: Vec<Var> = (0..declared.len())
+    // in name order already, as `declared` is
+    let vars: Vec<Var> = (0..declared.len())
         .map(|i| (declared[i].0.into(), r.value(i).map(|v| v.as_ref().into())))
         .collect();
-    vars.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     let depth = if parent == NONE {
         0
     } else {

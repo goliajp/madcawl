@@ -32,6 +32,8 @@ pub struct Decl {
     /// The shorthand `raw` is the value of, when it is one
     pub short: Option<Short>,
     pub important: bool,
+    /// A custom property's value has `var()` or `env()` in it
+    pub substitutes: bool,
 }
 
 /// Longhands other engines name with a prefix or an older name.
@@ -86,12 +88,14 @@ pub fn parse_block(src: &str, decls: &[Declaration]) -> Box<[Decl]> {
             if !var::vars_valid(src, d.value) {
                 continue;
             }
+            let raw = text.trim_matches(|c: char| c.is_ascii_whitespace());
             out.push(Decl {
                 what: What::Custom(name.as_str().into()),
                 value: wide(src, d.value).map_or(Specified::Unresolved, Specified::Wide),
-                raw: Some(text.trim_matches(|c: char| c.is_ascii_whitespace()).into()),
+                raw: Some(raw.into()),
                 short: None,
                 important: d.important,
+                substitutes: var::has_var(raw),
             });
             continue;
         }
@@ -103,6 +107,7 @@ pub fn parse_block(src: &str, decls: &[Declaration]) -> Box<[Decl]> {
             value,
             short,
             important: d.important,
+            substitutes: false,
         };
         if name == "all" {
             if let Some(w) = wide(src, d.value) {

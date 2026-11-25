@@ -72,9 +72,20 @@ pub(crate) type Won<'d> = [Option<&'d Decl>; PROPS];
 
 pub(crate) struct Cascaded<'d> {
     pub won: Won<'d>,
+    /// The winning custom property declarations, sorted by name
     pub customs: Vec<(&'d str, &'d Decl)>,
     /// Some declaration was flow-relative
     pub logical: bool,
+}
+
+/// `customs`, in the order the cascade found them, cut to the first of
+/// each name and sorted by name. Sorting rather than looking each name
+/// up among those kept: an element some rule gives thousands of custom
+/// properties would otherwise take millions of comparisons.
+fn first_by_name(customs: &mut Vec<(&str, &Decl)>) {
+    // a stable sort keeps the first of each name first
+    customs.sort_by(|a, b| a.0.cmp(b.0));
+    customs.dedup_by(|later, first| later.0 == first.0);
 }
 
 impl Run<'_, '_> {
@@ -104,9 +115,7 @@ impl Run<'_, '_> {
                         }
                     }
                     What::Custom(name) => {
-                        if !customs.iter().any(|(n, _)| *n == &**name) {
-                            customs.push((name, d));
-                        }
+                        customs.push((name, d));
                         continue;
                     }
                 };
@@ -125,6 +134,7 @@ impl Run<'_, '_> {
                 }
             }
         }
+        first_by_name(&mut customs);
         Cascaded {
             won,
             customs,
