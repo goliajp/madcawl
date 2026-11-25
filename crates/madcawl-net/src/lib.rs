@@ -13,6 +13,7 @@ pub mod error;
 pub mod fetch;
 pub mod http1;
 pub mod pool;
+pub mod psl;
 pub mod sock;
 pub mod stream;
 pub mod tls;
