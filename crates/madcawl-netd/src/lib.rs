@@ -21,13 +21,25 @@
 //! Served with a control channel (`serve_guarded`), every connection
 //! speaks for one document its host registered, and what it claims is
 //! checked against that document (`guard`).
+//!
+//! Given a profile's downloads directory, a navigation's response that is
+//! an attachment or of a type not shown as a page, and the response to a
+//! fetch that asks for it, is saved there instead of going out as BODY
+//! frames (`download`).
 
+mod admit;
+mod download;
 mod fetch;
 mod guard;
 mod hello;
+pub mod profile;
 
+pub use admit::ServerLimits;
+pub use download::{Downloads, is_attachment, renders, sanitize, suggested};
 pub use guard::{Guard, TOKEN_LEN};
+pub use profile::{Loaded, Profile, ProfileError};
 
+use admit::{Shared, Slot, admit};
 use fetch::run_fetch;
 use guard::{Binding, Screened};
 use hello::read_next;
@@ -39,7 +51,7 @@ use madcawl_net::{Client, Url};
 use std::io;
 use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -49,106 +61,9 @@ const ENFILE: i32 = 23;
 /// again at once would spin
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(50);
 
-/// Requests are shared out so that no client can lock the others out:
-/// each client may always run `reserve()` requests, and runs more only by
-/// drawing on a shared pool of what is left of `requests` once every
-/// possible client's reserve is set aside. A client that holds up to
-/// `in_flight` requests leaves the others their reserves; a cap of
-/// `clients × in_flight` in all would not be needed for that, and would
-/// allow that many threads.
-#[derive(Clone, Copy, Debug)]
-pub struct ServerLimits {
-    pub clients: usize,
-    /// requests at a time from one client
-    pub in_flight: usize,
-    /// requests at a time from all clients together
-    pub requests: usize,
-    /// bytes of request bodies held at a time by all clients together
-    pub body_bytes: usize,
-    /// how long a write to a client may block before the client is dropped
-    pub write_timeout: Duration,
-    /// how long a client served with a control channel may take, in all,
-    /// to bind itself with HELLO before it is dropped
-    pub hello_timeout: Duration,
-}
-
-impl Default for ServerLimits {
-    fn default() -> Self {
-        ServerLimits {
-            clients: 64,
-            in_flight: 32,
-            requests: 256,
-            body_bytes: 64 << 20,
-            write_timeout: Duration::from_secs(30),
-            hello_timeout: Duration::from_secs(10),
-        }
-    }
-}
-
-impl ServerLimits {
-    /// Requests each client may run without drawing on the shared pool;
-    /// all reserves together are at most half of `requests`.
-    pub fn reserve(&self) -> usize {
-        self.requests / (2 * self.clients.max(1))
-    }
-
-    fn shared(&self) -> usize {
-        self.requests - self.clients * self.reserve()
-    }
-}
-
 /// Response headers a content process never sees.
 pub fn is_hidden_response_header(name: &str) -> bool {
     name.eq_ignore_ascii_case("set-cookie") || name.eq_ignore_ascii_case("set-cookie2")
-}
-
-/// `n` units under a cap, given back when dropped.
-struct Slot(Arc<AtomicUsize>, usize);
-
-impl Slot {
-    fn take(count: &Arc<AtomicUsize>, n: usize, cap: usize) -> Option<Slot> {
-        if count.fetch_add(n, Ordering::SeqCst).saturating_add(n) > cap {
-            count.fetch_sub(n, Ordering::SeqCst);
-            return None;
-        }
-        Some(Slot(count.clone(), n))
-    }
-}
-
-impl Drop for Slot {
-    fn drop(&mut self) {
-        self.0.fetch_sub(self.1, Ordering::SeqCst);
-    }
-}
-
-/// The counters all clients share.
-#[derive(Clone, Default)]
-struct Shared {
-    /// requests drawn from the shared pool
-    requests: Arc<AtomicUsize>,
-    body_bytes: Arc<AtomicUsize>,
-}
-
-/// What one running request holds: its place among its client's, a place
-/// in the shared pool unless it is within the client's reserve, and its
-/// body's bytes.
-struct Held {
-    _mine: Slot,
-    _shared: Option<Slot>,
-    _body: Slot,
-}
-
-fn admit(mine: &Arc<AtomicUsize>, shared: &Shared, limits: &ServerLimits, body: usize) -> Result<Held, &'static str> {
-    const BUSY: &str = "too many requests in flight";
-    // only this client's reader adds to `mine`, so it cannot grow meanwhile
-    let within_reserve = mine.load(Ordering::SeqCst) < limits.reserve();
-    let _mine = Slot::take(mine, 1, limits.in_flight).ok_or(BUSY)?;
-    let _shared = match within_reserve {
-        true => None,
-        false => Some(Slot::take(&shared.requests, 1, limits.shared()).ok_or(BUSY)?),
-    };
-    let _body = Slot::take(&shared.body_bytes, body, limits.body_bytes).ok_or("request bodies over their memory budget")?;
-    Ok(Held { _mine, _shared, _body })
 }
 
 /// Cancels a client's fetches when its connection is done with.
@@ -168,7 +83,18 @@ pub fn serve(listener: UnixListener, client: Arc<Client>, limits: ServerLimits) 
 /// Serves each connection `streams` yields until it ends. A failed accept
 /// is logged and the next one tried.
 pub fn serve_streams(streams: impl IntoIterator<Item = io::Result<UnixStream>>, client: Arc<Client>, limits: ServerLimits) {
-    serve_inner(streams, client, limits, None);
+    serve_with(streams, client, limits, None);
+}
+
+/// `serve_streams`, saving downloads into `downloads`; without it every
+/// response goes to the client as BODY frames.
+pub fn serve_with(
+    streams: impl IntoIterator<Item = io::Result<UnixStream>>,
+    client: Arc<Client>,
+    limits: ServerLimits,
+    downloads: Option<Arc<Downloads>>,
+) {
+    serve_inner(streams, Service { client, limits, downloads, guard: None });
 }
 
 /// Serves `listener` with the host's end of the control channel on
@@ -176,7 +102,13 @@ pub fn serve_streams(streams: impl IntoIterator<Item = io::Result<UnixStream>>, 
 /// token was registered for. Returns only when the control channel is
 /// not a connected socket or its thread cannot start, since without it
 /// no client could ever be served.
-pub fn serve_guarded(listener: UnixListener, control: UnixStream, client: Arc<Client>, limits: ServerLimits) -> io::Result<()> {
+pub fn serve_guarded(
+    listener: UnixListener,
+    control: UnixStream,
+    client: Arc<Client>,
+    limits: ServerLimits,
+    downloads: Option<Arc<Downloads>>,
+) -> io::Result<()> {
     control.peer_addr()?;
     let guard = Arc::new(Guard::new(limits.clients));
     let g = guard.clone();
@@ -185,11 +117,21 @@ pub fn serve_guarded(listener: UnixListener, control: UnixStream, client: Arc<Cl
             eprintln!("madcawl-netd: control channel: {e}");
         }
     })?;
-    serve_inner(listener.incoming(), client, limits, Some(guard));
+    serve_inner(listener.incoming(), Service { client, limits, downloads, guard: Some(guard) });
     Ok(())
 }
 
-fn serve_inner(streams: impl IntoIterator<Item = io::Result<UnixStream>>, client: Arc<Client>, limits: ServerLimits, guard: Option<Arc<Guard>>) {
+/// What every connection is served with.
+#[derive(Clone)]
+struct Service {
+    client: Arc<Client>,
+    limits: ServerLimits,
+    downloads: Option<Arc<Downloads>>,
+    guard: Option<Arc<Guard>>,
+}
+
+fn serve_inner(streams: impl IntoIterator<Item = io::Result<UnixStream>>, service: Service) {
+    let limits = service.limits;
     let live = Arc::new(AtomicUsize::new(0));
     let shared = Shared::default();
     for stream in streams {
@@ -208,9 +150,9 @@ fn serve_inner(streams: impl IntoIterator<Item = io::Result<UnixStream>>, client
             eprintln!("madcawl-netd: client socket: {e}");
             continue;
         }
-        let (client, shared, guard) = (client.clone(), shared.clone(), guard.clone());
+        let (service, shared) = (service.clone(), shared.clone());
         let spawned = std::thread::Builder::new().name("netd-client".into()).spawn(move || {
-            let _ = serve_client(stream, slot, &client, &shared, limits, guard.as_deref());
+            let _ = serve_client(stream, slot, &service, &shared);
         });
         if let Err(e) = spawned {
             eprintln!("madcawl-netd: client thread: {e}");
@@ -235,7 +177,8 @@ pub(crate) fn error(id: u64, message: &str) -> Frame {
     Frame::new(kind::ERROR).num(tag::ID, id).str(tag::MESSAGE, message)
 }
 
-fn serve_client(stream: UnixStream, slot: Slot, client: &Arc<Client>, shared: &Shared, limits: ServerLimits, guard: Option<&Guard>) -> io::Result<()> {
+fn serve_client(stream: UnixStream, slot: Slot, service: &Service, shared: &Shared) -> io::Result<()> {
+    let (client, limits, guard) = (&service.client, service.limits, service.guard.as_deref());
     let mut reader = stream.try_clone()?;
     let writer: Writer = Arc::new(Mutex::new(stream));
     let mine = Arc::new(AtomicUsize::new(0));
@@ -271,10 +214,10 @@ fn serve_client(stream: UnixStream, slot: Slot, client: &Arc<Client>, shared: &S
                         continue;
                     }
                 };
-                let (client, w, c) = (client.clone(), writer.clone(), cancel.0.clone());
+                let (client, w, c, d) = (client.clone(), writer.clone(), cancel.0.clone(), service.downloads.clone());
                 let spawned = std::thread::Builder::new().name("netd-fetch".into()).spawn(move || {
                     let _held = held;
-                    let _ = run_fetch(&client, &w, id, frame, c);
+                    let _ = run_fetch(&client, &w, id, frame, c, d.as_deref());
                 });
                 if let Err(e) = spawned {
                     send(&writer, &error(id, &format!("cannot start the request: {e}")))?;
