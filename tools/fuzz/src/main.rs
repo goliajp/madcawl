@@ -1,19 +1,20 @@
-//! Mutation fuzzing of the HTML tokenizer and tree builder and of the
-//! CSS tokenizer and selector parser, with no fuzzing library: inputs
-//! are the inputs of the parsers' test suites, mutated by a seeded
-//! generator, so a run is reproducible from its seed. Each input is
-//! checked three ways: the parser does not panic; fed the second way it
-//! gives what it gives fed whole (HTML: in random chunks; CSS: see
-//! `css.rs`); its work (`madcawl_html::steps`, `madcawl_css::steps`)
-//! stays under a fixed multiple of its length. The tree target also
-//! audits the counts and links of both DOMs it built
+//! Mutation fuzzing of the HTML tokenizer and tree builder, of the CSS
+//! tokenizer and selector parser and of the Brotli decoder, with no
+//! fuzzing library: inputs are the inputs of the test suites, mutated by
+//! a seeded generator, so a run is reproducible from its seed. Each input
+//! is checked three ways: the parser does not panic; fed the second way
+//! it gives what it gives fed whole (HTML: in random chunks; CSS: see
+//! `css.rs`; Brotli: see `brotli.rs`); its work (`madcawl_html::steps`,
+//! `madcawl_css::steps`) stays under a fixed multiple of its length. The
+//! tree target also audits the counts and links of both DOMs it built
 //! (`madcawl_dom::Dom::audit`).
 //!
-//!   madcawl-fuzz <tokenizer|tree|css-tokenizer|css-selectors> --seconds N [--seed S] [--out DIR] [--steps-per-byte K]
+//!   madcawl-fuzz <tokenizer|tree|css-tokenizer|css-selectors|brotli> --seconds N [--seed S] [--out DIR] [--steps-per-byte K]
 //!
 //! Prints one JSON line with the counts at the end; every input that
 //! failed a check is written to DIR with what it failed.
 
+mod brotli;
 mod css;
 #[allow(dead_code)]
 #[path = "../../../crates/madcawl-html/tests/support/json.rs"]
@@ -149,13 +150,22 @@ fn main() {
         "tree" => targets::tree,
         "css-tokenizer" => css::tokenizer,
         "css-selectors" => css::selectors,
-        t => panic!("no target {t:?}: tokenizer, tree, css-tokenizer or css-selectors"),
+        "brotli" => brotli::decode,
+        t => panic!("no target {t:?}: tokenizer, tree, css-tokenizer, css-selectors or brotli"),
     };
     let is_css = a.target.starts_with("css-");
-    let pieces = if is_css { mutate::CSS } else { mutate::HTML };
+    let pieces = match a.target.as_str() {
+        "brotli" => brotli::PIECES,
+        _ if is_css => mutate::CSS,
+        _ => mutate::HTML,
+    };
     std::fs::create_dir_all(&a.out).unwrap();
     std::panic::set_hook(Box::new(|_| {}));
-    let seeds = if is_css { css_corpus() } else { corpus() };
+    let seeds = match a.target.as_str() {
+        "brotli" => brotli::corpus(),
+        _ if is_css => css_corpus(),
+        _ => corpus(),
+    };
     let mut rng = Rng(a.seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
     let mut c = Counts::default();
     let end = Instant::now() + Duration::from_secs(a.seconds);

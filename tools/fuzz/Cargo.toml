@@ -1,6 +1,6 @@
 [package]
 name = "madcawl-fuzz"
-description = "Deterministic mutation fuzzing of the HTML and CSS parsers"
+description = "Deterministic mutation fuzzing of the HTML and CSS parsers and the Brotli decoder"
 version = "0.0.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -14,6 +14,7 @@ publish = false
 madcawl-html = { path = "../../crates/madcawl-html", features = ["steps"] }
 madcawl-dom = { path = "../../crates/madcawl-dom" }
 madcawl-css = { path = "../../crates/madcawl-css", features = ["steps"] }
+madcawl-brotli = { path = "../../crates/madcawl-brotli" }
 
 [profile.release]
 # a panic is a finding: unwind so the driver can record it and go on

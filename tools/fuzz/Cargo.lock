@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "madcawl-brotli"
+version = "0.0.1"
+
+[[package]]
 name = "madcawl-css"
 version = "0.0.1"
 dependencies = [
@@ -23,6 +27,7 @@ dependencies = [
 name = "madcawl-fuzz"
 version = "0.0.1"
 dependencies = [
+ "madcawl-brotli",
  "madcawl-css",
  "madcawl-dom",
  "madcawl-html",
