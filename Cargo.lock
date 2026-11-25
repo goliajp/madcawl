@@ -3,6 +3,17 @@
 version = 4
 
 [[package]]
+name = "madcawl-agent"
+version = "0.0.1"
+dependencies = [
+ "madcawl-css",
+ "madcawl-dom",
+ "madcawl-html",
+ "madcawl-layout",
+ "madcawl-str",
+]
+
+[[package]]
 name = "madcawl-bindings"
 version = "0.0.1"
 dependencies = [

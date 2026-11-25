@@ -1,0 +1,19 @@
+[package]
+name = "madcawl-agent"
+description = "The semantic tree beside the DOM, element references, the views an agent reads, diffs, and the agent protocol frames"
+version.workspace = true
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+madcawl-css = { path = "../madcawl-css" }
+madcawl-dom = { path = "../madcawl-dom" }
+madcawl-html = { path = "../madcawl-html" }
+madcawl-layout = { path = "../madcawl-layout" }
+madcawl-str = { path = "../madcawl-str" }
