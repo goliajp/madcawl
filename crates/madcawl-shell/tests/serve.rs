@@ -195,3 +195,51 @@ fn the_audit_log_has_a_line_a_request_and_no_page_text() {
         "{log}"
     );
 }
+
+#[test]
+fn the_host_tells_its_counters_only_when_started_to() {
+    let stats = || Frame::new(kind::STATS).encode_vec();
+    let f = Fixture::new();
+    f.start();
+    let r = raw(&f, &stats());
+    assert_eq!(r.kind, kind::ERROR);
+    assert_eq!(r.get_num(tag::CODE), Some(code::UNKNOWN));
+
+    let mut f = Fixture::new();
+    f.config.stats = true;
+    std::fs::write(f.dir.join("s.css"), ".counted-sheet { color: red }").unwrap();
+    let page = f.dir.join("linked.html");
+    std::fs::write(
+        &page,
+        "<!doctype html><link rel=stylesheet href=s.css><p class=counted-sheet>a",
+    )
+    .unwrap();
+    f.start();
+    let mut m = f.mcp();
+    m.ok("open", &path_arg(&page.display().to_string()));
+    let r = raw(&f, &stats());
+    assert_eq!(r.kind, kind::RESULT);
+    let text = r.get_str(tag::TEXT).unwrap();
+    let value = |name: &str| -> u64 {
+        let line = text
+            .lines()
+            .find(|l| l.split(' ').next() == Some(name))
+            .unwrap();
+        line.split(' ').nth(1).unwrap().parse().unwrap()
+    };
+    // the cache is the process's: the other tests' hosts, whose session
+    // numbers are the same, may have dropped what this one holds meanwhile
+    assert!(value("sheet-cache-parses") >= 1, "{text}");
+    assert!(
+        value("sheet-cache-weight") <= value("sheet-cache-cap"),
+        "{text}"
+    );
+    assert!(
+        value("sheet-cache-names") <= 4 * value("sheet-cache-entries"),
+        "{text}"
+    );
+    assert_eq!(value("sheet-cache-cap"), 64 << 20, "{text}");
+    assert!(value("pages") >= 1, "{text}");
+    drop(m);
+    assert!(f.audit().lines().any(|l| l.contains("stats")));
+}

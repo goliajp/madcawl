@@ -41,6 +41,9 @@ pub struct Config {
     pub uploads: Vec<PathBuf>,
     /// Origins a form with a password field may be submitted to
     pub approve: Vec<String>,
+    /// answer `STATS` requests: what the process holds for all its
+    /// sessions, so one session would learn of the others' pages
+    pub stats: bool,
 }
 
 impl Config {
@@ -68,17 +71,19 @@ impl Config {
             download_cap: 256 << 20,
             uploads: Vec::new(),
             approve: Vec::new(),
+            stats: false,
         }
     }
 }
 
-pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds>] [--listen-fd N] [--exit-idle <seconds>] [--net] [--downloads <dir>] [--upload-allow <dir>]... [--approve <origin>]...
+pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds>] [--listen-fd N] [--exit-idle <seconds>] [--net] [--downloads <dir>] [--upload-allow <dir>]... [--approve <origin>]... [--stats]
          pages and their stylesheets open only from below the --allow directories;
          without --allow, only from below the current directory;
          --net lets pages come from http and https URLs, each session's in a cookie jar of its own that starts empty and ends with it;
          --downloads saves downloads below <dir>, a directory per session (default <socket>.downloads);
          --upload-allow lets an upload pick files from below <dir>; none, no uploads;
          --approve lets a form with a password field be submitted to <origin> (scheme://host[:port]);
+         --stats answers the host's own counters (shared stylesheet cache, pages open) to any session;
          --listen-fd accepts on an inherited listening socket instead of binding <socket>;
          --exit-idle exits once no session has been open for that long (checked once a period
          while sessions are open, so up to twice that after the last one ends)";
@@ -95,8 +100,13 @@ pub fn parse_args(args: &[&str]) -> Option<Config> {
     let mut allow = Vec::new();
     let mut rest = rest.iter();
     while let Some(&opt) = rest.next() {
-        if opt == "--net" {
-            c.net = true;
+        let flag = match opt {
+            "--net" => Some(&mut c.net),
+            "--stats" => Some(&mut c.stats),
+            _ => None,
+        };
+        if let Some(f) = flag {
+            *f = true;
             continue;
         }
         let v = *rest.next()?;
@@ -141,7 +151,8 @@ mod tests {
         assert_eq!(c.uploads, [tmp.canonicalize().unwrap()]);
         assert_eq!(c.approve, ["http://127.0.0.1:8"]);
         let c = parse_args(&["/s", "--downloads", "/d"]).unwrap();
-        assert!(!c.net && c.uploads.is_empty() && c.approve.is_empty());
+        assert!(!c.net && !c.stats && c.uploads.is_empty() && c.approve.is_empty());
+        assert!(parse_args(&["/s", "--stats"]).unwrap().stats);
         assert_eq!(c.downloads, Some(PathBuf::from("/d")));
         assert!(parse_args(&["/s", "--upload-allow", "/no/such/dir"]).is_none());
     }

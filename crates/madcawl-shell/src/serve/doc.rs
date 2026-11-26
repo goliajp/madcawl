@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 
 use madcawl_agent::{Frame, Geometry, Inputs, kind, tag};
 use madcawl_css::style::{
-    Device, Fetched, LinkedSheets, Scope, SheetCache, Styles, style_document_cached,
+    Device, Fetched, LinkedSheets, Scope, SheetCache, SheetCacheStats, Styles,
+    style_document_cached,
 };
 use madcawl_dom::Dom;
 use madcawl_html::Encoding;
@@ -20,12 +21,26 @@ use madcawl_net::cookie::site_of;
 use super::net::partition_of;
 use crate::load;
 
-/// The stylesheets the pages of the host have parsed, shared only by the
-/// pages of one agent session whose documents are of one site. 64 MiB of weight
-/// holds the sheets of four of the largest sites (12 to 16 MiB each) or
-/// dozens of ordinary ones, and is a sixteenth of what 64 pages may take
-/// in all
-static SHEETS: LazyLock<SheetCache> = LazyLock::new(|| SheetCache::new(64 << 20));
+/// the stylesheets the pages of the host have parsed, shared only by the
+/// pages of one agent session whose documents are of one site, bounded by
+/// `SHEET_CACHE_CAP` apart from what pages hold
+static SHEETS: LazyLock<SheetCache> = LazyLock::new(|| SheetCache::new(SHEET_CACHE_CAP));
+
+/// the shared stylesheet cache's own budget, in the weight it estimates
+/// (five bytes for a byte of text), apart from the pages' own memory:
+/// twelve real sites (news, wikis, docs, github, youtube) hold 36 MiB of
+/// it at once, 124 sheets; the largest single sheet, 3.2 MB of text,
+/// weighs 15 MiB and is kept only under a quarter of the cap, so 64 MiB
+/// is the least power of two that keeps such a site warm; half of it
+/// drops that sheet and every open of its site parses it again, for no
+/// memory a page saves, since the parse it holds is made anyway
+const SHEET_CACHE_CAP: usize = 64 << 20;
+
+/// what the shared stylesheet cache holds now, for every session, and
+/// the most it holds
+pub(crate) fn sheet_stats() -> (SheetCacheStats, usize) {
+    (SHEETS.stats(), SHEETS.max_weight())
+}
 
 /// The site a document at `url` is of, for which pages share stylesheets:
 /// the scheme and registrable domain of a web URL; for any other, its

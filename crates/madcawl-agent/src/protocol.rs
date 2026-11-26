@@ -32,6 +32,9 @@ pub mod kind {
     pub const PAGES: u16 = 33;
     /// A page's log of requests and load errors
     pub const REQUESTS: u16 = 34;
+    /// the host's own counters, process-wide; answered only by a host
+    /// started to answer them
+    pub const STATS: u16 = 35;
 }
 
 pub mod tag {

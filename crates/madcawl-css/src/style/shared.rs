@@ -19,7 +19,9 @@
 //! sheets first. The weight is an estimate made from the text's length
 //! before parsing, not a measure of what the sheet holds. A sheet heavier
 //! than a quarter of the bound is parsed and not kept, so one sheet
-//! cannot empty the cache.
+//! cannot empty the cache. Evicting drops only the cache's reference: a
+//! page styling with the sheet keeps it until it is done, outside the
+//! bound.
 //!
 //! A linked sheet can also be found by what its loader knows of it
 //! before reading it (`known`), so a page that links a held sheet does
@@ -88,6 +90,8 @@ pub struct SheetCacheStats {
     pub unread: u64,
     pub entries: usize,
     pub weight: usize,
+    /// loader names held (`get_known`), a few for each entry at most
+    pub names: usize,
 }
 
 /// A multiply-rotate hash over eight bytes at a time; collisions are
@@ -198,7 +202,13 @@ impl SheetCache {
             unread: self.unread.load(Ordering::Relaxed),
             entries: i.by_hash.len(),
             weight: i.weight,
+            names: i.known.len(),
         }
+    }
+
+    /// the weight the cache holds at most
+    pub fn max_weight(&self) -> usize {
+        self.max_weight
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {

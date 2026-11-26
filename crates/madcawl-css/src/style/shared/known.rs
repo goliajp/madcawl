@@ -30,6 +30,10 @@ pub(super) fn key(scope: Scope, id: &[u8]) -> Box<[u8]> {
 }
 
 impl Known {
+    pub(super) fn len(&self) -> usize {
+        self.slots.len()
+    }
+
     /// Drops the keys of an entry that is gone.
     pub(super) fn forget(&mut self, keys: &[Box<[u8]>]) {
         for k in keys {

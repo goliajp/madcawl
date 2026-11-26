@@ -167,6 +167,7 @@ impl<'a> Conn<'a> {
             kind::READ | kind::DIFF => self.page_request(f),
             kind::ACT | kind::WAIT => self.act(f),
             kind::REQUESTS => self.requests(f),
+            kind::STATS if self.shared.config.stats => self.stats(),
             _ => {
                 let r = error_frame(code::UNKNOWN, "unknown request kind");
                 self.log("-", &format!("kind-{}", f.kind), ("", ""), &r);
@@ -272,6 +273,26 @@ impl<'a> Conn<'a> {
         }
         let reply = Frame::new(kind::RESULT).str(tag::TEXT, &text);
         self.log("-", "pages", ("", ""), &reply);
+        reply
+    }
+
+    /// the host's counters, a `name value` pair a line
+    fn stats(&self) -> Frame {
+        let (s, cap) = super::doc::sheet_stats();
+        let text = format!(
+            "sheet-cache-weight {}\nsheet-cache-cap {}\nsheet-cache-entries {}\nsheet-cache-names {}\n\
+             sheet-cache-parses {}\nsheet-cache-hits {}\nsheet-cache-unread {}\npages {}\n",
+            s.weight,
+            cap,
+            s.entries,
+            s.names,
+            s.parses,
+            s.hits,
+            s.unread,
+            self.shared.pages.load(Ordering::SeqCst),
+        );
+        let reply = Frame::new(kind::RESULT).str(tag::TEXT, &text);
+        self.log("-", "stats", ("", ""), &reply);
         reply
     }
 }
