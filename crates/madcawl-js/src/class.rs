@@ -274,6 +274,14 @@ impl<E: Engine, H: 'static> ClassDef<E, H> {
         }
     }
 
+    /// Whether the interface prototype object inherits from
+    /// `%Error.prototype%`, as Web IDL says of `DOMException` alone;
+    /// any other class without a parent inherits from
+    /// `%Object.prototype%`.
+    pub fn inherits_error(&self) -> bool {
+        self.parent.is_none() && self.name == "DOMException"
+    }
+
     /// This class and its ancestors, nearest first.
     pub fn chain(&'static self) -> impl Iterator<Item = &'static ClassDef<E, H>> {
         std::iter::successors(Some(self), |c| c.parent)

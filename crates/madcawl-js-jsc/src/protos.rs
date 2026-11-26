@@ -94,6 +94,7 @@ impl Jsc {
         let ctx = self.realms[realm as usize].ctx;
         let (parent_iface, parent_proto) = match class.parent {
             Some(p) => self.class_objects(realm, p),
+            None if class.inherits_error() => (self.helper(realm, Helper::FunctionProto), self.helper(realm, Helper::ErrorProto)),
             None => (self.helper(realm, Helper::FunctionProto), self.helper(realm, Helper::ObjectProto)),
         };
         let made = class.constructor.and_then(|c| self.constructor_object::<H>(realm, ctx, c.get()));

@@ -40,8 +40,9 @@ impl Jsc {
             members: Vec::new(),
             shared: self.shared,
         }));
+        let jsclass = self.classes.wrapper_of(class.id.0, class.name);
         // SAFETY: the record lives until the host is told the wrapper died
-        let w = Value(unsafe { ffi::JSObjectMake(ctx, self.classes.wrapper, rec.cast()) } as u64);
+        let w = Value(unsafe { ffi::JSObjectMake(ctx, jsclass, rec.cast()) } as u64);
         // one count for the caller, one that keeps it while strong
         self.protect(w);
         self.protect(w);

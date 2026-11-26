@@ -128,6 +128,30 @@ return [a.foo(), a instanceof A, a instanceof EventTarget, Object.getPrototypeOf
     h.close(&mut e);
 }
 
+#[test]
+fn every_bound_interface_has_its_prototype_chain_and_class_string() {
+    let (mut e, mut h) = page("<p>x</p>");
+    let src = "var parents = { EventTarget: null, Node: 'EventTarget', Document: 'Node', Element: 'Node', DocumentFragment: 'Node',
+  CharacterData: 'Node', Text: 'CharacterData', Comment: 'CharacterData', Event: null, CustomEvent: 'Event', DOMException: null };
+var bad = [];
+for (const n in parents) {
+  const I = globalThis[n], P = parents[n];
+  const want = P ? globalThis[P].prototype : n === 'DOMException' ? Error.prototype : Object.prototype;
+  if (Object.getPrototypeOf(I.prototype) !== want) bad.push(n + ' prototype');
+  if (Object.getPrototypeOf(I) !== (P ? globalThis[P] : Function.prototype)) bad.push(n + ' interface');
+  if (Object.prototype.toString.call(I.prototype) !== '[object ' + n + ']') bad.push(n + ' tag ' + Object.prototype.toString.call(I.prototype));
+  if (I.name !== n) bad.push(n + ' name');
+}
+var objects = [[document, 'Document'], [document.querySelector('p'), 'Element'], [new Text(), 'Text'], [new Comment(), 'Comment'],
+  [new DocumentFragment(), 'DocumentFragment'], [new EventTarget(), 'EventTarget'], [new Event('x'), 'Event'],
+  [new CustomEvent('x'), 'CustomEvent'], [new DOMException(), 'DOMException']];
+for (const [o, n] of objects) if (Object.prototype.toString.call(o) !== '[object ' + n + ']') bad.push(n + ' object ' + Object.prototype.toString.call(o));
+var x = new DOMException('m', 'NotFoundError');
+return [bad.join('; ') || 'ok', x instanceof Error, String(x), x.toString === Error.prototype.toString].join('|');";
+    assert_eq!(eval(&mut e, &mut h, src), "ok|true|NotFoundError: m|true");
+    h.close(&mut e);
+}
+
 #[inline(never)]
 fn scrub() {
     let pad = [0u8; 512 * 1024];

@@ -21,10 +21,11 @@ pub(crate) enum Helper {
     Ungroup = 15,
     DerefAll = 16,
     Constructor = 17,
+    ErrorProto = 18,
 }
 
 impl Helper {
-    pub(crate) const LAST: Helper = Helper::Constructor;
+    pub(crate) const LAST: Helper = Helper::ErrorProto;
 }
 
 // Page script runs in the realm and may replace any global or
@@ -176,5 +177,6 @@ pub(crate) const HELPERS: &str = r#"(function () {
       if (p !== null && (typeof p === 'object' || typeof p === 'function') && R.proto(o) !== p) R.setProto(o, p);
       return o;
     },
+    Error.prototype,
   ];
 })()"#;

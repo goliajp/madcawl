@@ -73,7 +73,12 @@ pub(crate) struct WrapRec {
 pub(crate) struct Classes {
     pub func: JSClassRef,
     pub iface: JSClassRef,
+    /// The class every wrapper's class derives from, with the finalizer.
     pub wrapper: JSClassRef,
+    /// A class per host class, by id, named as the interface: the
+    /// framework answers `Symbol.toStringTag` on a callback object with
+    /// its class name, before the prototype chain is looked at.
+    pub by_class: std::collections::HashMap<u16, JSClassRef>,
 }
 
 impl Classes {
@@ -98,12 +103,27 @@ impl Classes {
                 d.finalize = Some(finalize_fn);
             }),
             wrapper: make(c"Object", |d| d.finalize = Some(finalize_wrapper)),
+            by_class: std::collections::HashMap::new(),
         }
     }
 
+    /// The class of the wrappers of host class `id`, called `name`.
+    pub(crate) fn wrapper_of(&mut self, id: u16, name: &str) -> JSClassRef {
+        let base = self.wrapper;
+        *self.by_class.entry(id).or_insert_with(|| {
+            let name = std::ffi::CString::new(name).expect("an interface name has no NUL");
+            let mut def = JSClassDefinition::EMPTY;
+            def.class_name = name.as_ptr();
+            def.attributes = ffi::kJSClassAttributeNoAutomaticPrototype;
+            def.parent_class = base;
+            // SAFETY: a complete definition; the framework copies the name
+            unsafe { ffi::JSClassCreate(&def) }
+        })
+    }
+
     pub(crate) fn release(&mut self) {
-        for c in [self.func, self.iface, self.wrapper] {
-            // SAFETY: made in new, no object of them is left
+        for c in [self.func, self.iface, self.wrapper].into_iter().chain(self.by_class.drain().map(|(_, c)| c)) {
+            // SAFETY: made here, no object of them is left
             unsafe { ffi::JSClassRelease(c) };
         }
     }
