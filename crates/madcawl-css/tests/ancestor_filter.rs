@@ -154,3 +154,42 @@ fn a_restyle_from_below_the_root_rebuilds_the_filter_of_its_ancestors() {
         assert_eq!(display(&dom, &s, "t"), want);
     }
 }
+
+#[test]
+fn ancestors_with_many_classes_still_rule_out_rules_naming_others() {
+    // pages of utility classes put a hundred names on the root and the body; a filter too small for them
+    // is all ones and lets every rule through, each then tried against every ancestor
+    let classes = |p: &str| {
+        (0..120)
+            .map(|i| format!("{p}{i}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let page = |rules: usize| {
+        let css: String = (0..rules)
+            .map(|k| format!(".absent{k} div div div div span {{ color: red }}"))
+            .collect();
+        format!(
+            "<!doctype html><html class=\"{}\"><style>{css}</style><body class=\"{}\">\
+             <div><div><div><div><div><span id=t>x</span></div></div></div></div></div>",
+            classes("r"),
+            classes("b")
+        )
+    };
+    let skipped = |html: &str| {
+        let dom = parse(html);
+        let list = sheets(&dom);
+        let st = cascade(&list).compute(&dom).stats();
+        (st.filter_checked, st.filter_skipped)
+    };
+    let (none, some) = (skipped(&page(0)), skipped(&page(200)));
+    assert_eq!(some.0 - none.0, 200, "each rule asked about once");
+    // about 250 names on the ancestors: 256 bits rule out 58 of these, 1024 bits with two a name 174, 4096
+    // with three each about 199
+    assert!(
+        some.1 - none.1 >= 190,
+        "only {} of 200 ruled out",
+        some.1 - none.1
+    );
+    same_with_filter(&page(200));
+}
