@@ -53,6 +53,9 @@ pub struct Config {
     /// Run the network service in a process of its own, this program
     /// started with `--netd`, and start it again when it ends
     pub isolate: Option<PathBuf>,
+    /// With `isolate`, a content process that has not answered a request
+    /// for this long is killed and its pages opened again
+    pub hang: Duration,
 }
 
 impl Config {
@@ -84,11 +87,12 @@ impl Config {
             watch: None,
             memory_cap: None,
             isolate: None,
+            hang: Duration::from_secs(180),
         }
     }
 }
 
-pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds>] [--listen-fd N] [--exit-idle <seconds>] [--net] [--downloads <dir>] [--upload-allow <dir>]... [--approve <origin>]... [--stats] [--watch-ms N] [--memory-cap-mib N] [--isolate]
+pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds> | --idle-ms N] [--rate N] [--burst N] [--max-request <bytes>] [--max-reply <bytes>] [--listen-fd N] [--exit-idle <seconds>] [--net] [--downloads <dir>] [--upload-allow <dir>]... [--approve <origin>]... [--stats] [--watch-ms N] [--memory-cap-mib N] [--isolate [--hang-secs N]]
          pages and their stylesheets open only from below the --allow directories;
          without --allow, only from below the current directory;
          --net lets pages come from http and https URLs, each session's in a cookie jar of its own that starts empty and ends with it;
@@ -99,7 +103,11 @@ pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--au
          long (at least 10 s), naming the stage it is in, and a slow request's time by stage when it ends;
          --memory-cap-mib drops the stylesheet cache past three quarters of N MiB of footprint and exits
          past N (a host without --isolate holds every session's pages and exits with them);
-         --isolate runs the network service in a process of its own and starts it again when it ends;
+         --rate and --burst bound a session's requests a second and how many it may make at once (50, 100);
+         --max-request and --max-reply bound a request frame and a reply's page text (64 KiB, 4 MiB);
+         --isolate runs each session's pages in a content process of its own and the network service in
+         another, and starts them again when they end, the session's pages opened again where they were;
+         --hang-secs kills a content process that has not answered for N s (default 180) and recovers it;
          --stats answers the host's own counters (shared stylesheet cache, pages open) to any session;
          --listen-fd accepts on an inherited listening socket instead of binding <socket>;
          --exit-idle exits once no session has been open for that long (checked once a period
@@ -139,11 +147,17 @@ pub fn parse_args(args: &[&str]) -> Option<Config> {
             "--pages" => c.max_pages = n()?,
             "--total-pages" => c.max_total_pages = n()?,
             "--idle" => c.idle = Duration::from_secs(n()? as u64),
+            "--idle-ms" => c.idle = Duration::from_millis(n()? as u64),
+            "--rate" => c.rate = v.parse().ok().filter(|r: &f64| *r > 0.0)?,
+            "--burst" => c.burst = v.parse().ok().filter(|b: &f64| *b >= 1.0)?,
+            "--max-request" => c.max_request = n()?,
+            "--max-reply" => c.max_reply = n()?,
             "--listen-fd" => c.listen_fd = Some(v.parse::<i32>().ok().filter(|&fd| fd > 2)?),
             "--exit-idle" => c.exit_idle = Some(Duration::from_secs(n()? as u64)),
             "--downloads" => c.downloads = Some(PathBuf::from(v)),
             "--upload-allow" => c.uploads.push(PathBuf::from(v).canonicalize().ok()?),
             "--memory-cap-mib" => c.memory_cap = Some(n()? as u64 * (1 << 20)),
+            "--hang-secs" => c.hang = Duration::from_secs(n()? as u64),
             "--watch-ms" => c.watch = Some(Duration::from_millis(n()? as u64)),
             "--approve" => c.approve.push(v.trim_end_matches('/').to_ascii_lowercase()),
             _ => return None,

@@ -82,6 +82,28 @@ pub(crate) fn readable(fd: i32, wait: Duration) -> std::io::Result<bool> {
     }
 }
 
+/// Waits until `a` or `b` (when given) has something to read or is
+/// closed, or `wait` passes (no limit when `None`); which of them.
+pub(crate) fn readable_pair(a: i32, b: Option<i32>, wait: Option<Duration>) -> std::io::Result<(bool, bool)> {
+    let ms = wait.map_or(-1, |w| w.as_millis().clamp(1, i32::MAX as u128) as i32);
+    const POLLERR: i16 = 0x8;
+    const POLLHUP: i16 = 0x10;
+    let mut p = [PollFd { fd: a, events: POLLIN, revents: 0 }, PollFd { fd: b.unwrap_or(-1), events: POLLIN, revents: 0 }];
+    let n = if b.is_some() { 2 } else { 1 };
+    loop {
+        // SAFETY: `n` valid pollfds for the length of the call
+        let r = unsafe { poll(p.as_mut_ptr(), n, ms) };
+        if r >= 0 {
+            let ready = |q: &PollFd| q.revents & (POLLIN | POLLERR | POLLHUP) != 0;
+            return Ok((ready(&p[0]), n == 2 && ready(&p[1])));
+        }
+        let e = Error::last_os_error();
+        if e.kind() != ErrorKind::Interrupted {
+            return Err(e);
+        }
+    }
+}
+
 /// An accept error that every later accept would repeat: the inherited
 /// socket is not one to accept on.
 pub(crate) fn fatal(e: &Error) -> bool {

@@ -19,7 +19,7 @@ use crate::serve::{code, error_frame, target};
 
 const MAX_VIEWPORT: u64 = 16_384;
 
-fn is_web(u: &str) -> bool {
+pub(super) fn is_web(u: &str) -> bool {
     matches!(target::scheme(u.trim()).map(str::to_ascii_lowercase).as_deref(), Some("http" | "https"))
 }
 
@@ -86,7 +86,21 @@ impl Conn<'_> {
             let msg = format!("the host has {} pages open across its sessions already", config.max_total_pages);
             return Err(error_frame(code::TOO_MANY_PAGES, &msg));
         }
-        let loaded = self.load(u, file, size, charset);
+        let id = match &self.shared.link {
+            None => self.shared.next_page.fetch_add(1, Ordering::SeqCst),
+            Some(link) => match link.new_page() {
+                Ok(Ok(id)) => id,
+                Ok(Err(msg)) => {
+                    total.fetch_sub(1, Ordering::SeqCst);
+                    return Err(error_frame(code::TOO_MANY_PAGES, &msg));
+                }
+                Err(e) => {
+                    total.fetch_sub(1, Ordering::SeqCst);
+                    return Err(error_frame(code::IO, &format!("the host: {e}")));
+                }
+            },
+        };
+        let loaded = self.load(id, u, file, size, charset);
         let (page, note) = loaded.inspect_err(|_| {
             total.fetch_sub(1, Ordering::SeqCst);
         })?;
@@ -96,14 +110,14 @@ impl Conn<'_> {
     }
 
     /// A new page with `file`, or the web URL `u`, loaded into it.
-    fn load(
+    pub(super) fn load(
         &self,
+        id: u32,
         u: &str,
         file: Option<(PathBuf, String)>,
         size: (f32, f32),
         charset: Option<Encoding>,
     ) -> Result<(Page, Option<String>), Frame> {
-        let id = self.shared.next_page.fetch_add(1, Ordering::SeqCst);
         let mut page = Page::blank(id, size, self.shared.net.as_ref(), self.id);
         let Some(u) = (match file {
             Some((path, url)) => {

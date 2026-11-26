@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use madcawl_agent::{Envelope, Frame, kind, tag};
 
 use super::limit::Bucket;
+use super::link::internal;
 use super::log::Line;
 use super::page::Page;
 use super::memory::{self, Cap};
@@ -20,6 +21,9 @@ use super::{Shared, code, error_frame};
 mod act;
 mod listing;
 mod open;
+mod restore;
+
+pub(crate) use restore::PageState;
 mod shot;
 
 const VIEWS: [&str; 5] = ["outline", "snapshot", "markdown", "find", "extract"];
@@ -78,11 +82,16 @@ impl<'a> Conn<'a> {
                     continue;
                 }
                 Got::Closed => break,
+                Got::Frame(f) if f.kind == internal::END && self.shared.link.is_some() => break,
                 Got::Frame(f) => {
                     if let Some(w) = &self.watch {
                         w.begin(kind_name(f.kind));
                     }
-                    let reply = self.admit(&f);
+                    // the host's own questions are not the agent's requests
+                    let reply = match internal::is_internal(f.kind) && self.shared.link.is_some() {
+                        true => self.answer(&f),
+                        false => self.admit(&f),
+                    };
                     if let Some(w) = &self.watch {
                         w.end();
                     }
@@ -191,6 +200,8 @@ impl<'a> Conn<'a> {
             kind::REQUESTS => self.requests(f),
             kind::SCREENSHOT => self.screenshot(f),
             kind::STATS if self.shared.config.stats => self.stats(),
+            internal::STATE if self.shared.link.is_some() => self.state(),
+            internal::RESTORE if self.shared.link.is_some() => self.restore(f),
             _ => {
                 let r = error_frame(code::UNKNOWN, "unknown request kind");
                 self.log("-", &format!("kind-{}", f.kind), ("", ""), &r);

@@ -24,6 +24,14 @@ pub mod internal {
     /// Content to host: a number for a page it is opening, or an error
     /// when the host holds as many pages as it may
     pub const NEW_PAGE: u16 = 243;
+    /// Host to content: the agent's session has ended; close its pages
+    /// and exit
+    pub const END: u16 = 244;
+
+    /// The tag the host sets on a request naming a page another session
+    /// holds, which the content process then refuses as such; the host
+    /// strips it from what agents send
+    pub const FOREIGN: u8 = 250;
 
     /// Whether an agent may send `kind`.
     pub fn is_internal(kind: u16) -> bool {
@@ -50,7 +58,11 @@ pub fn read_until(s: &mut UnixStream, buf: &mut Vec<u8>, deadline: Instant) -> i
         if left.is_zero() {
             return Ok(None);
         }
-        s.set_read_timeout(Some(left.max(Duration::from_millis(1))))?;
+        match s.set_read_timeout(Some(left.max(Duration::from_millis(1)))) {
+            // macos rejects it once the peer has closed; read without waiting
+            Err(e) if e.kind() == io::ErrorKind::InvalidInput => s.set_nonblocking(true)?,
+            r => r?,
+        }
         let mut chunk = [0u8; 64 << 10];
         match s.read(&mut chunk) {
             Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
@@ -83,7 +95,7 @@ impl Link {
         let (s, buf) = &mut *g;
         write(s, f)?;
         let r = read_until(s, buf, Instant::now() + ASK_WAIT)?;
-        s.set_read_timeout(None)?;
+        let _ = s.set_read_timeout(None);
         r.ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "the host did not answer in time"))
     }
 

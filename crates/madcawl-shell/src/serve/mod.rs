@@ -16,8 +16,10 @@ mod act_input;
 mod activation;
 mod config;
 mod conn;
+pub mod content;
 mod doc;
 mod limit;
+pub mod link;
 mod loader;
 mod log;
 pub mod memory;
@@ -26,6 +28,7 @@ mod netctl;
 pub mod netproc;
 mod orphan;
 mod page;
+mod proxy;
 mod reqlog;
 mod shot;
 mod socket;
@@ -73,6 +76,10 @@ pub mod code {
     pub const APPROVAL: u64 = 22;
     /// A navigation could not start
     pub const NAVIGATION: u64 = 23;
+    /// The session's content process ended while answering
+    pub const CRASHED: u64 = 24;
+    /// The session's content process did not answer in time
+    pub const HUNG: u64 = 25;
 }
 
 pub(crate) struct Shared {
@@ -92,6 +99,26 @@ pub(crate) struct Shared {
     /// The host's start time and process, as session directories are
     /// named by
     pub run: String,
+    /// In a content process, the channel to its host
+    pub link: Option<Arc<link::Link>>,
+}
+
+impl Shared {
+    pub(crate) fn new(config: Config, log: AuditLog, net: Option<Arc<Net>>, run: String, link: Option<Arc<link::Link>>) -> Shared {
+        Shared {
+            config,
+            log,
+            next_session: AtomicU32::new(1),
+            active: AtomicUsize::new(0),
+            pages: AtomicUsize::new(0),
+            quiet_since: Mutex::new(Instant::now()),
+            next_page: AtomicU32::new(1),
+            owners: Mutex::new(HashMap::new()),
+            net,
+            run,
+            link,
+        }
+    }
 }
 
 pub struct Server {
@@ -146,18 +173,7 @@ impl Server {
             }
             false => None,
         };
-        let shared = Arc::new(Shared {
-            config,
-            log,
-            next_session: AtomicU32::new(1),
-            active: AtomicUsize::new(0),
-            pages: AtomicUsize::new(0),
-            quiet_since: Mutex::new(Instant::now()),
-            next_page: AtomicU32::new(1),
-            owners: Mutex::new(HashMap::new()),
-            net,
-            run: run_tag(),
-        });
+        let shared = Arc::new(Shared::new(config, log, net, run_tag(), None));
         Ok(Server { listener, shared })
     }
 
@@ -231,8 +247,10 @@ impl Server {
             .name(format!("session-{id}"))
             .spawn(move || {
                 let s = theirs.lock().unwrap_or_else(|e| e.into_inner()).take();
-                if let Some(s) = s {
-                    conn::Conn::new(id, &shared).run(s);
+                match (s, shared.config.isolate.is_some()) {
+                    (Some(s), true) => proxy::run(id, &shared, s),
+                    (Some(s), false) => conn::Conn::new(id, &shared).run(s),
+                    (None, _) => {}
                 }
                 // the time first: a host counting no sessions must find it set
                 *shared.quiet_since.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();

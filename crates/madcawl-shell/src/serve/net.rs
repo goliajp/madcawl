@@ -21,6 +21,7 @@ use madcawl_net::wire::{Frame, kind, tag};
 use madcawl_net::{Client, Config};
 use madcawl_netd::{Downloads, ServerLimits, serve_guarded};
 
+use super::link::Link;
 use super::netctl::{Control, read_frame, write_with_id};
 use super::netproc::{self, Process, Spec};
 
@@ -29,12 +30,19 @@ const CONTROL_WAIT: Duration = Duration::from_secs(10);
 
 pub struct Net {
     socket: PathBuf,
-    control: Mutex<Control>,
+    control: Channel,
     /// Signalled when the network process is replaced, or will not be
     replaced: Condvar,
     pub downloads: Option<PathBuf>,
     /// The network process, when the service runs in one of its own
     pub process: Option<Process>,
+}
+
+/// The control channel is the host's own; in a content process, the
+/// host it belongs to holds it and passes its frames on.
+enum Channel {
+    Own(Mutex<Control>),
+    Host(Arc<Link>),
 }
 
 /// How long a request that found the network process gone waits for the
@@ -73,7 +81,29 @@ impl Net {
     }
 
     fn new(socket: &Path, control: Control, downloads: Option<PathBuf>, process: Option<Process>) -> Net {
-        Net { socket: socket.to_path_buf(), control: Mutex::new(control), replaced: Condvar::new(), downloads, process }
+        Net { socket: socket.to_path_buf(), control: Channel::Own(Mutex::new(control)), replaced: Condvar::new(), downloads, process }
+    }
+
+    /// The network of a content process, whose host holds the control
+    /// channel and answers its frames through `link`.
+    pub fn through(link: Arc<Link>, socket: &Path, downloads: Option<PathBuf>) -> Net {
+        Net { socket: socket.to_path_buf(), control: Channel::Host(link), replaced: Condvar::new(), downloads, process: None }
+    }
+
+    /// One frame on the control channel, sent by a content process of
+    /// this host; the answer, both encoded.
+    pub fn control_encoded(&self, encoded: &[u8]) -> io::Result<Vec<u8>> {
+        let (f, _) = Frame::decode(encoded).map_err(|e| io::Error::other(format!("{e:?}")))?;
+        let mut out = Vec::new();
+        self.control(f)?.encode(&mut out);
+        Ok(out)
+    }
+
+    fn own(&self) -> &Mutex<Control> {
+        match &self.control {
+            Channel::Own(c) => c,
+            Channel::Host(_) => unreachable!("only a host supervises its network process"),
+        }
     }
 
     /// Starts the service in a process of its own, `exe --netd`, and keeps
@@ -91,7 +121,7 @@ impl Net {
     /// The network process was replaced by process `pid`, whose control
     /// channel `host` is.
     pub(crate) fn replaced(&self, host: UnixStream, pid: i32) {
-        let mut c = self.control.lock().unwrap_or_else(|e| e.into_inner());
+        let mut c = self.own().lock().unwrap_or_else(|e| e.into_inner());
         match Control::new(host, CONTROL_WAIT) {
             Ok(mut new) => {
                 new.generation = c.generation + 1;
@@ -109,14 +139,23 @@ impl Net {
 
     /// The network process will not be started again.
     pub(crate) fn braked(&self) {
-        self.control.lock().unwrap_or_else(|e| e.into_inner()).braked = true;
+        self.own().lock().unwrap_or_else(|e| e.into_inner()).braked = true;
         self.replaced.notify_all();
     }
 
     /// One request on the control channel. When the network process is
     /// found gone, the request waits for the next one and goes to it.
     fn control(&self, f: Frame) -> io::Result<Frame> {
-        let mut c = self.control.lock().unwrap_or_else(|e| e.into_inner());
+        let c = match &self.control {
+            Channel::Own(c) => c,
+            Channel::Host(link) => {
+                let mut out = Vec::new();
+                f.encode(&mut out);
+                let answer = link.net(&out)?;
+                return Frame::decode(&answer).map(|(f, _)| f).map_err(|e| io::Error::other(format!("{e:?}")));
+            }
+        };
+        let mut c = c.lock().unwrap_or_else(|e| e.into_inner());
         let generation = c.generation;
         match c.request(f.clone()) {
             Err(e) if self.process.is_some() && e.kind() != io::ErrorKind::TimedOut => {
@@ -170,6 +209,10 @@ impl Net {
     /// Drops agent session `session`'s cookie partition and its cookies;
     /// whether it was open.
     pub fn end_session(&self, session: u32) -> io::Result<bool> {
+        // the host drops it once the content process has ended
+        if matches!(self.control, Channel::Host(_)) {
+            return Ok(true);
+        }
         let r = self.control(Frame::new(kind::PARTITION_DROP).num(tag::PARTITION, partition_of(session)))?;
         match r.kind {
             kind::PARTITION_DROP => Ok(r.get_num(tag::OK) == Some(1)),

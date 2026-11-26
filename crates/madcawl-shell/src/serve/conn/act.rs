@@ -11,6 +11,7 @@ use madcawl_agent::act::{Action, Until};
 use madcawl_agent::{Frame, kind, tag};
 
 use super::Conn;
+use crate::serve::link::internal;
 use crate::serve::act::ActError;
 use crate::serve::doc::layout_time;
 use crate::serve::page::{Env, Page};
@@ -56,7 +57,8 @@ impl Conn<'_> {
             return Ok(i);
         }
         let id = f.get_num(tag::PAGE).unwrap_or(0) as u32;
-        let theirs = self.shared.owners.lock().unwrap_or_else(|e| e.into_inner()).get(&id).is_some_and(|&s| s != self.id);
+        let theirs = self.shared.owners.lock().unwrap_or_else(|e| e.into_inner()).get(&id).is_some_and(|&s| s != self.id)
+            || self.shared.link.is_some() && f.get_num(internal::FOREIGN) == Some(1);
         if !theirs {
             return Err(self.no_page(action));
         }
