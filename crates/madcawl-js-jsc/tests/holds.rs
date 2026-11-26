@@ -1,12 +1,13 @@
 //! What an event holds on JavaScriptCore: its target's tree lives while
 //! script reaches the event, a cycle through script is still freed, the
 //! work of tree changes does not grow with the events kept nor that of
-//! a dispatch with its target's tree, and closing the page leaves the
-//! wrappers' member containers alone.
+//! a dispatch with its target's tree, a dispatch keeps the trees its
+//! path started in, and closing the page leaves the wrappers' member
+//! containers alone.
 
 use madcawl_bindings::DomHost;
 use madcawl_dom::Dom;
-use madcawl_js::{Deadline, Engine, ScriptOrigin, Step};
+use madcawl_js::{Bound, Ctx, Deadline, Engine, Key, ScriptOrigin, Step};
 use madcawl_js_jsc::Jsc;
 use madcawl_str::DomString;
 
@@ -122,6 +123,39 @@ var t = root.firstChild; t.addEventListener('x', () => seen++); root.addEventLis
 #[test]
 fn a_dispatch_works_the_same_however_large_its_target_tree() {
     assert_eq!(dispatches_in_tree_of(5000), dispatches_in_tree_of(10));
+}
+
+/// `gc()`: a full collection from inside a script.
+unsafe extern "C" fn gc_fn(ctx: *mut Ctx, _: u64, _: *const u64, _: usize) -> u64 {
+    // SAFETY: bound to Jsc and DomHost<Jsc>
+    let (e, _) = unsafe { Ctx::parts::<Jsc, DomHost<Jsc>>(ctx) };
+    scrub();
+    e.collect_now();
+    Jsc::to_bits(Jsc::undefined())
+}
+
+#[test]
+fn a_dispatch_keeps_the_tree_a_listener_moved_its_path_out_of() {
+    let (mut e, mut h) = page("<p>x</p>");
+    // SAFETY: gc_fn reads its context as Jsc and DomHost<Jsc>
+    let f = e.new_function(h.realm, "gc", 0, unsafe { Bound::<_, Jsc, DomHost<Jsc>>::host_fn(gc_fn) }, 0);
+    let g = e.global(h.realm);
+    assert!(e.set(&mut h, g.get(), Key::Str(&DomString::from_wtf8(b"gc")), f.get()));
+    e.release(g);
+    e.release(f);
+    // script reaches the target only; the root, its expando and its
+    // listener only through the target's tree, until a listener moves
+    // the target's parent into another tree and the root's wrapper is
+    // left to the dispatch
+    let src = "var t, got = 'none'; function onRoot() { got = this.x; }
+function onTarget() { var n = document.createElement('p'); n.appendChild(t.parentNode); n = null; gc(); }
+(function () { var r = document.createElement('div'); r.x = 'kept'; r.addEventListener('x', onRoot);
+t = r.appendChild(document.createElement('span')).appendChild(document.createElement('i')); t.addEventListener('x', onTarget); })(); 'ok'";
+    assert_eq!(eval(&mut e, &mut h, src), "ok");
+    collect_everything(&mut e, &mut h);
+    assert_eq!(eval(&mut e, &mut h, "t.dispatchEvent(new Event('x', { bubbles: true })); got"), "kept");
+    assert_eq!(h.dom.audit().mismatches(), 0);
+    h.close(&mut e);
 }
 
 #[test]
