@@ -8,8 +8,8 @@
 //!
 //! - A value is the framework's own 64-bit value word. A count on a
 //!   heap value is the framework's protection (`JSValueProtect`), so an
-//!   `Owned` value, a member and a root handle each keep their target
-//!   alive; immediates have no count.
+//!   `Owned` value and a root handle each keep their target alive;
+//!   immediates have no count.
 //! - A realm is a global context of the isolate's context group, so
 //!   values pass between the realms of one isolate.
 //! - Host functions are objects of a callable class whose private data
@@ -21,6 +21,9 @@
 //!   the framework's heap and die together once script holds none
 //!   (`groups.rs`), after which the host's trial deletion frees the
 //!   tree (`collect.rs`).
+//! - A member (a listener) is kept in a container its owner's wrapper
+//!   holds, not protected, so it lives and dies with the wrapper
+//!   (`members.rs`).
 //! - Microtasks share the framework's queue, which it drains as the
 //!   outermost call returns (`micro.rs`).
 //! - Interrupts go through the framework's execution time limit, one
@@ -36,6 +39,7 @@ mod halt;
 mod helpers;
 mod iface;
 mod isolate;
+mod members;
 mod micro;
 mod objects;
 mod ops;

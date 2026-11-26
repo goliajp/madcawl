@@ -248,8 +248,38 @@ pub trait Engine: Control + Sized + 'static {
     /// A word whose wrapper is gone has its index put in `refused`,
     /// which the host treats as [`Engine::wrapper_upgrade`] returning
     /// `None` for it. `With` names a live wrapper the caller holds.
-    fn place_wrappers(&mut self, tree: Tree<Self::Value>, words: &[u64], refused: &mut Vec<usize>) {
+    ///
+    /// `false` when the engine could not place them now (script is being
+    /// stopped): nothing was placed or refused, and the host asks again
+    /// before script next runs.
+    ///
+    /// A host that holds a node of a detached tree across calls (an
+    /// event's target, a range's boundary) places that whole tree as
+    /// `Anchored` while it does, so that its wrappers, with what script
+    /// put on them, live as long as the hold.
+    fn place_wrappers(&mut self, tree: Tree<Self::Value>, words: &[u64], refused: &mut Vec<usize>) -> bool {
         let _ = (tree, words, refused);
+        true
+    }
+
+    /// A count on `v` for a [`crate::Member`] of the host object whose
+    /// wrapper is `owner` (live, held by the caller). On an engine that
+    /// places wrappers, `v` lives exactly as long as that wrapper: it is
+    /// kept beside the wrapper in the engine's own heap, so a cycle
+    /// through script (a listener whose closure holds its node's
+    /// wrapper) is one the engine's collector sees. The host then drops
+    /// such members unreleased once it lets go of the wrapper word
+    /// (`wrapper_died`, or a refused wrapper).
+    fn member(&mut self, owner: Self::Value, v: Self::Value) -> Owned<Self::Value> {
+        let _ = owner;
+        self.retain(v)
+    }
+
+    /// Give back a count [`Engine::member`] gave for the wrapper whose
+    /// word is `owner`, while the host still holds that word.
+    fn release_member(&mut self, owner: u64, v: Owned<Self::Value>) {
+        let _ = owner;
+        self.release(v);
     }
 
     /// A weak handle to `v`. A weak handle to a wrapper does not

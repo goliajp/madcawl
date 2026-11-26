@@ -25,7 +25,10 @@ pub(crate) enum Helper {
 // Page script runs in the realm and may replace any global or
 // prototype member: everything the helpers use is taken when the realm
 // is made, before any page script, and called through `apply`; their
-// descriptors and arrays have no prototype to intercept a lookup.
+// descriptors and arrays have no prototype to intercept a lookup. The
+// one exception is the direct `eval` that compiles a handler: it is
+// looked up when called, through the handler's scopes, so a page that
+// replaced it runs its own code there.
 pub(crate) const HELPERS: &str = r#"(function () {
   const dp = Object.defineProperty;
   const apply = Reflect.apply;

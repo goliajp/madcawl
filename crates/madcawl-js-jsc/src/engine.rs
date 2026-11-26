@@ -9,8 +9,6 @@ use madcawl_str::{Atom, DomString, HeldAtoms};
 use crate::collect::{JscTracer, JscUnlinker};
 use crate::ffi;
 use crate::isolate::{Jsc, Realm};
-use crate::objects::{FnKind, FnRec, make_function, thunk};
-use crate::protos::Helper;
 use crate::value::{ABSENT, FALSE, NULL, THROWN, TRUE, UNDEFINED, Value};
 
 impl Engine for Jsc {
@@ -176,17 +174,7 @@ impl Engine for Jsc {
     }
 
     fn new_function<H: Host<Jsc>>(&mut self, realm: Realm, name: &'static str, length: u8, f: Bound<HostFn, Jsc, H>, data: u64) -> Owned<Value> {
-        let ctx = self.realm_ctx(realm);
-        let fproto = self.helper(realm.0, Helper::FunctionProto);
-        let kind = FnKind::Host { f: f.get(), data, thunk: thunk::<H> };
-        let v = make_function(self, ctx, FnRec { kind, host_type: std::any::TypeId::of::<H>() }, fproto);
-        let n = self.string_of(&DomString::from_wtf8(name.as_bytes()));
-        // stopped while naming it, the function stays usable, unnamed
-        if self.call_helper(realm.0, Helper::Named, &[v, n, Value::number(f64::from(length))]).is_err() {
-            self.after_stop();
-        }
-        self.unprotect(n);
-        Jsc::owned(v)
+        self.host_function(realm, name, length, f, data)
     }
 
     fn interface_object<H: Host<Jsc>>(&mut self, realm: Realm, class: &'static ClassDef<Jsc, H>) -> Owned<Value> {
@@ -239,8 +227,17 @@ impl Engine for Jsc {
 
     const PLACES_WRAPPERS: bool = true;
 
-    fn place_wrappers(&mut self, tree: Tree<Value>, words: &[u64], refused: &mut Vec<usize>) {
-        self.place(tree, words, refused);
+    fn place_wrappers(&mut self, tree: Tree<Value>, words: &[u64], refused: &mut Vec<usize>) -> bool {
+        self.place(tree, words, refused)
+    }
+
+    fn member(&mut self, owner: Value, v: Value) -> Owned<Value> {
+        self.add_member(owner, v);
+        Jsc::owned(v)
+    }
+
+    fn release_member(&mut self, owner: u64, v: Owned<Value>) {
+        self.remove_member(owner, v.into_raw());
     }
 
     fn weak(&mut self, v: Value) -> u32 {

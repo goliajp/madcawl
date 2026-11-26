@@ -146,6 +146,7 @@ pub(crate) fn init_event<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: SideRef
     let ty = h.names.hold(&wtf8(&ty));
     let ev = h.event_mut(this);
     (ev.ty, ev.bubbles, ev.cancelable, ev.initialized) = (ty, bubbles, cancelable, true);
-    (ev.stop, ev.stop_now, ev.canceled) = (false, false, false);
+    (ev.stop, ev.stop_now, ev.canceled, ev.trusted) = (false, false, false, false);
+    h.set_held(this, |ev| &mut ev.target, None);
     Ok(())
 }

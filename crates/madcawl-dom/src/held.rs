@@ -45,7 +45,9 @@ impl Dom {
         let i = n.index();
         self.by_count = true;
         self.inc(i);
-        *self.held.entry(i).or_insert(0) += 1;
+        let k = self.held.entry(i).or_insert(0);
+        self.holds_changed |= *k == 0;
+        *k += 1;
         HeldNode(n, PhantomData)
     }
 
@@ -59,6 +61,7 @@ impl Dom {
         *k -= 1;
         if *k == 0 {
             self.held.remove(&i);
+            self.holds_changed = true;
         }
         self.dec(i);
     }

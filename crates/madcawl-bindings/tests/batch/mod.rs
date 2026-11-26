@@ -21,7 +21,9 @@ pub trait Driver: Engine {
     fn collect_all(&mut self, h: &mut DomHost<Self>);
 }
 
+mod events;
 mod trees;
+pub use events::*;
 pub use trees::*;
 
 pub struct Js<E: Driver> {

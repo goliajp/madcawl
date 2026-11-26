@@ -11,6 +11,11 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+# collect-now: a synchronous full collection for this crate's own tests
+# (an undeclared framework entry point): no shipped build turns it on
+[features]
+collect-now = []
+
 # JavaScriptCore.framework is a system framework, linked directly; no crate
 [dependencies]
 madcawl-js = { path = "../madcawl-js" }
@@ -19,6 +24,7 @@ madcawl-str = { path = "../madcawl-str" }
 # the binding test batch runs here on JavaScriptCore, and the scripted
 # parsing cases with it
 [dev-dependencies]
+madcawl-js-jsc = { path = ".", features = ["collect-now"] }
 madcawl-bindings = { path = "../madcawl-bindings" }
 madcawl-dom = { path = "../madcawl-dom" }
 madcawl-html = { path = "../madcawl-html" }

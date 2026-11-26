@@ -4,8 +4,8 @@
 //!
 //! A node's wrapper is made the first time script reads the node and
 //! kept in the node's wrapper word. Listeners are member handles in a
-//! side table by node index, so a node without a wrapper keeps its
-//! listeners and stays a vertex of the collector's graph. The counts on
+//! side table by node index; on an engine that keeps wrappers by reach
+//! they live beside the node's wrapper and go with it. The counts on
 //! nodes follow the DOM's rules; [`DomHost::settle`] passes on what
 //! changed (wrappers gone, nodes freed, nodes left holding cycles), and
 //! [`DomHost::collect`] runs the engine's cycle collector by deadline.
@@ -16,6 +16,7 @@ mod event_loop;
 mod gc;
 mod host;
 mod impls;
+mod listeners;
 mod parse;
 mod shell;
 mod side;

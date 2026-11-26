@@ -68,4 +68,5 @@ fn preserve<E: Engine>(h: &mut DomHost<E>, obj: HostRef) {
 fn died<E: Engine>(h: &mut DomHost<E>, obj: HostRef) {
     let n = h.node(obj);
     h.dom.clear_wrapper(n);
+    h.drop_members(n);
 }

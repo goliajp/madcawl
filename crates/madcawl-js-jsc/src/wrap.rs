@@ -36,6 +36,8 @@ impl Jsc {
             strong: true,
             weak: Value(0),
             grouped: false,
+            container: Value(0),
+            members: Vec::new(),
             shared: self.shared,
         }));
         // SAFETY: the record lives until the host is told the wrapper died

@@ -70,3 +70,28 @@ fn holding_one_wrapper_keeps_its_whole_tree() {
 fn the_arena_gives_back_what_a_loop_of_detached_trees_took() {
     batch::the_arena_gives_back_what_a_loop_of_detached_trees_took::<E>();
 }
+
+#[test]
+fn dispatch_runs_capture_target_and_bubble_listeners_in_order() {
+    batch::dispatch_runs_capture_target_and_bubble_listeners_in_order::<E>();
+}
+
+#[test]
+fn a_listener_removed_during_dispatch_is_not_called_even_when_added_again() {
+    batch::a_listener_removed_during_dispatch_is_not_called_even_when_added_again::<E>();
+}
+
+#[test]
+fn removing_nodes_during_dispatch_leaves_its_path_as_it_was() {
+    batch::removing_nodes_during_dispatch_leaves_its_path_as_it_was::<E>();
+}
+
+#[test]
+fn an_event_keeps_its_detached_target_wrapper_with_its_own_properties() {
+    batch::an_event_keeps_its_detached_target_wrapper_with_its_own_properties::<E>();
+}
+
+#[test]
+fn a_listener_object_holding_its_own_detached_node_is_freed() {
+    batch::a_listener_object_holding_its_own_detached_node_is_freed::<E>();
+}

@@ -5,20 +5,13 @@ use std::collections::HashMap;
 
 use madcawl_dom::{Dom, NodeId, NodeKind};
 use madcawl_js::{
-    ClassDef, Deadline, Engine, ErrorKind, Halt, Host, HostRef, Member, ModuleRequest, Owned, Root, Step,
+    ClassDef, Deadline, Engine, ErrorKind, Halt, Host, HostRef, ModuleRequest, Owned, Root, Step,
 };
 use madcawl_str::{Atom, HeldAtoms};
 
 use crate::event_loop::EventLoop;
+use crate::listeners::Listener;
 use crate::generated::{DocumentClass, ElementClass, NodeClass};
-
-pub(crate) struct Listener<E: Engine> {
-    pub ty: Atom,
-    pub capture: bool,
-    /// Removed before its first call.
-    pub once: bool,
-    pub callback: Member<E>,
-}
 
 pub struct DomHost<E: Engine> {
     pub dom: Dom,
@@ -37,9 +30,18 @@ pub struct DomHost<E: Engine> {
     pub(crate) loader: Option<crate::parse::Loader>,
     /// The window's listeners: the window lives as long as the host, so
     /// they are roots.
-    pub(crate) window_listeners: Vec<(Atom, Root<E>)>,
-    /// Nodes moved between trees, being placed (`trees.rs`).
+    pub(crate) window_listeners: Vec<Listener<E>>,
+    /// The id of the last listener added (`listeners.rs`).
+    pub(crate) next_listener: u64,
+    /// Nodes moved between trees, being placed, and those the engine
+    /// could not place yet (`trees.rs`).
     pub(crate) moved: Vec<NodeId>,
+    /// The roots of the detached trees placed as held (`trees.rs`).
+    pub(crate) pinned: Vec<NodeId>,
+    /// The realm is detached: nothing is placed any more.
+    pub(crate) closed: bool,
+    /// Side objects whose wrapper the engine could not place yet.
+    pub(crate) unplaced_sides: Vec<crate::side::SideRef>,
     /// Suspects went to the engine since its last collection finished.
     pub(crate) collect_due: bool,
     /// The host objects that are not nodes (`side.rs`).
@@ -66,7 +68,11 @@ impl<E: Engine> DomHost<E> {
             parser: None,
             loader: None,
             window_listeners: Vec::new(),
+            next_listener: 0,
             moved: Vec::new(),
+            pinned: Vec::new(),
+            unplaced_sides: Vec::new(),
+            closed: false,
             collect_due: false,
             sides: Default::default(),
         };
@@ -108,8 +114,9 @@ impl<E: Engine> DomHost<E> {
     /// hand over the nodes that left a document still counted. Called
     /// after every call into the engine and every tree change.
     pub fn settle(&mut self, e: &mut E) {
-        self.regroup(e);
         loop {
+            // a side object freed last round may have let go of a held node
+            self.regroup(e);
             let delivered = e.drain_host(self);
             self.dom.free_dead(&mut self.freed);
             let freed = std::mem::take(&mut self.freed);
@@ -193,14 +200,6 @@ impl<E: Engine> DomHost<E> {
         self.listeners_of(n).count()
     }
 
-    pub(crate) fn listeners_of(&self, n: NodeId) -> impl Iterator<Item = &Listener<E>> {
-        self.listeners.get(&n.index()).into_iter().flatten()
-    }
-
-    pub(crate) fn take_listeners(&mut self, n: NodeId) -> Vec<Listener<E>> {
-        self.listeners.remove(&n.index()).unwrap_or_default()
-    }
-
     /// Give back everything this host holds in the engine: listeners,
     /// preserved wrappers (of nodes in the document and out of it), the
     /// realm. What script still holds is the engine's to free; the
@@ -224,6 +223,7 @@ impl<E: Engine> DomHost<E> {
                 e.release(unsafe { Owned::from_raw(E::wrapper_value(w & !1)) });
             }
         }
+        self.closed = true;
         e.detach_realm(self.realm);
         self.settle(e);
     }

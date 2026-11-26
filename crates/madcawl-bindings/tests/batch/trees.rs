@@ -35,7 +35,7 @@ fn touch_and_drop<E: Driver>(js: &mut Js<E>, html: E::Value, n: usize) {
 /// values could keep them for a collector that scans it: the engine's
 /// own frames under a host call reach deeper than 64 KiB.
 #[inline(never)]
-fn scrub() {
+pub(super) fn scrub() {
     let mut pad = [0u64; 64 * 1024];
     for w in pad.iter_mut() {
         // SAFETY: a write to a live local

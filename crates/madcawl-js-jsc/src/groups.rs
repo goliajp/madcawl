@@ -25,20 +25,22 @@ fn record<'a>(word: u64) -> &'a mut WrapRec {
 }
 
 impl Jsc {
-    pub(crate) fn place(&mut self, tree: Tree<Value>, words: &[u64], refused: &mut Vec<usize>) {
-        let Some(&first) = words.first() else { return };
+    /// `false` when script was being stopped and nothing was placed.
+    pub(crate) fn place(&mut self, tree: Tree<Value>, words: &[u64], refused: &mut Vec<usize>) -> bool {
+        let Some(&first) = words.first() else { return true };
         let realm = record(first).realm;
         let settled = |&w: &u64| record(w).strong && !record(w).grouped;
         if self.realms[realm as usize].detached || (tree == Tree::Anchored && words.iter().all(settled)) {
-            return;
+            return true;
         }
-        let Some(live) = self.live_records(realm, words, refused) else { return };
-        match tree {
+        let Some(live) = self.live_records(realm, words, refused) else { return false };
+        let placed = match tree {
             Tree::Anchored => self.anchor(realm, words, &live),
             Tree::New => self.group(realm, UNDEFINED, words, &live),
             Tree::With(r) => self.group(realm, r, words, &live),
-        }
+        };
         self.unprotect(live.array);
+        placed
     }
 
     /// Which of `words` are alive, with each one's wrapper in an array
@@ -91,7 +93,7 @@ impl Jsc {
         Some(Live { alive, array })
     }
 
-    fn anchor(&mut self, realm: u32, words: &[u64], live: &Live) {
+    fn anchor(&mut self, realm: u32, words: &[u64], live: &Live) -> bool {
         let mut grouped = Vec::new();
         for (i, &w) in words.iter().enumerate() {
             let rec = record(w);
@@ -104,22 +106,30 @@ impl Jsc {
             }
             // a strong wrapper is read without it
             self.unprotect(std::mem::replace(&mut rec.weak, Value(0)));
-            if std::mem::take(&mut rec.grouped) {
-                grouped.push(rec.js);
+            if rec.grouped {
+                grouped.push(w);
             }
         }
         if grouped.is_empty() {
-            return;
+            return true;
         }
-        let arr = self.array(self.realms[realm as usize].ctx, &grouped);
-        if self.call_helper(realm, Helper::Ungroup, &[arr]).is_err() {
-            // still in their old group, which only keeps them longer
-            self.after_stop();
-        }
+        let js: Vec<Value> = grouped.iter().map(|&w| record(w).js).collect();
+        let arr = self.array(self.realms[realm as usize].ctx, &js);
+        let ok = self.call_helper(realm, Helper::Ungroup, &[arr]).is_ok();
         self.unprotect(arr);
+        if !ok {
+            // still in their old groups, which they would keep alive: the
+            // host places them again
+            self.after_stop();
+            return false;
+        }
+        for w in grouped {
+            record(w).grouped = false;
+        }
+        true
     }
 
-    fn group(&mut self, realm: u32, root: Value, words: &[u64], live: &Live) {
+    fn group(&mut self, realm: u32, root: Value, words: &[u64], live: &Live) -> bool {
         let ctx = self.realms[realm as usize].ctx;
         let need: Vec<Value> = live_records(words, live).map(|r| if r.weak == Value(0) { TRUE } else { FALSE }).collect();
         let need_arr = self.array(ctx, &need);
@@ -128,9 +138,10 @@ impl Jsc {
         let made = match r {
             Ok(a) => self.elements(realm, a, need.iter().filter(|&&n| n == TRUE).count()),
             Err(_) => {
-                // they stay as they were: strong ones protected
+                // they stay as they were, strong ones protected, until the
+                // host places them again
                 self.after_stop();
-                return;
+                return false;
             }
         };
         let mut made = made.into_iter();
@@ -144,6 +155,7 @@ impl Jsc {
                 self.unprotect(rec.js);
             }
         }
+        true
     }
 
     /// The first `n` elements of array `a`, uncounted: `a` holds them

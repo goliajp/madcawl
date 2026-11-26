@@ -20,39 +20,60 @@ use crate::engine::Engine;
 use crate::graph::{Tracer, Unlinker};
 use crate::value::{NotSend, Owned};
 
-pub struct Member<E: Engine>(Option<E::Value>, NotSend);
+pub struct Member<E: Engine> {
+    v: Option<E::Value>,
+    /// The owner's wrapper word when the count came from
+    /// [`Engine::member`]; 0 for one from a plain count.
+    owner: u64,
+    _not_send: NotSend,
+}
 
 impl<E: Engine> Member<E> {
     pub fn new(v: Owned<E::Value>) -> Self {
-        Member(Some(v.into_raw()), PhantomData)
+        Member { v: Some(v.into_raw()), owner: 0, _not_send: PhantomData }
+    }
+
+    /// A member of the host object whose wrapper is `owner` (live, held
+    /// by the caller): see [`Engine::member`].
+    pub fn of(e: &mut E, owner: E::Value, v: E::Value) -> Self {
+        let m = e.member(owner, v);
+        Member { v: Some(m.into_raw()), owner: E::wrapper_word(owner), _not_send: PhantomData }
     }
 
     pub fn empty() -> Self {
-        Member(None, PhantomData)
+        Member { v: None, owner: 0, _not_send: PhantomData }
     }
 
     pub fn get(&self) -> Option<E::Value> {
-        self.0
+        self.v
     }
 
     pub fn trace(&self, t: &mut E::Tracer) {
-        if let Some(v) = self.0 {
+        if let Some(v) = self.v {
             t.value(v);
         }
     }
 
     pub fn unlink(&mut self, u: &mut E::Unlinker) {
-        if let Some(v) = self.0.take() {
+        if let Some(v) = self.v.take() {
             // SAFETY: the count this handle held
             u.release(unsafe { Owned::from_raw(v) });
         }
     }
 
     pub fn clear(&mut self, e: &mut E) {
-        if let Some(v) = self.0.take() {
+        if let Some(v) = self.v.take() {
             // SAFETY: as in unlink
-            e.release(unsafe { Owned::from_raw(v) });
+            let v = unsafe { Owned::from_raw(v) };
+            if self.owner == 0 { e.release(v) } else { e.release_member(self.owner, v) }
         }
+    }
+
+    /// Let go of the value without the engine: its owner's wrapper died
+    /// on an engine that keeps members beside wrappers, and the value
+    /// with it ([`Engine::member`]).
+    pub fn forget(&mut self) {
+        self.v = None;
     }
 }
 

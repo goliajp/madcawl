@@ -122,15 +122,34 @@ impl<E: Engine> DomHost<E> {
         let word = E::wrapper_word(v.get());
         self.sides.get_mut(r).wrapper = word;
         self.sides.inc(r);
-        if E::PLACES_WRAPPERS {
-            // in no tree: it lives while script holds it
-            let mut refused = Vec::new();
-            e.place_wrappers(Tree::New, &[word], &mut refused);
-            if !refused.is_empty() {
-                self.side_wrapper_gone(e, r);
-            }
+        if E::PLACES_WRAPPERS && !self.place_side(e, r) {
+            self.unplaced_sides.push(r);
         }
         v
+    }
+
+    /// Place the wrapper of `r` in no tree: it lives while script holds
+    /// it. `false` when the engine could not place it now.
+    fn place_side(&mut self, e: &mut E, r: SideRef) -> bool {
+        let word = self.sides.get(r).wrapper & !1;
+        let mut refused = Vec::new();
+        if !e.place_wrappers(Tree::New, &[word], &mut refused) {
+            return false;
+        }
+        if !refused.is_empty() {
+            self.side_wrapper_gone(e, r);
+        }
+        true
+    }
+
+    /// Place the side wrappers the engine could not place before.
+    pub(crate) fn place_sides(&mut self, e: &mut E) {
+        for r in std::mem::take(&mut self.unplaced_sides) {
+            let live = self.sides.map.get(&r.0).is_some_and(|s| s.wrapper != 0);
+            if live && !self.place_side(e, r) {
+                self.unplaced_sides.push(r);
+            }
+        }
     }
 
     /// The wrapper of `r` is gone or refused: clear its word and its count.

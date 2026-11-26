@@ -10,6 +10,7 @@ use madcawl_str::{Atom, DomString};
 
 use crate::convert::{Thrown, arg, run, throw};
 use crate::generated::{DocumentClass, ElementClass, EventClass, EventTargetClass, NodeClass};
+use crate::event::Target;
 use crate::host::DomHost;
 use crate::shell;
 
@@ -73,8 +74,11 @@ impl<E: Engine> DomHost<E> {
         let roots: Vec<Root<E>> = self
             .window_listeners
             .iter()
-            .filter(|(t, _)| *t == ty)
-            .map(|(_, cb)| Root::new(e.retain(cb.get())))
+            .filter(|l| l.ty == ty)
+            .filter_map(|l| l.callback.get())
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|cb| Root::new(e.retain(cb)))
             .collect();
         let window = e.global(self.realm);
         let arg = e.string(ty.to_dom_string());
@@ -101,23 +105,21 @@ impl<E: Engine> DomHost<E> {
     }
 
     pub(crate) fn close_window(&mut self, e: &mut E) {
-        for (_, cb) in std::mem::take(&mut self.window_listeners) {
-            cb.release(e);
+        for mut l in std::mem::take(&mut self.window_listeners) {
+            l.callback.clear(e);
         }
     }
 }
 
 fn listener<E: Engine>(e: &mut E, h: &mut DomHost<E>, args: &[Value<E>], add: bool) -> Result<(), Thrown> {
     let ty = crate::convert::atom(e, h, arg::<E>(args, 0))?;
-    let Some(cb) = crate::convert::callback_or_null(e, arg::<E>(args, 1))? else { return Ok(()) };
-    let at = h.window_listeners.iter().position(|(t, c)| *t == ty && c.get() == cb);
-    match (add, at) {
-        (true, None) => {
-            let r = Root::new(e.retain(cb));
-            h.window_listeners.push((ty, r));
-        }
-        (false, Some(i)) => h.window_listeners.remove(i).1.release(e),
-        _ => {}
+    let cb = crate::convert::callback_or_null(e, arg::<E>(args, 1))?;
+    let o = crate::listeners::options(e, h, arg::<E>(args, 2), add)?;
+    let Some(cb) = cb else { return Ok(()) };
+    if add {
+        h.add_listener(e, Target::Window, ty, cb, &o);
+    } else {
+        h.remove_listener(e, Target::Window, ty, o.capture, cb);
     }
     Ok(())
 }

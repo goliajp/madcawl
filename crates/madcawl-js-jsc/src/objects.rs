@@ -62,6 +62,11 @@ pub(crate) struct WrapRec {
     pub weak: Value,
     /// In a group (`groups.rs`).
     pub grouped: bool,
+    /// The object the wrapper's members are kept in, 0 before the first
+    /// (`members.rs`); held by the wrapper.
+    pub container: Value,
+    /// The container's slots, uncounted.
+    pub members: Vec<Value>,
     pub shared: *const Shared,
 }
 

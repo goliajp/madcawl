@@ -76,6 +76,8 @@ pub struct Jsc {
     /// The first realm's `deref` helper, counted: weak handles read
     /// through it once no realm is live.
     pub(crate) deref: Value,
+    /// The private property name a wrapper's members hang on.
+    pub(crate) members_name: JSStringRef,
 }
 
 impl Jsc {
@@ -129,6 +131,8 @@ impl Jsc {
             scratch: Vec::new(),
             proxies: HashMap::new(),
             deref: Value(0),
+            // SAFETY: a static string; released in Drop
+            members_name: unsafe { ffi::JSStringCreateWithUTF8CString(c"members".as_ptr()) },
         }
     }
 
@@ -226,6 +230,8 @@ impl Drop for Jsc {
             // SAFETY: made by this isolate, used by nothing now
             unsafe { ffi::JSStringRelease(s) };
         }
+        // SAFETY: made in build, used by nothing now
+        unsafe { ffi::JSStringRelease(self.members_name) };
         // SAFETY: every realm's context was released by detach; the group
         // goes last, and its heap with it, running the finalizers
         unsafe {

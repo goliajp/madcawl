@@ -94,6 +94,75 @@ for (let i = 0; i < 500; i++) s.dispatchEvent(new Event('x', {{ bubbles: true }}
     h.close(&mut e);
 }
 
+#[test]
+fn window_phases_passive_listeners_signal_and_init_event() {
+    let (mut e, mut h) = page("<p>x</p>");
+    let src = format!("{TREE}
+window.addEventListener('y', function () {{ log.push('wc'); }}, true); window.addEventListener('y', function () {{ log.push('wb'); }});
+s.addEventListener('y', function () {{ log.push('s'); }});
+s.dispatchEvent(new Event('y')); log.push('|'); s.dispatchEvent(new Event('y', {{ bubbles: true }}));
+var p = new Event('p', {{ cancelable: true }}); s.addEventListener('p', function (e) {{ e.preventDefault(); }}, {{ passive: true }});
+s.dispatchEvent(p);
+var read = []; s.addEventListener('q', null, {{ get capture() {{ read.push('capture'); }}, get once() {{ read.push('once'); }}, get passive() {{ read.push('passive'); }}, get signal() {{ read.push('signal'); }} }});
+var t; try {{ s.addEventListener('q', function () {{}}, {{ signal: null }}); t = 'none'; }} catch (err) {{ t = err.name; }}
+p.initEvent('p2');
+[log.join(), p.defaultPrevented, read.join(), t, p.target].join('|')");
+    assert_eq!(eval(&mut e, &mut h, &src), "wc,s,|,wc,s,wb|false|capture,once,passive,signal|TypeError|");
+    h.close(&mut e);
+}
+
+fn collect_everything(e: &mut Jsc, h: &mut DomHost<Jsc>) {
+    scrub();
+    e.collect_now();
+    while h.collect(e, Deadline::Work(u32::MAX)) != Step::Done {}
+}
+
+#[test]
+fn an_event_keeps_its_detached_target_wrapper_with_its_own_properties() {
+    let (mut e, mut h) = page("<p>x</p>");
+    let src = "var ev = new Event('x'); (function () { var d = document.createElement('div'); d.appendChild(document.createElement('i')); d.x = 'kept'; d.firstChild.y = 'too'; d.dispatchEvent(ev); })(); 'ok'";
+    assert_eq!(eval(&mut e, &mut h, src), "ok");
+    collect_everything(&mut e, &mut h);
+    assert_eq!(eval(&mut e, &mut h, "ev.target.x + ',' + ev.target.firstChild.y"), "kept,too");
+    // once the event goes, so does the tree
+    let before = h.dom.node_count();
+    assert_eq!(eval(&mut e, &mut h, "ev = null; 'ok'"), "ok");
+    // the first collection frees the event, which lets go of the tree;
+    // the second its wrappers, and then the nodes
+    collect_everything(&mut e, &mut h);
+    collect_everything(&mut e, &mut h);
+    assert_eq!(h.dom.node_count(), before - 2);
+    assert_eq!(h.dom.audit().mismatches(), 0);
+    h.close(&mut e);
+}
+
+#[test]
+fn a_detached_node_whose_listener_holds_it_is_freed() {
+    let (mut e, mut h) = page("<p>x</p>");
+    let before = h.dom.node_count();
+    let src = "for (let i = 0; i < 200; i++) { let d = document.createElement('div'); d.id = 'n' + i; d.addEventListener('click', () => d.id); } 'ok'";
+    assert_eq!(eval(&mut e, &mut h, src), "ok");
+    collect_everything(&mut e, &mut h);
+    assert_eq!(h.dom.node_count(), before);
+    assert_eq!(h.dom.audit().mismatches(), 0);
+    h.close(&mut e);
+}
+
+#[test]
+fn listeners_live_while_their_node_does() {
+    let (mut e, mut h) = page("<p>x</p>");
+    let src = "var log = []; var b = document.querySelector('body');
+var kept = document.createElement('div'); kept.addEventListener('x', function () { log.push('kept:' + (this === kept)); });
+var out = document.createElement('div'); b.appendChild(out); out.addEventListener('x', () => log.push('out'));
+var inside = document.createElement('div'); b.appendChild(inside); inside.addEventListener('x', () => log.push('in'));
+b.removeChild(out); out = null; inside = null; 'ok'";
+    assert_eq!(eval(&mut e, &mut h, src), "ok");
+    collect_everything(&mut e, &mut h);
+    let src = "kept.dispatchEvent(new Event('x')); b.lastChild.dispatchEvent(new Event('x')); log.join()";
+    assert_eq!(eval(&mut e, &mut h, src), "kept:true,in");
+    h.close(&mut e);
+}
+
 #[inline(never)]
 fn scrub() {
     let pad = [0u8; 512 * 1024];

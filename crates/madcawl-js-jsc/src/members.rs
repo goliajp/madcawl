@@ -1,0 +1,61 @@
+//! Members: the script values a host object holds (its listeners), kept
+//! in a container hung on its wrapper as a private property, so the
+//! framework's collector sees the edge from wrapper to value and frees a
+//! listener whose closure holds its own node's wrapper together with
+//! that wrapper. The record mirrors the container's slots, uncounted, to
+//! find a value without asking the framework.
+
+use crate::isolate::Jsc;
+use crate::objects::WrapRec;
+use crate::value::{UNDEFINED, Value};
+use crate::{ffi, private};
+
+fn record<'a>(word: u64) -> &'a mut WrapRec {
+    // SAFETY: a word the host holds names a record not yet freed
+    unsafe { &mut *(word as *mut WrapRec) }
+}
+
+impl Jsc {
+    /// Keep `v` beside `owner`, a live wrapper.
+    pub(crate) fn add_member(&mut self, owner: Value, v: Value) {
+        let rec = record(Self::word_of(owner));
+        let ctx = self.realms[rec.realm as usize].ctx;
+        if rec.container == Value(0) {
+            // SAFETY: a plain object of a live realm, with no prototype, so
+            // that putting a slot runs no script
+            let c = unsafe {
+                let c = ffi::JSObjectMake(ctx, std::ptr::null_mut(), std::ptr::null_mut());
+                ffi::JSObjectSetPrototype(ctx, c, ffi::JSValueMakeNull(ctx));
+                Value(c as u64)
+            };
+            private::set_private_property(ctx, owner, self.members_name, c);
+            rec.container = c;
+        }
+        let i = rec.members.len() as u32;
+        rec.members.push(v);
+        // SAFETY: the container its wrapper holds, alive while the wrapper is
+        unsafe { ffi::JSObjectSetPropertyAtIndex(ctx, rec.container.0 as _, i, v.raw(), std::ptr::null_mut()) };
+    }
+
+    /// Drop one `v` kept beside the wrapper whose word is `owner`;
+    /// nothing once that wrapper is dead (the value went with it) or its
+    /// realm is gone.
+    pub(crate) fn remove_member(&mut self, owner: u64, v: Value) {
+        let rec = record(owner);
+        if rec.dead || self.realms[rec.realm as usize].detached {
+            return;
+        }
+        let i = rec.members.iter().rposition(|&m| m == v).expect("a member of this wrapper");
+        let last = rec.members.len() - 1;
+        rec.members.swap_remove(i);
+        let ctx = self.realms[rec.realm as usize].ctx;
+        let c = rec.container.0 as ffi::JSObjectRef;
+        // SAFETY: as in add_member
+        unsafe {
+            if i != last {
+                ffi::JSObjectSetPropertyAtIndex(ctx, c, i as u32, rec.members[i].raw(), std::ptr::null_mut());
+            }
+            ffi::JSObjectSetPropertyAtIndex(ctx, c, last as u32, UNDEFINED.raw(), std::ptr::null_mut());
+        }
+    }
+}

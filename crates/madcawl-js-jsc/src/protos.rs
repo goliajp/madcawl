@@ -53,6 +53,21 @@ impl Jsc {
         Realm(r, self.id)
     }
 
+    /// A function object calling host function `f` with `data`.
+    pub(crate) fn host_function<H: Host<Jsc>>(&mut self, realm: Realm, name: &'static str, length: u8, f: madcawl_js::Bound<madcawl_js::HostFn, Jsc, H>, data: u64) -> madcawl_js::Owned<Value> {
+        let ctx = self.realm_ctx(realm);
+        let fproto = self.helper(realm.0, Helper::FunctionProto);
+        let kind = FnKind::Host { f: f.get(), data, thunk: thunk::<H> };
+        let v = make_function(self, ctx, FnRec { kind, host_type: std::any::TypeId::of::<H>() }, fproto);
+        let n = self.string_of(&madcawl_str::DomString::from_wtf8(name.as_bytes()));
+        // stopped while naming it, the function stays usable, unnamed
+        if self.call_helper(realm.0, Helper::Named, &[v, n, Value::number(f64::from(length))]).is_err() {
+            self.after_stop();
+        }
+        self.unprotect(n);
+        Jsc::owned(v)
+    }
+
     pub(crate) fn helper(&self, realm: u32, h: Helper) -> Value {
         self.realms[realm as usize].helpers[h as usize]
     }

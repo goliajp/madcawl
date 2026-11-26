@@ -31,7 +31,8 @@ pub(crate) unsafe extern "C" fn call(
 
 /// `instanceof` an interface object: the framework asks the class of a
 /// callback object and has no default, so this is OrdinaryHasInstance,
-/// the value's prototype chain against the interface's `prototype`.
+/// the value's prototype chain against the interface's `prototype`,
+/// which throws when that is not an object.
 pub(crate) unsafe extern "C" fn has_instance(ctx: JSContextRef, iface: JSObjectRef, v: JSValueRef, exception: *mut JSValueRef) -> bool {
     // SAFETY: a live context, interface object and value, inside the
     // framework's own callback
@@ -43,6 +44,13 @@ pub(crate) unsafe extern "C" fn has_instance(ctx: JSContextRef, iface: JSObjectR
         let proto = ffi::JSObjectGetProperty(ctx, iface, name, exception);
         ffi::JSStringRelease(name);
         if !(*exception).is_null() {
+            return false;
+        }
+        if ffi::JSValueGetType(ctx, proto) != ffi::kJSTypeObject {
+            let src = c"new TypeError('the prototype of the right-hand side of instanceof is not an object')";
+            let s = ffi::JSStringCreateWithUTF8CString(src.as_ptr());
+            *exception = ffi::JSEvaluateScript(ctx, s, std::ptr::null_mut(), std::ptr::null_mut(), 1, std::ptr::null_mut());
+            ffi::JSStringRelease(s);
             return false;
         }
         let mut o = v;

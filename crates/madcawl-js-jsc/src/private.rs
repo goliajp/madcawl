@@ -6,17 +6,21 @@
 //!
 //! - `JSContextGroupSetExecutionTimeLimit`: the watchdog that stops
 //!   running script when another thread asks ([`install_watchdog`]).
+//! - `JSObjectSetPrivateProperty`: a property script cannot see, on a
+//!   wrapper, that holds its members ([`set_private_property`]).
 
 use std::ffi::{CStr, c_void};
 use std::sync::atomic::Ordering;
 
-use crate::ffi::{JSContextGroupRef, JSContextRef};
+use crate::ffi::{JSContextGroupRef, JSContextRef, JSObjectRef, JSStringRef, JSValueRef};
 use crate::halt::{ABORT, Flags, TERMINATE};
 
 type ShouldTerminate = unsafe extern "C" fn(JSContextRef, *mut c_void) -> bool;
 type SetTimeLimit = unsafe extern "C" fn(JSContextGroupRef, f64, Option<ShouldTerminate>, *mut c_void);
 
 const SET_TIME_LIMIT: &CStr = c"JSContextGroupSetExecutionTimeLimit";
+const SET_PRIVATE_PROPERTY: &CStr = c"JSObjectSetPrivateProperty";
+type SetPrivateProperty = unsafe extern "C" fn(JSContextRef, JSObjectRef, JSStringRef, JSValueRef) -> bool;
 
 /// How often running script looks at the interrupt flags, in seconds:
 /// the bound on how long a stop request waits.
@@ -36,7 +40,7 @@ fn lookup(name: &CStr) -> *mut c_void {
 /// The names of the entry points the adapter needs and the system does
 /// not export; empty when all are there.
 pub fn check() -> Vec<&'static str> {
-    [SET_TIME_LIMIT]
+    [SET_TIME_LIMIT, SET_PRIVATE_PROPERTY]
         .into_iter()
         .filter(|n| lookup(n).is_null())
         .map(|n| n.to_str().expect("an ASCII name"))
@@ -73,14 +77,29 @@ pub(crate) fn install_watchdog(group: JSContextGroupRef, flags: *const Flags) {
     arm(group, flags);
 }
 
+/// Put `v` on wrapper `obj` (an object of a class with private data)
+/// under `name`, where script sees no property.
+pub(crate) fn set_private_property(ctx: JSContextRef, obj: crate::value::Value, name: JSStringRef, v: crate::value::Value) {
+    let f = lookup(SET_PRIVATE_PROPERTY);
+    assert!(!f.is_null(), "the system JavaScriptCore exports {SET_PRIVATE_PROPERTY:?}");
+    // SAFETY: the exported function of this signature, on a live context,
+    // object and value
+    let ok = unsafe { std::mem::transmute::<*mut c_void, SetPrivateProperty>(f)(ctx, obj.0 as _, name, v.raw()) };
+    assert!(ok, "a wrapper takes private properties");
+}
+
+#[cfg(feature = "collect-now")]
 const SYNC_GC: &CStr = c"JSSynchronousGarbageCollectForDebugging";
+#[cfg(feature = "collect-now")]
 type SyncGc = unsafe extern "C" fn(JSContextRef);
 
+#[cfg(feature = "collect-now")]
 impl crate::isolate::Jsc {
-    /// A full collection and sweep now, finalizers run: for tests and
-    /// gauges, which need one at a known moment. Not on the path of a
-    /// page, whose collections the framework times itself; so the entry
-    /// point is looked up here and is not among those [`check`] needs.
+    /// A full collection and sweep now, finalizers run: for this crate's
+    /// tests, which need one at a known moment. Built only with the
+    /// `collect-now` feature, which nothing but those tests turns on: a
+    /// page's collections the framework times itself, and the entry
+    /// point is not among those [`check`] needs.
     pub fn collect_now(&mut self) {
         let f = lookup(SYNC_GC);
         assert!(!f.is_null(), "the system JavaScriptCore exports {SYNC_GC:?}");

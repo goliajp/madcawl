@@ -50,6 +50,8 @@ pub(crate) struct EventState {
     pub stop: bool,
     pub stop_now: bool,
     pub canceled: bool,
+    /// A passive listener is being called: it cannot cancel.
+    pub in_passive: bool,
     pub phase: u16,
     pub time: f64,
     pub target: Option<Held>,
@@ -71,6 +73,7 @@ impl EventState {
             stop: false,
             stop_now: false,
             canceled: false,
+            in_passive: false,
             phase: NONE,
             time,
             target: None,
@@ -99,7 +102,7 @@ impl EventState {
 
     /// Cancel, when a listener may.
     pub fn cancel(&mut self) {
-        if self.cancelable {
+        if self.cancelable && !self.in_passive {
             self.canceled = true;
         }
     }
@@ -138,7 +141,7 @@ impl<E: Engine> DomHost<E> {
         }
     }
 
-    fn set_held(&mut self, r: SideRef, which: fn(&mut EventState) -> &mut Option<Held>, t: Option<Target>) {
+    pub(crate) fn set_held(&mut self, r: SideRef, which: fn(&mut EventState) -> &mut Option<Held>, t: Option<Target>) {
         let new = t.map(|t| self.hold_target(t));
         if let Some(Held::Node(old)) = std::mem::replace(which(self.event_mut(r)), new) {
             self.dom.let_go(old);
@@ -160,6 +163,9 @@ impl<E: Engine> DomHost<E> {
         }
         let held: Vec<Held> = path.iter().map(|&t| self.hold_target(t)).collect();
         self.event_mut(r).path = held;
+        // a detached target's tree is held now: its wrappers stay while
+        // listeners run
+        self.regroup(e);
         let event = self.wrap_side(e, r);
         for (i, &t) in path.iter().enumerate().rev() {
             let phase = if i == 0 { AT_TARGET } else { CAPTURING_PHASE };
@@ -195,35 +201,29 @@ impl<E: Engine> DomHost<E> {
             return;
         }
         let ty = self.event(r).ty;
-        let list: Vec<(Root<E>, bool)> = match t {
-            Target::Node(n) => self
-                .listeners_of(n)
-                .filter(|l| l.ty == ty && l.capture == capture)
-                .filter_map(|l| l.callback.get().map(|cb| (Root::new(e.retain(cb)), l.once)))
-                .collect(),
-            // the window's listeners are not split by phase yet: they run
-            // as it is left
-            Target::Window if !capture => {
-                self.window_listeners.iter().filter(|(a, _)| *a == ty).map(|(_, cb)| (Root::new(e.retain(cb.get())), false)).collect()
-            }
-            Target::Window => Vec::new(),
-        };
+        let list: Vec<(Root<E>, u64, bool, bool)> = self
+            .list_of(t)
+            .iter()
+            .filter(|l| l.ty == ty && l.capture == capture)
+            .filter_map(|l| l.callback.get().map(|cb| (cb, l.id, l.once, l.passive)))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|(cb, id, once, passive)| (Root::new(e.retain(cb)), id, once, passive))
+            .collect();
         if list.is_empty() {
             return;
         }
         self.event_mut(r).phase = phase;
         self.set_held(r, |ev| &mut ev.current, Some(t));
         let this = t.into_js(e, self);
-        for (cb, once) in list {
-            let live = match t {
-                Target::Node(n) => self.listeners_of(n).any(|l| l.ty == ty && l.capture == capture && l.callback.get() == Some(cb.get())),
-                Target::Window => true,
-            };
-            if live && !self.event(r).stop_now && e.halt() == Halt::Running {
-                if once && let Target::Node(n) = t {
-                    self.remove_listener(e, n, ty, capture, cb.get());
+        for (cb, id, once, passive) in list {
+            if self.listening(t, id) && !self.event(r).stop_now && e.halt() == Halt::Running {
+                if once {
+                    self.remove_listener(e, t, ty, capture, cb.get());
                 }
+                self.event_mut(r).in_passive = passive;
                 self.call_listener(e, cb.get(), this.get(), event);
+                self.event_mut(r).in_passive = false;
             }
             cb.release(e);
         }
