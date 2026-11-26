@@ -31,11 +31,11 @@ impl Proxy<'_> {
         let generation = net.generation();
         self.tokens.retain(|_, g| *g == generation);
         if self.tokens.len() >= self.token_share(net.slot_limit()) {
-            self.log("net-register", "error 13");
+            self.content_log("net-register", "error 13");
             return error_frame(code::TOO_MANY_PAGES, "the session holds as many network registrations as it may");
         }
         if !net.take_slot() {
-            self.log("net-register", "error 13 host");
+            self.content_log("net-register", "error 13 host");
             return error_frame(code::TOO_MANY_PAGES, "the host holds as many network registrations as the network service takes");
         }
         match net.register(self.id) {
@@ -66,7 +66,7 @@ impl Proxy<'_> {
             return error_frame(code::BAD_REQUEST, "no registration named");
         };
         let Some(g) = self.tokens.remove(t) else {
-            self.log("net-release", "error 11");
+            self.content_log("net-release", "error 11");
             return error_frame(code::REFUSED, "not a registration the host made for this session");
         };
         net.give_slots(1, g);

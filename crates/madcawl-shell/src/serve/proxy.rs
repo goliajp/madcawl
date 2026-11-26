@@ -234,7 +234,7 @@ impl<'a> Proxy<'a> {
                 return None;
             }
             k => {
-                self.log(&format!("question-{k}"), "error 11");
+                self.content_log(&format!("question-{k}"), "error 11");
                 error_frame(code::REFUSED, "the host does not take that question from a content process")
             }
         })

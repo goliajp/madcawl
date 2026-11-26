@@ -28,7 +28,9 @@ impl Budget {
 }
 
 impl Proxy<'_> {
-    pub(super) fn audit(&mut self, q: &Frame) {
+    /// Takes one line from the window's budget; false when it is spent and
+    /// the line is to be dropped (and counted).
+    fn charge(&mut self) -> bool {
         if self.audit.since.elapsed() >= WINDOW {
             self.audit_dropped();
             self.audit.since = Instant::now();
@@ -36,9 +38,24 @@ impl Proxy<'_> {
         }
         if self.audit.written >= LINES {
             self.audit.dropped += 1;
-            return;
+            return false;
         }
         self.audit.written += 1;
+        true
+    }
+
+    /// A line the host writes because of a content-process frame: it is
+    /// held to the same budget as the process's own lines.
+    pub(super) fn content_log(&mut self, action: &str, result: &str) {
+        if self.charge() {
+            self.log(action, result);
+        }
+    }
+
+    pub(super) fn audit(&mut self, q: &Frame) {
+        if !self.charge() {
+            return;
+        }
         let f: Vec<&str> = q.fields.iter().filter(|(t, _)| *t == tag::FIELD).map(|(_, v)| std::str::from_utf8(v).unwrap_or("?")).collect();
         let [origin, action, role, name, result] = f[..] else {
             self.log("audit", "a malformed line from the content process");
@@ -80,5 +97,18 @@ mod tests {
         assert_eq!(tail.len(), 2, "{tail:?}");
         assert!(tail[0].contains("audit-dropped") && tail[0].contains("500 lines"), "{}", tail[0]);
         assert!(tail[1].contains("\tread\t"), "{}", tail[1]);
+    }
+
+    #[test]
+    fn refused_questions_from_a_content_process_are_held_to_the_same_budget() {
+        let (s, dir) = shared("audit-q", false, |_| {});
+        let mut p = Proxy::new(1, &s);
+        let unknown = Frame::new(200);
+        for _ in 0..LINES + 500 {
+            assert!(p.answer(&unknown).is_some());
+        }
+        let log = std::fs::read_to_string(dir.0.join("audit.log")).unwrap();
+        assert_eq!(log.lines().count(), LINES as usize);
+        assert_eq!(p.audit.dropped, 500);
     }
 }
