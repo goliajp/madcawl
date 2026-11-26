@@ -122,13 +122,16 @@ pub(crate) fn arg<E: Engine>(args: &[E::Value], i: usize) -> E::Value {
     args.get(i).copied().unwrap_or_else(E::undefined)
 }
 
+/// `this` as a node: an `Attr` passes Node's brand check but is a side
+/// object, so a Node member it does not answer itself (`childNodes`
+/// among them, an empty list in the standard) throws a TypeError.
 pub(crate) fn this_node<E: Engine>(
     e: &mut E,
     h: &DomHost<E>,
     this: E::Value,
     class: &'static ClassDef<E, DomHost<E>>,
 ) -> Result<NodeId, Thrown> {
-    match e.host_of(this, class) {
+    match e.host_of(this, class).filter(|&obj| h.sides.of(obj).is_none()) {
         Some(obj) => Ok(h.node(obj)),
         None => Err(throw(e, ErrorKind::Type, "illegal invocation")),
     }
@@ -175,13 +178,17 @@ pub(crate) fn side<E: Engine>(
     }
 }
 
+/// An argument as a node of `class`. An `Attr` is refused with a
+/// TypeError where the standard takes it as a node that is in no tree:
+/// `contains(attr)` throws instead of giving false, and `attr` as the
+/// child of `insertBefore` throws a TypeError, not a NotFoundError.
 pub(crate) fn node<E: Engine>(
     e: &mut E,
     h: &DomHost<E>,
     v: E::Value,
     class: &'static ClassDef<E, DomHost<E>>,
 ) -> Result<NodeId, Thrown> {
-    match e.host_of(v, class) {
+    match e.host_of(v, class).filter(|&obj| h.sides.of(obj).is_none()) {
         Some(obj) => Ok(h.node(obj)),
         None => Err(throw(e, ErrorKind::Type, "the argument is not a node of that interface")),
     }

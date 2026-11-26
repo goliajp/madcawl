@@ -52,7 +52,8 @@ impl<E: Engine> DomHost<E> {
     /// live collection: its root's wrapper; of a fixed one: an array of
     /// the wrappers of its nodes outside the document; of a controller:
     /// its signal's wrapper, which is then the same object while the
-    /// controller's lives): script
+    /// controller's lives; of an `Attr` or `attributes` map: its
+    /// element's wrapper): script
     /// that reaches the event reaches the target's tree, with what it
     /// put there, and a cycle back through script (a listener keeping
     /// the event, the target keeping it in a property) is one the
@@ -72,6 +73,10 @@ impl<E: Engine> DomHost<E> {
         }
         let w = match &self.sides.get(r).data {
             SideData::Controller(s) => s.target().into_js(e, self),
+            SideData::Attr(_) | SideData::AttrMap(_) => match self.owning_element(r) {
+                Some(el) => self.wrap(e, el),
+                None => return,
+            },
             SideData::Event(ev) => match ev.target.as_ref().map(Held::target) {
                 Some(t @ (Target::Node(_) | Target::Side(_))) => t.into_js(e, self),
                 _ => return,

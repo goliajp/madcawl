@@ -10,7 +10,8 @@ pub(crate) use super::collections::{
     last_element_child, next_element_sibling, previous_element_sibling,
 };
 pub(crate) use super::attributes::{
-    class_name, get_attribute, get_attribute_names, has_attribute, has_attributes, remove_attribute, set_attribute,
+    attributes, class_name, get_attribute, get_attribute_names, get_attribute_node, get_attribute_node_ns, has_attribute,
+    has_attributes, remove_attribute, remove_attribute_node, set_attribute, set_attribute_node, set_attribute_node_ns,
     set_class_name, set_id, toggle_attribute,
 };
 pub(crate) use super::parent::{query_selector, query_selector_all};

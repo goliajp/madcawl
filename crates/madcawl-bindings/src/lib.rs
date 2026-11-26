@@ -12,6 +12,7 @@
 
 mod abort;
 mod args;
+mod attr;
 mod convert;
 mod event;
 mod event_loop;

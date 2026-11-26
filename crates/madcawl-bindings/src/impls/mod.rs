@@ -3,6 +3,7 @@
 
 pub(crate) mod abort_controller;
 pub(crate) mod abort_signal;
+pub(crate) mod attr;
 pub(crate) mod attributes;
 pub(crate) mod character_data;
 pub(crate) mod collections;
@@ -13,6 +14,7 @@ pub(crate) mod dom_exception;
 pub(crate) mod element;
 pub(crate) mod event;
 pub(crate) mod event_target;
+pub(crate) mod named_node_map;
 pub(crate) mod node;
 pub(crate) mod parent;
 

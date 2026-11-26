@@ -48,6 +48,32 @@ impl Dom {
         done
     }
 
+    /// Add the attribute `local` in `ns` with `prefix` (a static atom)
+    /// to element `el`, after the others, as `setAttributeNode` does
+    /// for one it does not have. False as for `set_attribute`.
+    pub fn add_attribute(&mut self, el: NodeId, ns: AttrNamespace, prefix: Option<Atom>, local: Atom, value: &[u8]) -> bool {
+        let i = el.index();
+        assert_eq!(self.kind_of(i), NodeKind::Element, "attributes go on an element");
+        let cut = self.cut;
+        let done = self.add_attr(i, AttrRef { ns, local, prefix, value });
+        self.cut = cut;
+        self.notify(crate::tree::Change::Attributes(i));
+        done
+    }
+
+    /// Give attribute `k` of element `el` (in the order `attributes`
+    /// gives them) the value `value` and the prefix `prefix` (a static
+    /// atom), keeping its place, namespace and local name. False as for
+    /// `set_attribute`.
+    pub fn set_attribute_at(&mut self, el: NodeId, k: usize, prefix: Option<Atom>, value: &[u8]) -> bool {
+        let i = el.index();
+        let cut = self.cut;
+        let done = self.replace_attr(i, k, prefix, value);
+        self.cut = cut;
+        self.notify(crate::tree::Change::Attributes(i));
+        done
+    }
+
     /// Remove attribute `k` of element `el`, in the order `attributes`
     /// gives them; its value gives back its bytes, its slot and its table
     /// entries, and the element's id or class list goes with it.
@@ -102,12 +128,18 @@ impl Dom {
             };
             return self.add_attr(el, a);
         };
+        self.replace_attr(el, k, None, v)
+    }
+
+    /// Give attribute `k` of `el` the value `v` and prefix `prefix`; the
+    /// value it replaces gives back its bytes and its table entries.
+    fn replace_attr(&mut self, el: u32, k: usize, prefix: Option<Atom>, v: &[u8]) -> bool {
+        let b = self.n(el).attrs;
         let old = self.attrs.attrs(b)[k];
+        let (ns, local) = (old.ns(), old.local());
         self.refund(old.value());
-        let (value, classes, id, whole) = self.attr_value(AttrNamespace::None, local, v);
-        let old = self
-            .attrs
-            .replace(b, k, Unit::attr(local, AttrNamespace::None, None, value));
+        let (value, classes, id, whole) = self.attr_value(ns, local, v);
+        let old = self.attrs.replace(b, k, Unit::attr(local, ns, prefix, value));
         if let Some(k) = classes {
             let mut was = Vec::new();
             old.value().write_wtf8(&mut was);
@@ -116,7 +148,7 @@ impl Dom {
             self.m(el).flags |= HAS_CLASS;
         }
         old.drop_value();
-        if local == atom!("id") {
+        if ns == AttrNamespace::None && local == atom!("id") {
             if let Some(was) = self.attrs.id(b) {
                 self.tables.drop_id(was);
             }

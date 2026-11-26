@@ -134,6 +134,7 @@ impl<E: Engine> DomHost<E> {
                     m.forget();
                 }
             }
+            self.drop_owned(n);
         }
     }
 }

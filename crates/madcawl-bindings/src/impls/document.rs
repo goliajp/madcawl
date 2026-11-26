@@ -52,6 +52,20 @@ pub(crate) fn create_comment<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: No
     }
 }
 
+/// `createAttribute`: an `Attr` on no element, its name in ASCII lower
+/// case (the document is an HTML document), refused as `setAttribute`
+/// refuses one.
+pub(crate) fn create_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: NodeId, local: DomString) -> Result<crate::side::SideRef, Thrown> {
+    let mut n = Vec::new();
+    local.write_wtf8(&mut n);
+    if super::attributes::bad_name(&n) {
+        return Err(throw_dom(e, h, "InvalidCharacterError", "not a valid attribute name"));
+    }
+    n.make_ascii_lowercase();
+    let local = h.names.hold(&n);
+    Ok(h.loose_attr(local))
+}
+
 pub(crate) fn get_element_by_id<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId, id: DomString) -> Result<Option<NodeId>, Thrown> {
     let mut b = Vec::new();
     id.write_wtf8(&mut b);

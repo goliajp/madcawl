@@ -1,13 +1,17 @@
-//! Element's attribute members. Attributes are found by qualified name,
-//! lowercased first on an HTML element; setting one with a prefix is not
-//! told apart yet: the name is the local name.
+//! Element's attribute members, and what `NamedNodeMap` shares with
+//! them. Attributes are found by qualified name, lowercased first on an
+//! HTML element; setting one with a prefix is not told apart yet: the
+//! name is the local name. Taking an attribute off goes through
+//! [`take_off`], so that its `Attr` keeps its value.
 
 use madcawl_dom::NodeId;
+use madcawl_html::AttrNamespace;
 use madcawl_js::{Engine, Owned, ValueKind};
 use madcawl_str::{Atom, DomString, atom};
 
 use crate::convert::{IntoJs, Thrown, array_of, throw_dom};
 use crate::host::DomHost;
+use crate::side::SideRef;
 
 /// Strings, as an array.
 pub(crate) struct Names(Vec<DomString>);
@@ -31,7 +35,7 @@ fn qualified(prefix: Option<Atom>, local: Atom, out: &mut Vec<u8>) {
 
 /// The place of the first attribute of `el` named `name`, in the order
 /// the DOM keeps them.
-fn find<E: Engine>(h: &DomHost<E>, el: NodeId, name: &DomString) -> Option<usize> {
+pub(crate) fn find<E: Engine>(h: &DomHost<E>, el: NodeId, name: &DomString) -> Option<usize> {
     let mut want = Vec::new();
     name.write_wtf8(&mut want);
     if h.dom.in_html_namespace(el) {
@@ -71,7 +75,7 @@ pub(crate) fn get_attribute_names<E: Engine>(_: &mut E, h: &mut DomHost<E>, this
 
 /// The names `setAttribute` refuses: empty, or holding a character no
 /// attribute name can.
-fn bad_name(b: &[u8]) -> bool {
+pub(crate) fn bad_name(b: &[u8]) -> bool {
     b.is_empty() || b.iter().any(|&c| matches!(c, b'\t' | b'\n' | 0x0C | b'\r' | b' ' | b'/' | b'>' | b'=' | 0))
 }
 
@@ -101,11 +105,19 @@ pub(crate) fn set_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: Node
     set(e, h, this, local, &value)
 }
 
-pub(crate) fn remove_attribute<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId, name: DomString) -> Result<(), Thrown> {
+pub(crate) fn remove_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, name: DomString) -> Result<(), Thrown> {
     if let Some(k) = find(h, this, &name) {
-        h.dom.remove_attribute(this, k);
+        take_off(e, h, this, k);
     }
     Ok(())
+}
+
+/// Take attribute `k` off `el`; its `Attr`, if it has one, keeps the
+/// value it had.
+pub(crate) fn take_off<E: Engine>(e: &mut E, h: &mut DomHost<E>, el: NodeId, k: usize) -> Option<SideRef> {
+    let r = h.detach_attr(e, el, k);
+    h.dom.remove_attribute(el, k);
+    r
 }
 
 /// `toggleAttribute`: `force` is the optional boolean, read as any so
@@ -121,7 +133,7 @@ pub(crate) fn toggle_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: N
         }
         Some(_) if force == Some(true) => Ok(true),
         Some(k) => {
-            h.dom.remove_attribute(this, k);
+            take_off(e, h, this, k);
             Ok(false)
         }
     }
@@ -141,4 +153,85 @@ pub(crate) fn set_class_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: Nod
 
 pub(crate) fn full<E: Engine>(e: &mut E, h: &mut DomHost<E>) -> Thrown {
     throw_dom(e, h, "QuotaExceededError", "the document holds all the bytes it may")
+}
+
+/// The namespace a namespace argument names; `None` for one no
+/// attribute in this DOM can be in.
+fn namespace(ns: Option<DomString>) -> Option<AttrNamespace> {
+    let Some(ns) = ns.filter(|s| !s.is_empty()) else { return Some(AttrNamespace::None) };
+    let mut b = Vec::new();
+    ns.write_wtf8(&mut b);
+    super::attr::NAMESPACES.iter().find(|(_, uri)| uri.as_bytes() == b.as_slice()).map(|&(n, _)| n)
+}
+
+/// The place of `el`'s attribute in namespace `ns` named `local`.
+pub(crate) fn find_ns<E: Engine>(h: &DomHost<E>, el: NodeId, ns: Option<DomString>, local: &DomString) -> Option<usize> {
+    let ns = namespace(ns)?;
+    let mut b = Vec::new();
+    local.write_wtf8(&mut b);
+    let local = Atom::lookup(&b)?;
+    h.dom.attributes(el).position(|a| a.ns == ns && a.local == local)
+}
+
+/// The standard's "set an attribute": `attr` goes on `el` in the place
+/// of the one of its namespace and local name, which is returned, or
+/// after the others. Past the byte limit the attribute is left off when
+/// it found no slot, or put on with its value cut short, and `attr` is
+/// on the element exactly when the attribute is.
+pub(crate) fn set_node<E: Engine>(e: &mut E, h: &mut DomHost<E>, el: NodeId, attr: SideRef) -> Result<Option<SideRef>, Thrown> {
+    let a = h.attr(attr);
+    match a.element() {
+        Some(x) if x == el => return Ok(Some(attr)),
+        Some(_) => return Err(throw_dom(e, h, "InUseAttributeError", "the attribute is on another element")),
+        None => {}
+    }
+    let (ns, prefix, local) = (a.ns, a.prefix, a.local);
+    let mut v = Vec::new();
+    a.value.write_wtf8(&mut v);
+    let at = h.dom.attributes(el).position(|x| x.ns == ns && x.local == local);
+    let (old, done) = match at {
+        Some(k) => {
+            let old = h.attr_of(el, k);
+            h.detach_attr(e, el, k);
+            (Some(old), h.dom.set_attribute_at(el, k, prefix, &v))
+        }
+        None => (None, h.dom.add_attribute(el, ns, prefix, local, &v)),
+    };
+    if h.place_of(el, attr).is_some() {
+        h.attach_attr(e, attr, el);
+    }
+    if done { Ok(old) } else { Err(full(e, h)) }
+}
+
+pub(crate) fn attributes<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<SideRef, Thrown> {
+    Ok(h.attr_map(this))
+}
+
+pub(crate) fn get_attribute_node<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId, name: DomString) -> Result<Option<SideRef>, Thrown> {
+    Ok(find(h, this, &name).map(|k| h.attr_of(this, k)))
+}
+
+pub(crate) fn get_attribute_node_ns<E: Engine>(
+    _: &mut E,
+    h: &mut DomHost<E>,
+    this: NodeId,
+    ns: Option<DomString>,
+    local: DomString,
+) -> Result<Option<SideRef>, Thrown> {
+    Ok(find_ns(h, this, ns, &local).map(|k| h.attr_of(this, k)))
+}
+
+pub(crate) fn set_attribute_node<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, attr: SideRef) -> Result<Option<SideRef>, Thrown> {
+    set_node(e, h, this, attr)
+}
+
+pub(crate) fn set_attribute_node_ns<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, attr: SideRef) -> Result<Option<SideRef>, Thrown> {
+    set_node(e, h, this, attr)
+}
+
+pub(crate) fn remove_attribute_node<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, attr: SideRef) -> Result<SideRef, Thrown> {
+    match h.place_of(this, attr).filter(|_| h.attr(attr).element() == Some(this)) {
+        Some(k) => Ok(take_off(e, h, this, k).expect("the attribute's own Attr")),
+        None => Err(throw_dom(e, h, "NotFoundError", "the attribute is not on this element")),
+    }
 }

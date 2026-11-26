@@ -3,10 +3,10 @@
 //!
 //! The counted edges out of a node are the DOM's (parent, children,
 //! node document, template contents, inert document), its listeners
-//! and the wrappers of its `childNodes` and `children` (member handles),
-//! and its wrapper when preserved. Each is reported
-//! once. A node in a document is never entered; leaving a document
-//! makes it a candidate.
+//! and the wrappers of its `childNodes`, `children`, `attributes` and
+//! `Attr`s (member handles), and its wrapper when preserved. Each is
+//! reported once. A node in a document is never entered; leaving a
+//! document makes it a candidate.
 
 use std::marker::PhantomData;
 
@@ -42,6 +42,7 @@ fn traverse<E: Engine>(h: &DomHost<E>, obj: HostRef, t: &mut E::Tracer) {
             m.trace(t);
         }
     }
+    h.trace_owned(n, t);
     let w = h.dom.wrapper(n);
     if w & 1 != 0 {
         t.value(E::wrapper_value(w & !1));
@@ -58,6 +59,7 @@ fn unlink<E: Engine>(h: &mut DomHost<E>, obj: HostRef, u: &mut E::Unlinker) {
             m.unlink(u);
         }
     }
+    h.unlink_owned(n, u);
     let w = h.dom.wrapper(n);
     if w & 1 != 0 {
         h.dom.set_wrapper_preserved(n, false);

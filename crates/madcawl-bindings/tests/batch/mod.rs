@@ -22,10 +22,12 @@ pub trait Driver: Engine {
 }
 
 mod abort;
+mod attrs;
 mod events;
 mod nodes;
 mod trees;
 pub use abort::*;
+pub use attrs::*;
 pub use events::*;
 pub use nodes::*;
 pub use trees::*;
@@ -267,27 +269,6 @@ pub fn interface_objects_hold_the_prototype_chain<E: Driver>() {
     let r = js.e.call(&mut js.h, node.get(), E::undefined(), &[]);
     assert_eq!(js.threw(r), "TypeError", "an interface without a constructor");
     js.drop_all([mine, f, proto, div, doc, element, node]);
-}
-
-pub fn attributes_and_ids_of_a_parsed_document<E: Driver>() {
-    let mut js = Js::<E>::parsed("<p id=intro class='a b' data-x=1>hi</p><svg viewBox='0 0 1 1'></svg>");
-    let doc = js.doc();
-    let id = js.str("intro");
-    let p = js.call(doc.get(), "getElementById", &[id.get()]);
-    assert_eq!(js.read(p.get(), "id"), "intro");
-    assert_eq!(js.read(p.get(), "className"), "a b");
-    let key = js.str("DATA-X");
-    let v = js.call(p.get(), "getAttribute", &[key.get()]);
-    assert_eq!(js.text(v.get()), "1");
-    let missing = js.str("nope");
-    let none = js.call(p.get(), "getAttribute", &[missing.get()]);
-    assert!(none.get() == E::null());
-    let html = js.get(doc.get(), "documentElement");
-    let body = js.get(html.get(), "lastChild");
-    let svg = js.get(body.get(), "lastChild");
-    assert_eq!(js.read(svg.get(), "tagName"), "svg", "not upper-cased outside HTML");
-    js.drop_all([svg, body, html, none, missing, v, key, p, id, doc]);
-    js.audit();
 }
 
 pub fn listeners_are_added_once_called_and_removed<E: Driver>() {

@@ -128,6 +128,7 @@ interface CustomEvent : Event {
 [Exposed=Window, HostOps]
 interface Node : EventTarget {
   const unsigned short ELEMENT_NODE = 1;
+  const unsigned short ATTRIBUTE_NODE = 2;
   const unsigned short TEXT_NODE = 3;
   const unsigned short PROCESSING_INSTRUCTION_NODE = 7;
   const unsigned short COMMENT_NODE = 8;
@@ -166,6 +167,7 @@ interface Element : Node {
   [CEReactions] attribute DOMString className;
 
   boolean hasAttributes();
+  [SameObject] readonly attribute NamedNodeMap attributes;
   sequence<DOMString> getAttributeNames();
   DOMString? getAttribute(DOMString qualifiedName);
   [CEReactions] undefined setAttribute(DOMString qualifiedName, DOMString value);
@@ -173,6 +175,12 @@ interface Element : Node {
   // the optional boolean is read as any, to tell a missing one from false
   [CEReactions] boolean toggleAttribute(DOMString qualifiedName, optional any force);
   boolean hasAttribute(DOMString qualifiedName);
+
+  Attr? getAttributeNode(DOMString qualifiedName);
+  Attr? getAttributeNodeNS(DOMString? namespace, DOMString localName);
+  [CEReactions] Attr? setAttributeNode(Attr attr);
+  [CEReactions] Attr? setAttributeNodeNS(Attr attr);
+  [CEReactions] Attr removeAttributeNode(Attr attr);
 
   HTMLCollection getElementsByTagName(DOMString qualifiedName);
   HTMLCollection getElementsByClassName(DOMString classNames);
@@ -199,6 +207,7 @@ interface Document : Node {
   [NewObject] DocumentFragment createDocumentFragment();
   [NewObject] Text createTextNode(DOMString data);
   [NewObject] Comment createComment(DOMString data);
+  [NewObject] Attr createAttribute(DOMString localName);
 
   Element? getElementById(DOMString elementId);
   HTMLCollection getElementsByTagName(DOMString qualifiedName);

@@ -50,6 +50,7 @@ fn unlink<E: Engine>(h: &mut DomHost<E>, obj: HostRef, u: &mut E::Unlinker) {
         m.unlink(u);
     }
     h.forget_fixed(r);
+    h.forget_owned(r, true);
     for mut l in h.side_listeners.remove(&r).unwrap_or_default() {
         l.callback.unlink(u);
     }

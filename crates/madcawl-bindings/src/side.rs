@@ -37,6 +37,10 @@ pub(crate) enum SideData {
     Signal(crate::abort::SignalState),
     /// An `AbortController`: its signal, by a count.
     Controller(Held),
+    /// An `Attr` (`attr.rs`).
+    Attr(crate::attr::AttrState),
+    /// An element's `attributes`: the element, by a count.
+    AttrMap(Held),
 }
 
 impl SideData {
@@ -45,7 +49,8 @@ impl SideData {
         match self {
             SideData::Event(ev) => ev.held(f),
             SideData::List(l) => l.held(f),
-            SideData::Controller(s) => f(s),
+            SideData::Controller(s) | SideData::AttrMap(s) => f(s),
+            SideData::Attr(a) => a.owner.iter().for_each(f),
             _ => {}
         }
     }
@@ -54,9 +59,9 @@ impl SideData {
         match self {
             SideData::Event(ev) => ev.release(out),
             SideData::List(l) => l.release(out),
-            // the signal is given back once: the controller is freed or
-            // unlinked after this
-            SideData::Controller(s) => out.push(std::mem::replace(s, Held::Window)),
+            // given back once: the object is freed or unlinked after this
+            SideData::Controller(s) | SideData::AttrMap(s) => out.push(std::mem::replace(s, Held::Window)),
+            SideData::Attr(a) => out.extend(a.owner.take()),
             _ => {}
         }
     }
@@ -73,6 +78,8 @@ impl SideData {
             SideData::List(_) => &g::HTMLCollectionClass::<E>::DEF,
             SideData::Signal(_) => &g::AbortSignalClass::<E>::DEF,
             SideData::Controller(_) => &g::AbortControllerClass::<E>::DEF,
+            SideData::Attr(_) => &g::AttrClass::<E>::DEF,
+            SideData::AttrMap(_) => &g::NamedNodeMapClass::<E>::DEF,
         }
     }
 }
@@ -159,6 +166,7 @@ impl<E: Engine> DomHost<E> {
             }
             self.keep_target(e, r, v.get());
             self.keep_child_list(e, r, v.get());
+            self.keep_owned(e, r, v.get());
         }
         v
     }
@@ -222,6 +230,7 @@ impl<E: Engine> DomHost<E> {
             let live = self.sides.map.get(&addr).is_some_and(|s| abi::refcount(s.header) == 0);
             if live {
                 self.forget_list(SideRef(addr));
+                self.forget_owned(SideRef(addr), true);
             }
             if live && let Some(mut s) = self.sides.map.remove(&addr) {
                 s.data.release(&mut held);
@@ -255,6 +264,7 @@ impl<E: Engine> DomHost<E> {
             m.forget();
         }
         self.forget_fixed(r);
+        self.forget_owned(r, false);
         for mut l in self.side_listeners.remove(&r).unwrap_or_default() {
             l.callback.forget();
         }
@@ -264,6 +274,7 @@ impl<E: Engine> DomHost<E> {
     /// and the nodes it holds: the host is closing.
     pub(crate) fn close_sides(&mut self, e: &mut E) {
         self.close_fixed(e);
+        self.close_owned(e);
         let edges = std::mem::take(&mut self.target_edges).into_values().chain(std::mem::take(&mut self.list_edges).into_values());
         for mut m in std::mem::take(&mut self.details).into_values().chain(edges) {
             m.close(e);

@@ -5,7 +5,7 @@
 //! the parser.
 
 use madcawl_dom::{Dom, Limits, Refused};
-use madcawl_html::{Atom, Attrs, Namespace, Options, Step, Tokenizer, TreeBuilder, TreeSink, atom};
+use madcawl_html::{Atom, AttrNamespace, Attrs, Namespace, Options, Step, Tokenizer, TreeBuilder, TreeSink, atom};
 
 fn text(s: &madcawl_str::DomString) -> String {
     let mut v = Vec::new();
@@ -247,5 +247,22 @@ fn removing_attributes_gives_back_bytes_entries_id_and_classes() {
     assert_eq!((dom.bytes(), dom.table_bytes()), (bytes, tables));
     assert!(dom.set_attribute(el, atom!("id"), b"x-only-id"));
     assert_eq!(dom.element_id(el).map(|a| text(&a.to_dom_string())), Some("x-only-id".into()));
+    assert_eq!(dom.audit().mismatches(), 0);
+}
+
+#[test]
+fn an_attribute_is_set_in_its_place_or_added_with_its_namespace() {
+    let mut dom = Dom::new();
+    let el = dom.create_element(Namespace::Html, atom!("div"), Attrs::empty());
+    dom.append(dom.document(), el);
+    assert!(dom.set_attribute(el, atom!("id"), b"one"));
+    assert!(dom.add_attribute(el, AttrNamespace::XLink, Some(atom!("xlink")), atom!("href"), b"u"));
+    assert!(dom.set_attribute_at(el, 0, None, b"two"));
+    assert!(dom.set_attribute_at(el, 1, Some(atom!("xlink")), b"v"));
+    assert_eq!(names(&dom, el), ["id=two", "href=v"]);
+    let a = dom.attributes(el).nth(1).unwrap();
+    assert_eq!((a.ns, a.prefix), (AttrNamespace::XLink, Some(atom!("xlink"))));
+    assert_eq!(dom.element_id(el).map(|a| text(&a.to_dom_string())), Some("two".into()), "the id follows");
+    assert_eq!(dom.attribute(el, atom!("href")), None, "not an attribute in no namespace");
     assert_eq!(dom.audit().mismatches(), 0);
 }

@@ -130,3 +130,13 @@ fn an_aborted_signal_carries_its_reason_and_its_handler_is_an_object_or_null() {
 fn a_timeout_signal_is_kept_by_its_timer_and_freed_after() {
     batch::a_timeout_signal_is_kept_by_its_timer_and_freed_after::<E>();
 }
+
+#[test]
+fn an_attr_is_the_same_object_and_follows_its_element() {
+    batch::an_attr_is_the_same_object_and_follows_its_element::<E>();
+}
+
+#[test]
+fn an_attr_holds_its_element_until_it_is_dropped() {
+    batch::an_attr_holds_its_element_until_it_is_dropped::<E>();
+}
