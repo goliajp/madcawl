@@ -1,4 +1,4 @@
-//! ToString and ToNumber, with ToPrimitive calling an object's own
+//! ToString, ToNumber and ToBoolean, with ToPrimitive calling an object's own
 //! `toString` and `valueOf` as script defines them. With neither, an
 //! object converts as `Object.prototype` would make it, which the stub
 //! does not have.
@@ -10,6 +10,16 @@ use crate::isolate::Stub;
 use crate::value::{THROWN, TRUE, Value};
 
 impl Stub {
+    pub(crate) fn truthy(&self, v: Value) -> bool {
+        match self.kind(v) {
+            ValueKind::Undefined | ValueKind::Null => false,
+            ValueKind::Boolean => v == TRUE,
+            ValueKind::Number => v.as_number().is_some_and(|n| n != 0.0 && !n.is_nan()),
+            ValueKind::String => self.string_len(v).is_some_and(|n| n != 0),
+            _ => true,
+        }
+    }
+
     pub(crate) fn string_of<H: Host<Stub>>(&mut self, host: &mut H, v: Value) -> Option<DomString> {
         if let Some(s) = self.as_string(v) {
             return Some(s);

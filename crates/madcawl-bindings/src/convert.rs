@@ -3,7 +3,7 @@
 //! these.
 
 use madcawl_dom::NodeId;
-use madcawl_js::{ClassDef, Engine, ErrorKind, Key, Owned, ValueKind};
+use madcawl_js::{ClassDef, Engine, ErrorKind, Owned, ValueKind};
 use madcawl_str::{Atom, DomString};
 
 use crate::host::DomHost;
@@ -94,15 +94,12 @@ impl<E: Engine, T: IntoJs<E>> IntoJs<E> for Option<T> {
     }
 }
 
-/// An array of `items`, made by the realm's `Array.of`; their counts are
-/// given back.
+/// An array of `items`, made from the realm's own `Array` without
+/// running script; their counts are given back.
 pub(crate) fn array_of<E: Engine>(e: &mut E, h: &mut DomHost<E>, items: Vec<Owned<E::Value>>) -> Owned<E::Value> {
-    let global = e.global(h.realm);
-    let array = e.get(h, global.get(), Key::Str(&DomString::from_wtf8(b"Array")));
-    let of = e.get(h, array.get(), Key::Str(&DomString::from_wtf8(b"of")));
     let values: Vec<E::Value> = items.iter().map(Owned::get).collect();
-    let r = e.call(h, of.get(), array.get(), &values);
-    for v in items.into_iter().chain([of, array, global]) {
+    let r = e.new_array(h.realm, &values);
+    for v in items {
         e.release(v);
     }
     r

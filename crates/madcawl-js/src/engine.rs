@@ -100,9 +100,8 @@ pub trait Engine: Control + Sized + 'static {
     /// A WindowProxy: the object script gets for a browsing context's
     /// window, forwarding every property access to the global object of
     /// `realm`; thrown, with nothing registered, when script is halted
-    /// and the engine needs script to make one. Which object the global's own accessors see as `this`
-    /// (the proxy, as the web requires) is not settled here yet: it
-    /// comes with the global as a host object.
+    /// and the engine needs script to make one. What `this` the global's
+    /// own accessors see is settled with the global as a host object.
     fn new_window_proxy(&mut self, realm: Self::Realm) -> Owned<Self::Value>;
     /// Navigation: `proxy` forwards to the global of `realm` from now on.
     /// Script that holds the proxy sees the new global through the same
@@ -122,6 +121,9 @@ pub trait Engine: Control + Sized + 'static {
     fn live_realms(&self) -> usize;
 
     fn new_object(&mut self, realm: Self::Realm) -> Owned<Self::Value>;
+    /// An array of `items` (borrowed) from `realm`'s own `Array`, made
+    /// without running script: what a sequence converts to.
+    fn new_array(&mut self, realm: Self::Realm, items: &[Self::Value]) -> Owned<Self::Value>;
     fn get<H: Host<Self>>(
         &mut self,
         host: &mut H,
@@ -204,15 +206,14 @@ pub trait Engine: Control + Sized + 'static {
     /// preserved edge's count, if the bit was set), and makes a new
     /// wrapper; the engine sends no `wrapper_died` for the old one.
     ///
-    /// After `None` the host never passes that word to the engine again.
-    /// From then on the old wrapper no longer holds the host object: the
-    /// engine's graph does not report that edge. The engine frees the
-    /// refused wrapper's memory itself once its count reaches 0, and the
-    /// host takes no part in that.
+    /// After `None` the host never passes that word to the engine again,
+    /// and the old wrapper no longer holds the host object (the engine's
+    /// graph does not report that edge); the engine frees its memory
+    /// itself once its count reaches 0.
     ///
     /// The engine does not reuse a wrapper's memory before its notice is
-    /// delivered by [`Engine::drain_host`] or refused here, so a word the
-    /// host still holds is always safe to pass.
+    /// delivered ([`Engine::drain_host`]) or refused here: a word the
+    /// host still holds is safe to pass.
     fn wrapper_upgrade(&mut self, word: u64) -> Option<Owned<Self::Value>>;
     /// The wrapper whose word is `word` (preserved bit clear), borrowed,
     /// for a word whose preserved bit is set: `traverse` reports the
@@ -250,7 +251,6 @@ pub trait Engine: Control + Sized + 'static {
     /// A word whose wrapper is gone has its index put in `refused`,
     /// which the host treats as [`Engine::wrapper_upgrade`] returning
     /// `None` for it. `With` names a live wrapper the caller holds.
-    ///
     /// `false` when the engine could not place them now (script is being
     /// stopped): nothing was placed or refused, and the host asks again
     /// before script next runs.

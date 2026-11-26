@@ -106,12 +106,7 @@ impl Engine for Jsc {
     }
 
     fn to_boolean(&self, v: Value) -> bool {
-        match v {
-            UNDEFINED | NULL | FALSE => false,
-            TRUE => true,
-            // SAFETY: a live value; ToBoolean runs no script
-            _ => v.as_number().map_or_else(|| unsafe { ffi::JSValueToBoolean(self.base, v.raw()) }, |n| n != 0.0 && !n.is_nan()),
-        }
+        crate::value::truthy(self.base, v)
     }
 
     fn new_realm(&mut self) -> Realm {
@@ -151,6 +146,11 @@ impl Engine for Jsc {
         // SAFETY: a live realm
         let o = Value(unsafe { ffi::JSObjectMake(ctx, std::ptr::null_mut(), std::ptr::null_mut()) } as u64);
         self.take(o)
+    }
+
+    fn new_array(&mut self, realm: Realm, items: &[Value]) -> Owned<Value> {
+        let ctx = self.realm_ctx(realm);
+        Jsc::owned(self.array(ctx, items))
     }
 
     fn get<H: Host<Jsc>>(&mut self, host: &mut H, obj: Value, key: Key<'_>) -> Owned<Value> {

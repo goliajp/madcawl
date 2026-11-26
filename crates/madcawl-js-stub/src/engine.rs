@@ -119,13 +119,7 @@ impl Engine for Stub {
     }
 
     fn to_boolean(&self, v: Value) -> bool {
-        match self.kind(v) {
-            ValueKind::Undefined | ValueKind::Null => false,
-            ValueKind::Boolean => v == TRUE,
-            ValueKind::Number => v.as_number().is_some_and(|n| n != 0.0 && !n.is_nan()),
-            ValueKind::String => self.string_len(v).is_some_and(|n| n != 0),
-            _ => true,
-        }
+        self.truthy(v)
     }
 
     fn new_realm(&mut self) -> Realm {
@@ -159,6 +153,10 @@ impl Engine for Stub {
 
     fn new_object(&mut self, realm: Realm) -> Owned<Value> {
         Stub::owned(self.alloc(self.index(realm), Body::Object))
+    }
+
+    fn new_array(&mut self, realm: Realm, items: &[Value]) -> Owned<Value> {
+        self.array(realm, items)
     }
 
     fn get<H: Host<Stub>>(&mut self, host: &mut H, obj: Value, key: Key<'_>) -> Owned<Value> {

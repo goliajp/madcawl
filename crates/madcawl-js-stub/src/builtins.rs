@@ -1,15 +1,29 @@
 //! What script does through builtins the stub has no script for: weak
-//! references and maps, freezing, symbols. Each is the operation a test
+//! references and maps, freezing, symbols, arrays. Each is the operation a test
 //! calls where a page would call the builtin; the ones that make a
 //! wrapper observable preserve it, as the engine interface lists.
 
 use madcawl_js::{Host, Owned};
 
-use crate::cell::{Body, Cell};
+use crate::cell::{Body, Cell, PropKey};
 use crate::isolate::{Realm, Stub};
 use crate::value::{UNDEFINED, Value};
 
 impl Stub {
+    /// An array: an object with `items` at their indices and a `length`.
+    pub(crate) fn array(&mut self, realm: Realm, items: &[Value]) -> Owned<Value> {
+        let a = self.alloc(self.index(realm), Body::Object);
+        for &v in items {
+            self.retain_value(v);
+        }
+        let length = (PropKey::Name(madcawl_str::atom!("length")), Value::number(items.len() as f64));
+        // SAFETY: just made
+        let props = &mut unsafe { Cell::at(a) }.props;
+        props.extend(items.iter().enumerate().map(|(i, &v)| (PropKey::Index(i as u32), v)));
+        props.push(length);
+        Stub::owned(a)
+    }
+
     /// A weak handle slot on cell `v`.
     pub(crate) fn weak_slot(&mut self, v: Value) -> u32 {
         assert!(v.is_cell(), "a weak handle to an object");

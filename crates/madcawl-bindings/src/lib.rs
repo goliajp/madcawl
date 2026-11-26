@@ -13,6 +13,7 @@
 mod convert;
 mod event;
 mod event_loop;
+mod fixed;
 mod gc;
 mod holds;
 mod host;

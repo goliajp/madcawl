@@ -104,6 +104,16 @@ pub(crate) fn check_layout(ctx: JSContextRef) {
     );
 }
 
+/// ECMAScript ToBoolean, which runs no script.
+pub(crate) fn truthy(base: JSContextRef, v: Value) -> bool {
+    match v {
+        UNDEFINED | NULL | FALSE => false,
+        TRUE => true,
+        // SAFETY: a live value
+        _ => v.as_number().map_or_else(|| unsafe { ffi::JSValueToBoolean(base, v.raw()) }, |n| n != 0.0 && !n.is_nan()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

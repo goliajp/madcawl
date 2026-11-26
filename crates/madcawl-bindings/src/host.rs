@@ -56,6 +56,8 @@ pub struct DomHost<E: Engine> {
     pub(crate) same_lists: HashMap<(u32, bool), crate::side::SideRef>,
     /// How many times live collections found their nodes again.
     pub(crate) list_rebuilds: u64,
+    /// What fixed collections keep of nodes that leave the document.
+    pub(crate) fixed: crate::fixed::FixedLists<E>,
 }
 
 impl<E: Engine> DomHost<E> {
@@ -89,6 +91,7 @@ impl<E: Engine> DomHost<E> {
             side_listeners: HashMap::new(),
             same_lists: HashMap::new(),
             list_rebuilds: 0,
+            fixed: Default::default(),
         };
         if E::PLACES_WRAPPERS {
             h.dom.track_moves();
@@ -152,6 +155,7 @@ impl<E: Engine> DomHost<E> {
             self.freed = freed;
             self.freed.clear();
         }
+        self.settle_fixed(e);
     }
 
     /// Run the cycle collector until `deadline`.

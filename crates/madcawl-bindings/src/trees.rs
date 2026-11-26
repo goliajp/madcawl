@@ -32,6 +32,9 @@ impl<E: Engine> DomHost<E> {
         }
         let mut again = Vec::new();
         for r in moved.drain(..) {
+            if self.dom.is_live(r) && !self.dom.in_main_tree(r) {
+                self.fixed_nodes_left(e, r);
+            }
             if self.dom.is_live(r) && !self.place_subtree(e, r) {
                 again.push(r);
             }

@@ -139,6 +139,20 @@ impl<E: Engine> DomHost<E> {
         v
     }
 
+    /// The wrapper of side object `r` with a count, when `r` is still a
+    /// side object and its wrapper lives; one found dead is let go of.
+    pub(crate) fn live_side_wrapper(&mut self, e: &mut E, r: SideRef) -> Option<Owned<E::Value>> {
+        let w = self.sides.of(r.host_ref()).map_or(0, |r| self.sides.get(r).wrapper);
+        if w == 0 {
+            return None;
+        }
+        let v = e.wrapper_upgrade(w & !1);
+        if v.is_none() {
+            self.side_wrapper_gone(e, r);
+        }
+        v
+    }
+
     /// Place the wrapper of `r` in no tree: it lives while script holds
     /// it. `false` when the engine could not place it now.
     fn place_side(&mut self, e: &mut E, r: SideRef) -> bool {
@@ -216,6 +230,7 @@ impl<E: Engine> DomHost<E> {
         for mut m in self.details.remove(&r).into_iter().chain(self.target_edges.remove(&r)) {
             m.forget();
         }
+        self.forget_fixed(r);
         for mut l in self.side_listeners.remove(&r).unwrap_or_default() {
             l.callback.forget();
         }
@@ -224,6 +239,7 @@ impl<E: Engine> DomHost<E> {
     /// Give back every side object's preserved wrapper edge, its members
     /// and the nodes it holds: the host is closing.
     pub(crate) fn close_sides(&mut self, e: &mut E) {
+        self.close_fixed(e);
         for mut m in std::mem::take(&mut self.details).into_values().chain(std::mem::take(&mut self.target_edges).into_values()) {
             m.close(e);
         }

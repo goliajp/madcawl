@@ -49,14 +49,18 @@ impl<E: Engine> DomHost<E> {
 
     /// On an engine that places wrappers, keep the wrapper of the target
     /// of event `r` as a member of the event's wrapper `event` (of a
-    /// collection: its root's wrapper, or an array of a fixed one's
-    /// nodes' wrappers, the same way): script
+    /// live collection: its root's wrapper; of a fixed one: an array of
+    /// the wrappers of its nodes outside the document): script
     /// that reaches the event reaches the target's tree, with what it
     /// put there, and a cycle back through script (a listener keeping
     /// the event, the target keeping it in a property) is one the
     /// engine's collector sees and frees. The target's wrapper moves
     /// with its node from tree to tree, so whatever tree the target is
-    /// in is the one kept.
+    /// in is the one kept. A fixed collection's node that was in the
+    /// document when the collection was made gets no wrapper for it:
+    /// the document's wrappers live with the realm, and making one for
+    /// each node found would keep them all; it gets one when it leaves
+    /// the document (`fixed.rs`).
     pub(crate) fn keep_target(&mut self, e: &mut E, r: SideRef, event: E::Value) {
         if !E::PLACES_WRAPPERS {
             return;
@@ -72,22 +76,17 @@ impl<E: Engine> DomHost<E> {
             SideData::List(l) => match l.root.as_ref().map(Held::target) {
                 Some(t) => t.into_js(e, self),
                 None => {
-                    let nodes = self.list_nodes(r);
+                    let (inside, nodes): (Vec<_>, Vec<_>) = self.list_nodes(r).into_iter().partition(|&n| self.dom.in_main_tree(n));
+                    self.wait_for_removal(r, &inside);
+                    if nodes.is_empty() {
+                        return;
+                    }
                     let items = nodes.into_iter().map(|n| self.wrap(e, n)).collect();
                     crate::convert::array_of(e, self, items)
                 }
             },
             _ => return,
         };
-        // a page that replaced `Array.of` gets a fixed collection whose
-        // nodes' trees it does not keep
-        if E::is_thrown(w.get()) {
-            let _sentinel = w.into_raw();
-            if let Some(x) = e.take_exception() {
-                e.release(x);
-            }
-            return;
-        }
         let m = madcawl_js::Member::of(e, event, w.get());
         e.release(w);
         self.target_edges.insert(r, m);

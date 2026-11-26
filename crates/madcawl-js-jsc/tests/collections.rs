@@ -111,6 +111,48 @@ return [a.length, b.length, document.getElementsByClassName('BAR').length].join(
 }
 
 #[test]
+fn sequences_and_fixed_lists_call_no_page_script_and_wrap_no_document_node() {
+    let (mut e, mut h) = page("<ul id=u></ul>");
+    let src = "var u = document.getElementById('u');
+for (let i = 0; i < 500; i++) u.appendChild(document.createElement('li'));
+window.calls = 0; Array.of = function () { calls++; return 'mine'; };
+return 'ok';";
+    assert_eq!(eval(&mut e, &mut h, src), "ok");
+    let wrapped = h.dom.wrapped().len();
+    let src = "var n = 0; for (let i = 0; i < 20; i++) n += document.querySelectorAll('li').length;
+return [n, calls].join();";
+    assert_eq!(eval(&mut e, &mut h, src), "10000,0");
+    assert_eq!(h.dom.wrapped().len(), wrapped, "no document node wrapped for a fixed list");
+    let src = "var el = document.createElement('p'); el.setAttribute('b', '1'); el.setAttribute('a', '2');
+var names = el.getAttributeNames();
+window.found = (function () { var d = document.createElement('div'); d.appendChild(document.createElement('i')).y = 'found';
+  return d.querySelectorAll('i'); })();
+return [Array.isArray(names), names.join(' '), Object.getPrototypeOf(names) === Array.prototype, calls].join();";
+    assert_eq!(eval(&mut e, &mut h, src), "true,b a,true,0");
+    collect_everything(&mut e, &mut h);
+    assert_eq!(eval(&mut e, &mut h, "return [found[0].y, calls].join();"), "found,0");
+    h.close(&mut e);
+}
+
+#[test]
+fn a_fixed_list_keeps_the_tree_its_nodes_leave_the_document_for() {
+    let (mut e, mut h) = page("<div id=c><ul id=u><li>a</li><li>b</li></ul><ol id=o><li>c</li></ol></div>");
+    let src = "(function () { var c = document.getElementById('c'), u = c.firstChild, o = c.lastChild;
+  window.nl = document.querySelectorAll('li'); u.x = 'ux'; nl[1].z = 'lz'; window.wm = new WeakMap([[nl[1], 'wm']]);
+  o.y = 'oy'; u.remove(); o.remove(); c.appendChild(o); o.remove(); })();
+// garbage for a collection before the host settles
+for (let i = 0; i < 200000; i++) [i, i];
+(function () { document.querySelectorAll('div'); })();
+return 'ok';";
+    assert_eq!(eval(&mut e, &mut h, src), "ok");
+    collect_everything(&mut e, &mut h);
+    let src = "document.getElementById('c').remove();
+return [nl.length, nl[0].parentNode.x, nl[1].z, wm.get(nl[1]), nl[2].parentNode.y].join();";
+    assert_eq!(eval(&mut e, &mut h, src), "3,ux,lz,wm,oy");
+    h.close(&mut e);
+}
+
+#[test]
 fn a_collection_keeps_its_root_tree_and_a_dropped_one_is_freed() {
     let (mut e, mut h) = page("<p>x</p>");
     let (nodes, sides) = (h.dom.node_count(), h.side_objects());
