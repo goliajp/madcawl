@@ -126,6 +126,7 @@ impl Doc {
         (session, url): (u32, &str),
         links: &mut dyn LinkedSheets,
     ) -> Doc {
+        super::watch::stage("style");
         let site = site(url);
         let scope = Scope { partition: partition_of(session), site: &site };
         let device = Device { width: size.0 as f64, height: size.1 as f64, ..Device::default() };

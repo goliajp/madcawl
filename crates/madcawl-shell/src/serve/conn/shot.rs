@@ -45,6 +45,7 @@ impl Conn<'_> {
             _ => None,
         };
         let url = p.url.clone();
+        crate::serve::watch::stage("paint");
         let taken = p.screenshot(&req);
         let seq = p.sync();
         let (reply, saved) = match taken {

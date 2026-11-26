@@ -5,7 +5,7 @@ use std::io::{ErrorKind, Read as _};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
-use madcawl_agent::Frame;
+use madcawl_agent::{Frame, kind};
 
 /// How long the rest of a frame may take once its first byte came.
 const BODY_WAIT: Duration = Duration::from_secs(10);
@@ -50,5 +50,22 @@ pub(crate) fn read_frame(s: &mut UnixStream, max: usize, wait: Option<Duration>)
     match Frame::decode(&buf) {
         Ok((f, _)) => Got::Frame(f),
         Err(_) => Got::Bad,
+    }
+}
+
+/// A request kind's name, for the watchdog's lines.
+pub(crate) fn kind_name(k: u16) -> &'static str {
+    match k {
+        kind::OPEN => "open",
+        kind::CLOSE => "close",
+        kind::PAGES => "pages",
+        kind::READ => "read",
+        kind::DIFF => "diff",
+        kind::ACT => "act",
+        kind::WAIT => "wait",
+        kind::REQUESTS => "requests",
+        kind::SCREENSHOT => "screenshot",
+        kind::STATS => "stats",
+        _ => "other",
     }
 }

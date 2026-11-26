@@ -11,10 +11,13 @@ use madcawl_agent::{Envelope, Frame, kind, tag};
 use super::limit::Bucket;
 use super::log::Line;
 use super::page::Page;
+use super::watch::Watch;
+use super::wire::kind_name;
 use super::wire::{Got, read_frame};
 use super::{Shared, code, error_frame};
 
 mod act;
+mod listing;
 mod open;
 mod shot;
 
@@ -25,6 +28,7 @@ pub(crate) struct Conn<'a> {
     shared: &'a Shared,
     pages: Vec<Page>,
     bucket: Bucket,
+    watch: Option<Watch>,
 }
 
 /// The audit log's word for how a request ended.
@@ -42,6 +46,7 @@ impl<'a> Conn<'a> {
             shared,
             pages: Vec::new(),
             bucket: Bucket::new(shared.config.rate, shared.config.burst),
+            watch: shared.config.watch.and_then(|slow| Watch::for_session(id, slow)),
         }
     }
 
@@ -72,7 +77,16 @@ impl<'a> Conn<'a> {
                     continue;
                 }
                 Got::Closed => break,
-                Got::Frame(f) => (self.admit(&f), false),
+                Got::Frame(f) => {
+                    if let Some(w) = &self.watch {
+                        w.begin(kind_name(f.kind));
+                    }
+                    let reply = self.admit(&f);
+                    if let Some(w) = &self.watch {
+                        w.end();
+                    }
+                    (reply, false)
+                }
                 Got::TooLong(n) => {
                     let msg = format!("a request of {n} bytes is more than the {max} one may be");
                     (error_frame(code::REQUEST_TOO_LARGE, &msg), true)
@@ -89,6 +103,9 @@ impl<'a> Conn<'a> {
             }
         }
         self.log_refused(true);
+        if let Some(w) = self.watch.take() {
+            w.stop();
+        }
         for p in std::mem::take(&mut self.pages) {
             self.log(&p.url, "close-session", ("", ""), &Frame::new(kind::RESULT));
             self.drop_page(p);
@@ -254,47 +271,6 @@ impl<'a> Conn<'a> {
         let reply = Frame::new(kind::RESULT).str(tag::TEXT, &format!("closed p{}", p.id));
         self.log(&p.url, "close", ("", ""), &reply);
         self.drop_page(p);
-        reply
-    }
-
-    fn list(&self) -> Frame {
-        let now = Instant::now();
-        let mut text = String::new();
-        for p in &self.pages {
-            text.push_str(&format!(
-                "p{} {} {}x{} idle {}s\n",
-                p.id,
-                p.url,
-                p.width,
-                p.height,
-                now.duration_since(p.last_used).as_secs()
-            ));
-        }
-        if text.is_empty() {
-            text.push_str("no pages open\n");
-        }
-        let reply = Frame::new(kind::RESULT).str(tag::TEXT, &text);
-        self.log("-", "pages", ("", ""), &reply);
-        reply
-    }
-
-    /// the host's counters, a `name value` pair a line
-    fn stats(&self) -> Frame {
-        let (s, cap) = super::doc::sheet_stats();
-        let text = format!(
-            "sheet-cache-weight {}\nsheet-cache-cap {}\nsheet-cache-entries {}\nsheet-cache-names {}\n\
-             sheet-cache-parses {}\nsheet-cache-hits {}\nsheet-cache-unread {}\npages {}\n",
-            s.weight,
-            cap,
-            s.entries,
-            s.names,
-            s.parses,
-            s.hits,
-            s.unread,
-            self.shared.pages.load(Ordering::SeqCst),
-        );
-        let reply = Frame::new(kind::RESULT).str(tag::TEXT, &text);
-        self.log("-", "stats", ("", ""), &reply);
         reply
     }
 }

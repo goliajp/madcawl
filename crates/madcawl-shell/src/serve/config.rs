@@ -44,6 +44,9 @@ pub struct Config {
     /// answer `STATS` requests: what the process holds for all its
     /// sessions, so one session would learn of the others' pages
     pub stats: bool,
+    /// Time each request of a session and log one that runs longer than
+    /// this, naming the stage it is in (see `watch`)
+    pub watch: Option<Duration>,
 }
 
 impl Config {
@@ -72,17 +75,20 @@ impl Config {
             uploads: Vec::new(),
             approve: Vec::new(),
             stats: false,
+            watch: None,
         }
     }
 }
 
-pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds>] [--listen-fd N] [--exit-idle <seconds>] [--net] [--downloads <dir>] [--upload-allow <dir>]... [--approve <origin>]... [--stats]
+pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds>] [--listen-fd N] [--exit-idle <seconds>] [--net] [--downloads <dir>] [--upload-allow <dir>]... [--approve <origin>]... [--stats] [--watch-ms N]
          pages and their stylesheets open only from below the --allow directories;
          without --allow, only from below the current directory;
          --net lets pages come from http and https URLs, each session's in a cookie jar of its own that starts empty and ends with it;
          --downloads saves downloads below <dir>, a directory per session (default <socket>.downloads);
          --upload-allow lets an upload pick files from below <dir>; none, no uploads;
          --approve lets a form with a password field be submitted to <origin> (scheme://host[:port]);
+         --watch-ms logs a request still running after N ms, and once more when it runs ten times as
+         long (at least 10 s), naming the stage it is in, and a slow request's time by stage when it ends;
          --stats answers the host's own counters (shared stylesheet cache, pages open) to any session;
          --listen-fd accepts on an inherited listening socket instead of binding <socket>;
          --exit-idle exits once no session has been open for that long (checked once a period
@@ -122,6 +128,7 @@ pub fn parse_args(args: &[&str]) -> Option<Config> {
             "--exit-idle" => c.exit_idle = Some(Duration::from_secs(n()? as u64)),
             "--downloads" => c.downloads = Some(PathBuf::from(v)),
             "--upload-allow" => c.uploads.push(PathBuf::from(v).canonicalize().ok()?),
+            "--watch-ms" => c.watch = Some(Duration::from_millis(n()? as u64)),
             "--approve" => c.approve.push(v.trim_end_matches('/').to_ascii_lowercase()),
             _ => return None,
         }

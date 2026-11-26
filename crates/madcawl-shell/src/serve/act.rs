@@ -143,6 +143,7 @@ impl Page {
     /// so what the geometry refines can be told from what changed.
     pub(crate) fn geometry(&mut self) -> &mut Geometry {
         if self.doc.geometry.is_none() && self.agents.is_attached() {
+            super::watch::stage("layout");
             let before = self.sync();
             self.doc.lay_out();
             self.doc.laid_out_at = Some((before, self.sync()));

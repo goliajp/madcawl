@@ -124,6 +124,7 @@ impl Page {
     pub(crate) fn load_file(&mut self, path: &Path, url: String, charset: Option<Encoding>, allow: &[PathBuf]) -> std::io::Result<()> {
         let started = Instant::now();
         let bytes = load::read_file(path, load::MAX_FILE)?;
+        super::watch::stage("parse");
         let (dom, encoding) = load::parse(&bytes, charset);
         let base = path.parent().map(Path::to_path_buf);
         let mut links = FileSheets::new(base.as_deref(), Some(allow));
@@ -182,6 +183,7 @@ impl Page {
     /// a finished navigation came to, for the reply.
     pub(crate) fn settle(&mut self, deadline: Instant, env: &Env) -> Option<String> {
         let conn = self.conn.as_mut()?;
+        super::watch::stage("network");
         let loaded = match self.loader.pump(conn, deadline, &mut self.log) {
             Ok(l) => l,
             Err(e) => {
@@ -259,6 +261,7 @@ impl Page {
         let f = f.num(tag::SESSION, self.session as u64);
         self.lay_out_for(&f);
         let f = self.floored(f);
+        super::watch::stage("agent");
         let (dom, inputs) = self.doc.parts();
         self.agents.handle(dom, inputs, &f)
     }

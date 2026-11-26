@@ -28,6 +28,7 @@ mod socket;
 mod submit;
 mod target;
 mod wait;
+pub mod watch;
 mod wire;
 
 use std::collections::HashMap;
