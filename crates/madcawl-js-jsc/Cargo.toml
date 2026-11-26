@@ -1,0 +1,24 @@
+[package]
+name = "madcawl-js-jsc"
+description = "The script engine interface on the system JavaScriptCore, for the transition to torajs-engine"
+version.workspace = true
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+# JavaScriptCore.framework is a system framework, linked directly; no crate
+[dependencies]
+madcawl-js = { path = "../madcawl-js" }
+madcawl-str = { path = "../madcawl-str" }
+
+# the binding test batch runs here on JavaScriptCore, and the scripted
+# parsing cases with it
+[dev-dependencies]
+madcawl-bindings = { path = "../madcawl-bindings" }
+madcawl-dom = { path = "../madcawl-dom" }
+madcawl-html = { path = "../madcawl-html" }
