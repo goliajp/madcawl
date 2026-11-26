@@ -3,6 +3,7 @@
 
 mod border;
 mod ffi;
+mod marks;
 mod png;
 
 use madcawl_text::Fonts;
@@ -10,7 +11,8 @@ use madcawl_text::Fonts;
 use crate::list::{DisplayList, Item, RectF, Rgba};
 use ffi::Ref;
 
-pub use png::write_png;
+pub use marks::{MAX_MARKS, Mark};
+pub use png::{encode_png, write_png};
 
 /// The largest bitmap side drawn, in device pixels; a taller area is cut there.
 pub const MAX_SIDE: usize = 16384;
@@ -75,24 +77,15 @@ impl Raster {
 
     /// Draws `list` with the faces of `fonts`, the ones its glyph runs were shaped with.
     pub fn draw(&self, list: &DisplayList, fonts: &mut Fonts) -> Bitmap {
-        let s = self.scale.max(0.01);
         let (width, height) = self.device_size();
-        let mut data = vec![0u8; width * height * 4];
-        // SAFETY: `data` outlives the context, which is released below; every CF object made is released
+        let mut bm = Bitmap {
+            width,
+            height,
+            data: vec![0u8; width * height * 4],
+        };
+        // SAFETY: the context draws into `bm`, which outlives it; it is released below
         unsafe {
-            let cs = ffi::CGColorSpaceCreateWithName(ffi::kCGColorSpaceSRGB);
-            let ctx = ffi::CGBitmapContextCreate(
-                data.as_mut_ptr().cast(),
-                width,
-                height,
-                8,
-                width * 4,
-                cs,
-                ffi::kCGImageAlphaPremultipliedFirst | ffi::kCGBitmapByteOrder32Little,
-            );
-            ffi::CGColorSpaceRelease(cs);
-            assert!(!ctx.is_null(), "a bitmap context of {width}x{height}");
-            setup(ctx, height, s, self.view);
+            let ctx = context(&mut bm, self.scale, self.view);
             fill(ctx, list.canvas);
             ffi::CGContextFillRect(
                 ctx,
@@ -122,11 +115,35 @@ impl Raster {
             }
             ffi::CGContextRelease(ctx);
         }
-        Bitmap {
-            width,
-            height,
-            data,
-        }
+        bm
+    }
+}
+
+/// A bitmap context drawing into `bm` in CSS px of `view` at `scale` device pixels each; the caller
+/// releases it.
+// SAFETY: `bm` must outlive the context, and its data must hold `width * height` BGRA pixels
+pub(crate) unsafe fn context(bm: &mut Bitmap, scale: f32, view: RectF) -> Ref {
+    // SAFETY: as the caller promises; the color space is released once the context holds it
+    unsafe {
+        let cs = ffi::CGColorSpaceCreateWithName(ffi::kCGColorSpaceSRGB);
+        let ctx = ffi::CGBitmapContextCreate(
+            bm.data.as_mut_ptr().cast(),
+            bm.width,
+            bm.height,
+            8,
+            bm.width * 4,
+            cs,
+            ffi::kCGImageAlphaPremultipliedFirst | ffi::kCGBitmapByteOrder32Little,
+        );
+        ffi::CGColorSpaceRelease(cs);
+        assert!(
+            !ctx.is_null(),
+            "a bitmap context of {}x{}",
+            bm.width,
+            bm.height
+        );
+        setup(ctx, bm.height, scale.max(0.01), view);
+        ctx
     }
 }
 

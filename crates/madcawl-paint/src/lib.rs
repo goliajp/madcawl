@@ -11,4 +11,4 @@ pub mod raster;
 
 pub use build::paint;
 pub use list::{DisplayList, Entry, GlyphPos, Item, Line, RectF, Rgba};
-pub use raster::{Bitmap, Raster};
+pub use raster::{Bitmap, Mark, Raster};

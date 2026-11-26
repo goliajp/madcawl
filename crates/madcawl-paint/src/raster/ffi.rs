@@ -54,6 +54,9 @@ unsafe extern "C" {
         enc: u32,
         ext: u8,
     ) -> Ref;
+    pub fn CFDataCreateMutable(alloc: Ref, capacity: isize) -> Ref;
+    pub fn CFDataGetLength(data: Ref) -> isize;
+    pub fn CFDataGetBytePtr(data: Ref) -> *const u8;
     pub fn CFURLCreateFromFileSystemRepresentation(
         alloc: Ref,
         buf: *const u8,
@@ -134,11 +137,28 @@ unsafe extern "C" {
         n: usize,
         ctx: Ref,
     );
+    pub fn CTFontCreateWithName(name: Ref, size: f64, matrix: *const CGAffineTransform) -> Ref;
+    pub fn CTFontGetGlyphsForCharacters(
+        font: Ref,
+        chars: *const u16,
+        glyphs: *mut u16,
+        n: isize,
+    ) -> bool;
+    pub fn CTFontGetAdvancesForGlyphs(
+        font: Ref,
+        orientation: u32,
+        glyphs: *const u16,
+        advances: *mut CGSize,
+        n: isize,
+    ) -> f64;
+    pub fn CTFontGetAscent(font: Ref) -> f64;
+    pub fn CTFontGetDescent(font: Ref) -> f64;
 }
 
 #[link(name = "ImageIO", kind = "framework")]
 unsafe extern "C" {
     pub fn CGImageDestinationCreateWithURL(url: Ref, kind: Ref, n: usize, opts: Ref) -> Ref;
+    pub fn CGImageDestinationCreateWithData(data: Ref, kind: Ref, n: usize, opts: Ref) -> Ref;
     pub fn CGImageDestinationAddImage(dest: Ref, img: Ref, props: Ref);
     pub fn CGImageDestinationFinalize(dest: Ref) -> bool;
 }
