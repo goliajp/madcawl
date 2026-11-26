@@ -94,40 +94,42 @@ impl Jsc {
         let ctx = self.realms[realm as usize].ctx;
         let (parent_iface, parent_proto) = match class.parent {
             Some(p) => self.class_objects(realm, p),
-            None if class.inherits_error() => (self.helper(realm, Helper::FunctionProto), self.helper(realm, Helper::ErrorProto)),
+            None if class.error_prototype => (self.helper(realm, Helper::FunctionProto), self.helper(realm, Helper::ErrorProto)),
             None => (self.helper(realm, Helper::FunctionProto), self.helper(realm, Helper::ObjectProto)),
         };
-        let made = class.constructor.and_then(|c| self.constructor_object::<H>(realm, ctx, c.get()));
-        // SAFETY: a plain object of a live realm, with no record
-        let iface = made.unwrap_or_else(|| Value(unsafe { ffi::JSObjectMake(ctx, self.classes.iface, std::ptr::null_mut()) } as u64));
-        self.protect(iface);
-        // SAFETY: a plain object of a live realm; both live objects of it
+        // SAFETY: a plain object of a live realm, whose parent is live
         let proto = unsafe {
             let p = Value(ffi::JSObjectMake(ctx, std::ptr::null_mut(), std::ptr::null_mut()) as u64);
             self.protect(p);
-            ffi::JSObjectSetPrototype(ctx, iface.0 as _, parent_iface.raw());
             ffi::JSObjectSetPrototype(ctx, p.0 as _, parent_proto.raw());
             p
         };
+        let made = class.constructor.and_then(|c| self.constructor_object::<H>(realm, ctx, c.get(), proto));
+        // SAFETY: a plain object of a live realm, with no record
+        let iface = made.unwrap_or_else(|| Value(unsafe { ffi::JSObjectMake(ctx, self.classes.iface, std::ptr::null_mut()) } as u64));
+        self.protect(iface);
+        // SAFETY: both live objects of a live realm
+        unsafe { ffi::JSObjectSetPrototype(ctx, iface.0 as _, parent_iface.raw()) };
         self.realms[realm as usize].protos.insert(class.id.0, (iface, proto));
         let name = self.string_of(&madcawl_str::DomString::from_wtf8(class.name.as_bytes()));
-        self.define(realm, Helper::Interface, &[iface, proto, name]);
+        self.define(realm, Helper::Interface, &[iface, proto, name, Value::number(f64::from(class.length))]);
         self.define_members(realm, ctx, class, iface, proto);
         self.unprotect(name);
         (iface, proto)
     }
 
-    /// The interface object of a class whose constructor is `f`: a
-    /// script function around a host function calling `f`, uncounted
-    /// (the caller protects it; the native function is held by the
-    /// closure). A host function object gets no `new.target`, which a
-    /// subclass needs. `None` when script was being stopped: the
+    /// The interface object of a class whose constructor is `f` and
+    /// prototype object `proto`: a bound script function around a host
+    /// function calling `f`, uncounted (the caller protects it; the
+    /// native function is held by the closure). A host function object
+    /// gets no `new.target`, which a subclass needs; the bound function
+    /// shows as native code. `None` when script was being stopped: the
     /// interface then throws on `new`, as one without a constructor.
-    fn constructor_object<H: Host<Jsc>>(&mut self, realm: u32, ctx: JSContextRef, f: madcawl_js::HostFn) -> Option<Value> {
+    fn constructor_object<H: Host<Jsc>>(&mut self, realm: u32, ctx: JSContextRef, f: madcawl_js::HostFn, proto: Value) -> Option<Value> {
         let fproto = self.helper(realm, Helper::FunctionProto);
         let kind = FnKind::Host { f, data: 0, thunk: thunk::<H> };
         let native = make_function(self, ctx, FnRec { kind, host_type: std::any::TypeId::of::<H>() }, fproto);
-        let made = self.call_helper(realm, Helper::Constructor, &[native]);
+        let made = self.call_helper(realm, Helper::Constructor, &[native, proto]);
         self.unprotect(native);
         if made.is_err() {
             self.after_stop();

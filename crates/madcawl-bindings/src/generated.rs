@@ -35,6 +35,8 @@ impl<E: Engine> EventTargetClass<E> {
         interceptors: None,
         ops: Some(&SideOps::<E>::OPS),
         constructor: Some(unsafe { Bound::host_fn(event_target_constructor_abi::<E>) }),
+        length: 0,
+        error_prototype: false,
     };
 }
 
@@ -128,6 +130,8 @@ impl<E: Engine> NodeClass<E> {
         interceptors: None,
         ops: Some(&NodeOps::<E>::OPS),
         constructor: None,
+        length: 0,
+        error_prototype: false,
     };
 }
 
@@ -339,6 +343,8 @@ impl<E: Engine> ElementClass<E> {
         interceptors: None,
         ops: None,
         constructor: None,
+        length: 0,
+        error_prototype: false,
     };
 }
 
@@ -504,6 +510,8 @@ impl<E: Engine> DocumentClass<E> {
         interceptors: None,
         ops: None,
         constructor: None,
+        length: 0,
+        error_prototype: false,
     };
 }
 
@@ -654,6 +662,8 @@ impl<E: Engine> DocumentFragmentClass<E> {
         interceptors: None,
         ops: None,
         constructor: Some(unsafe { Bound::host_fn(document_fragment_constructor_abi::<E>) }),
+        length: 0,
+        error_prototype: false,
     };
 }
 
@@ -727,6 +737,8 @@ impl<E: Engine> CharacterDataClass<E> {
         interceptors: None,
         ops: None,
         constructor: None,
+        length: 0,
+        error_prototype: false,
     };
 }
 
@@ -855,6 +867,8 @@ impl<E: Engine> TextClass<E> {
         interceptors: None,
         ops: None,
         constructor: Some(unsafe { Bound::host_fn(text_constructor_abi::<E>) }),
+        length: 0,
+        error_prototype: false,
     };
 }
 
@@ -905,6 +919,8 @@ impl<E: Engine> CommentClass<E> {
         interceptors: None,
         ops: None,
         constructor: Some(unsafe { Bound::host_fn(comment_constructor_abi::<E>) }),
+        length: 0,
+        error_prototype: false,
     };
 }
 
@@ -963,6 +979,8 @@ impl<E: Engine> DOMExceptionClass<E> {
         interceptors: None,
         ops: Some(&SideOps::<E>::OPS),
         constructor: Some(unsafe { Bound::host_fn(dom_exception_constructor_abi::<E>) }),
+        length: 0,
+        error_prototype: true,
     };
 }
 
@@ -1047,6 +1065,8 @@ impl<E: Engine> EventClass<E> {
         interceptors: None,
         ops: Some(&SideOps::<E>::OPS),
         constructor: Some(unsafe { Bound::host_fn(event_constructor_abi::<E>) }),
+        length: 1,
+        error_prototype: false,
     };
 }
 
@@ -1287,6 +1307,8 @@ impl<E: Engine> CustomEventClass<E> {
         interceptors: None,
         ops: Some(&SideOps::<E>::OPS),
         constructor: Some(unsafe { Bound::host_fn(custom_event_constructor_abi::<E>) }),
+        length: 1,
+        error_prototype: false,
     };
 }
 

@@ -19,9 +19,10 @@ interface EventTarget {
   boolean dispatchEvent(Event event);
 };
 
-// from Web IDL, whose interface prototype object inherits from
-// Error.prototype, as Web IDL says of it alone
-[Exposed=*, Side]
+// from Web IDL; [ErrorPrototype] (not in the standard): its interface
+// prototype object inherits from Error.prototype, as Web IDL says of it
+// alone
+[Exposed=*, Side, ErrorPrototype]
 interface DOMException {
   constructor(optional DOMString message = "", optional DOMString name = "Error");
   readonly attribute DOMString name;

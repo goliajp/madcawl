@@ -20,8 +20,9 @@ a parent, a constructor, constants, attributes, operations with
 optional arguments and defaults (boolean, string literals, and
 null for `any`),
 nullable types, and extended attribute
-lists (only `[HostOps]`, `[Side]` (its objects are not nodes) and
-`[Targets]` (nodes, and side objects of its own) on an interface, `[Atom]` on an argument, and `[CEReactions]` and
+lists (only `[HostOps]`, `[Side]` (its objects are not nodes),
+`[Targets]` (nodes, and side objects of its own) and `[ErrorPrototype]`
+(its prototype object inherits from Error.prototype) on an interface, `[Atom]` on an argument, and `[CEReactions]` and
 `[NewObject]` on a member are acted on; `[StaticList]` documents a list
 result).
 A `[Atom] DOMString` argument is a name, such as an event type: the
@@ -77,7 +78,8 @@ def parse(text):
         ext, name, parent, body = m.groups()
         iface = {'name': name, 'parent': parent, 'host_ops': bool(ext and re.search(r'\bHostOps\b', ext)),
                  'side': bool(ext and re.search(r'\bSide\b', ext)),
-                 'targets': bool(ext and re.search(r'\bTargets\b', ext)), 'consts': [], 'attrs': [], 'ops': [],
+                 'targets': bool(ext and re.search(r'\bTargets\b', ext)),
+                 'error_proto': bool(ext and re.search(r'\bErrorPrototype\b', ext)), 'consts': [], 'attrs': [], 'ops': [],
                  'ctor': None}
         for member in body.split(';'):
             ext = re.match(r'^\s*\[([^\]]*)\]', member)
@@ -257,7 +259,9 @@ def emit(ifaces, sources):
                 out.append(f'        {field}: &[],')
         ops_of = 'Some(&SideOps::<E>::OPS)' if i['side'] or i['targets'] else 'Some(&NodeOps::<E>::OPS)' if i['host_ops'] else 'None'
         ctor = f"Some(unsafe {{ Bound::host_fn({m}_constructor_abi::<E>) }})" if i['ctor'] else 'None'
-        out += ['        interceptors: None,', f"        ops: {ops_of},", f'        constructor: {ctor},', '    };', '}', '']
+        length = sum(1 for a in i['ctor']['args'] if not a['optional']) if i['ctor'] else 0
+        out += ['        interceptors: None,', f"        ops: {ops_of},", f'        constructor: {ctor},', f'        length: {length},',
+                f"        error_prototype: {'true' if i['error_proto'] else 'false'},", '    };', '}', '']
         for a in i['attrs']:
             out += glue(f"{m}_get_{snake(a['name'])}", i,
                         [f"impls::{m}::{ident(a['name'])}(e, h, this)"], 'get')

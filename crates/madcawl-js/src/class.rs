@@ -256,6 +256,13 @@ pub struct ClassDef<E: Engine, H: 'static> {
     /// `this`; it returns the new wrapper. `None`: constructing throws a
     /// TypeError, as calling the interface object always does.
     pub constructor: Option<Bound<HostFn, E, H>>,
+    /// The interface object's `length`: the arguments the constructor
+    /// requires, 0 without one.
+    pub length: u32,
+    /// The interface prototype object inherits from `%Error.prototype%`
+    /// (`DOMException`) instead of `%Object.prototype%`; only for a
+    /// class without a parent.
+    pub error_prototype: bool,
 }
 
 impl<E: Engine, H: 'static> ClassDef<E, H> {
@@ -272,14 +279,6 @@ impl<E: Engine, H: 'static> ClassDef<E, H> {
             }
             c = c.parent.expect("a host class with host object callbacks");
         }
-    }
-
-    /// Whether the interface prototype object inherits from
-    /// `%Error.prototype%`, as Web IDL says of `DOMException` alone;
-    /// any other class without a parent inherits from
-    /// `%Object.prototype%`.
-    pub fn inherits_error(&self) -> bool {
-        self.parent.is_none() && self.name == "DOMException"
     }
 
     /// This class and its ancestors, nearest first.

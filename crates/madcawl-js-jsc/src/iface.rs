@@ -3,15 +3,35 @@
 //! `instanceof` walks the prototype chain.
 
 use crate::ffi::{self, JSContextRef, JSObjectRef, JSValueRef};
+use crate::frame;
+use crate::objects::halted;
 
-fn illegal(ctx: JSContextRef, exception: *mut JSValueRef) {
-    let src = c"new TypeError('Illegal constructor')";
-    // SAFETY: a live context inside its own callback
-    unsafe {
-        let s = ffi::JSStringCreateWithUTF8CString(src.as_ptr());
-        *exception = ffi::JSEvaluateScript(ctx, s, std::ptr::null_mut(), std::ptr::null_mut(), 1, std::ptr::null_mut());
-        ffi::JSStringRelease(s);
+/// Put a TypeError saying `message` in `exception`, made by the realm's
+/// captured constructor, so a page that replaced `TypeError` does not
+/// get its own object.
+fn throw_type(exception: *mut JSValueRef, message: &str) {
+    // SAFETY: the frame's engine, suspended in the framework
+    let e = unsafe { &mut *frame::current().engine };
+    if e.halted() {
+        halted(exception);
+        return;
     }
+    let _sentinel = e.throw_new(madcawl_js::ErrorKind::Type, message).into_raw();
+    match e.exception.take() {
+        Some(x) => {
+            // SAFETY: the framework's exception slot; the value stays on
+            // the stack the collector scans until the framework has it
+            unsafe { *exception = x.raw() };
+            e.unprotect(x);
+        }
+        None => {
+            halted(exception);
+        }
+    }
+}
+
+fn illegal(_: JSContextRef, exception: *mut JSValueRef) {
+    throw_type(exception, "Illegal constructor");
 }
 
 pub(crate) unsafe extern "C" fn call(
@@ -44,10 +64,7 @@ pub(crate) unsafe extern "C" fn has_instance(ctx: JSContextRef, iface: JSObjectR
             return false;
         }
         if ffi::JSValueGetType(ctx, proto) != ffi::kJSTypeObject {
-            let src = c"new TypeError('the prototype of the right-hand side of instanceof is not an object')";
-            let s = ffi::JSStringCreateWithUTF8CString(src.as_ptr());
-            *exception = ffi::JSEvaluateScript(ctx, s, std::ptr::null_mut(), std::ptr::null_mut(), 1, std::ptr::null_mut());
-            ffi::JSStringRelease(s);
+            throw_type(exception, "the prototype of the right-hand side of instanceof is not an object");
             return false;
         }
         let mut o = v;

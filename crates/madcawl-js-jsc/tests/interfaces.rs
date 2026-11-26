@@ -152,6 +152,28 @@ return [bad.join('; ') || 'ok', x instanceof Error, String(x), x.toString === Er
     h.close(&mut e);
 }
 
+#[test]
+fn interface_objects_look_native_and_have_their_lengths() {
+    let (mut e, mut h) = page("<p>x</p>");
+    let src = "var names = ['EventTarget', 'Node', 'Document', 'Element', 'DocumentFragment', 'CharacterData', 'Text', 'Comment',
+  'Event', 'CustomEvent', 'DOMException'];
+var foreign = [], lengths = [];
+for (const n of names) {
+  const s = Function.prototype.toString.call(globalThis[n]);
+  if (!/\\{\\s*\\[native code\\]\\s*\\}\\s*$/.test(s) || /apply|errors|setProto|inner/.test(s)) foreign.push(n + ': ' + s);
+  lengths.push(globalThis[n].length);
+}
+var TE = TypeError, thrown = [];
+TypeError = function () { return { mine: true }; };
+for (const f of [() => new Node(), () => Event('x')]) {
+  try { f(); thrown.push('none'); } catch (x) { thrown.push(x instanceof TE && !x.mine); }
+}
+TypeError = TE;
+return [foreign.join('; ') || 'ok', lengths.join(' '), thrown.join(' '), new Text('t') instanceof Text, new Text('t') instanceof Node].join('|');";
+    assert_eq!(eval(&mut e, &mut h, src), "ok|0 0 0 0 0 0 0 0 1 1 0|true true|true|true");
+    h.close(&mut e);
+}
+
 #[inline(never)]
 fn scrub() {
     let pad = [0u8; 512 * 1024];

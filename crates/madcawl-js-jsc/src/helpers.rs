@@ -38,6 +38,7 @@ impl Helper {
 pub(crate) const HELPERS: &str = r#"(function () {
   const dp = Object.defineProperty;
   const apply = Reflect.apply;
+  const bind = Function.prototype.bind;
   const create = Object.create;
   const put = (a, i, v) => { dp(a, i, ({ __proto__: null, value: v, writable: true, enumerable: true, configurable: true })); };
   const named = (f, n, l) => {
@@ -94,10 +95,10 @@ pub(crate) const HELPERS: &str = r#"(function () {
       dp(o, n, ({ __proto__: null, value: f, writable: true, enumerable: true, configurable: true }));
     },
     (o, n, v) => { dp(o, n, ({ __proto__: null, value: v, enumerable: true })); },
-    (i, p, n) => {
+    (i, p, n, l) => {
       dp(i, 'prototype', ({ __proto__: null, value: p, writable: false }));
       dp(p, 'constructor', ({ __proto__: null, value: i, writable: true, configurable: true }));
-      named(i, n, 0);
+      named(i, n, l);
       dp(p, Symbol.toStringTag, ({ __proto__: null, value: n, configurable: true }));
     },
     (k, m) => new errors[k](m),
@@ -166,16 +167,23 @@ pub(crate) const HELPERS: &str = r#"(function () {
       for (let i = 0; i < rs.length; i++) put(out, i, apply(deref, rs[i], []));
       return out;
     },
-    // the interface object of a class with a constructor: `new` calls
-    // the host's constructor and gives the object the prototype that
-    // `new.target` names, so a subclass gets its own (Web IDL takes
-    // the interface's when that is not an object); a call throws
-    (native) => function (...args) {
-      if (new.target === undefined) throw new errors[0]('Illegal constructor');
-      const o = apply(native, undefined, args);
-      const p = new.target.prototype;
-      if (p !== null && (typeof p === 'object' || typeof p === 'function') && R.proto(o) !== p) R.setProto(o, p);
-      return o;
+    // the interface object of a class with a constructor, prototype
+    // object `p`: `new` calls the host's constructor and gives the
+    // object the prototype that `new.target` names, so a subclass gets
+    // its own (Web IDL takes the interface's when that is not an
+    // object); a call throws. Bound, it shows as native code, and `new`
+    // on it passes the inner function as `new.target`, whose prototype
+    // is `p` too
+    (native, p) => {
+      const inner = (0, function (...args) {
+        if (new.target === undefined) throw new errors[0]('Illegal constructor');
+        const o = apply(native, undefined, args);
+        const q = new.target.prototype;
+        if (q !== null && (typeof q === 'object' || typeof q === 'function') && R.proto(o) !== q) R.setProto(o, q);
+        return o;
+      });
+      dp(inner, 'prototype', ({ __proto__: null, value: p, writable: false }));
+      return apply(bind, inner, [undefined]);
     },
     Error.prototype,
   ];
