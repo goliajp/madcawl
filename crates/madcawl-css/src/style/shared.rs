@@ -20,18 +20,20 @@
 //! before parsing, not a measure of what the sheet holds. A sheet heavier
 //! than a quarter of the bound is parsed and not kept, so one sheet
 //! cannot empty the cache.
+//!
+//! A linked sheet can also be found by what its loader knows of it
+//! before reading it (`known`), so a page that links a held sheet does
+//! not read and decode its bytes again.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::BuildHasher;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use madcawl_dom::Dom;
-
-use crate::Span;
 use crate::sheet::{SourceTooLarge, Stylesheet};
 
-use super::{Cascade, Device, Origin, SheetSource, Styles, matches_media, sheet_sources, ua_sheet};
+mod known;
 
 /// The estimated memory of a parsed sheet for each byte of its text, the
 /// text included, its declarations all parsed (measured 3.5 over a corpus
@@ -45,6 +47,7 @@ pub struct SheetCache {
     seed: u64,
     parses: AtomicU64,
     hits: AtomicU64,
+    unread: AtomicU64,
 }
 
 /// Which pages may share a sheet: those of one partition whose top-level
@@ -61,6 +64,8 @@ struct Entry {
     sheet: Arc<Stylesheet>,
     weight: usize,
     used: u64,
+    /// The keys the entry is known by in `Inner::known`, oldest first
+    known: Vec<Box<[u8]>>,
 }
 
 #[derive(Default)]
@@ -68,6 +73,7 @@ struct Inner {
     by_hash: HashMap<u64, Entry>,
     /// The hash of every entry, by when it was last used
     by_use: BTreeMap<u64, u64>,
+    known: known::Known,
     weight: usize,
     clock: u64,
 }
@@ -76,7 +82,10 @@ struct Inner {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SheetCacheStats {
     pub parses: u64,
+    /// Sheets reused after comparing their text
     pub hits: u64,
+    /// Sheets reused by what their loader knew of them, unread
+    pub unread: u64,
     pub entries: usize,
     pub weight: usize,
 }
@@ -112,28 +121,59 @@ impl SheetCache {
             seed: std::collections::hash_map::RandomState::new().hash_one(0u64),
             parses: AtomicU64::new(0),
             hits: AtomicU64::new(0),
+            unread: AtomicU64::new(0),
         }
     }
 
     /// The sheet parsed from `text` for a page of `scope`: the one held
     /// when the cache has it, else parsed now and kept when it fits.
     pub fn get(&self, scope: Scope, text: String) -> Result<Arc<Stylesheet>, SourceTooLarge> {
+        self.get_as(scope, Cow::Owned(text), None)
+    }
+
+    /// The same, the text copied only when it is parsed; when `id` is
+    /// given, the sheet is known by it from then on while held (`get_known`).
+    pub fn get_as(
+        &self,
+        scope: Scope,
+        text: Cow<'_, str>,
+        id: Option<&[u8]>,
+    ) -> Result<Arc<Stylesheet>, SourceTooLarge> {
         let h = hash(self.seed, scope, &text);
         let held = self.lock().candidate(h, scope);
         if let Some(s) = held.filter(|s| s.source() == text) {
-            self.lock().touch(h, &s);
+            let mut i = self.lock();
+            i.touch(h, &s);
+            if let Some(id) = id {
+                i.know(known::key(scope, id), h, &s);
+            }
             self.hits.fetch_add(1, Ordering::Relaxed);
             return Ok(s);
         }
         let w = weight(&text);
         // parsed outside the lock: another page may parse the same text
         // meanwhile, and the first one in is kept
-        let sheet = Arc::new(Stylesheet::parse(text)?);
+        let sheet = Arc::new(Stylesheet::parse(text.into_owned())?);
         self.parses.fetch_add(1, Ordering::Relaxed);
         if w <= self.max_weight / 4 {
-            self.lock().keep(h, scope, &sheet, w, self.max_weight);
+            let mut i = self.lock();
+            i.keep(h, scope, &sheet, w, self.max_weight);
+            if let Some(id) = id {
+                i.know(known::key(scope, id), h, &sheet);
+            }
         }
         Ok(sheet)
+    }
+
+    /// The sheet held for pages of `scope` that its loader knows by `id`,
+    /// a name the loader vouches stands for one text only (as a file's
+    /// identity does while the file is unchanged), without the text.
+    pub fn get_known(&self, scope: Scope, id: &[u8]) -> Option<Arc<Stylesheet>> {
+        let mut i = self.lock();
+        let (h, s) = i.known(&known::key(scope, id))?;
+        i.touch(h, &s);
+        self.unread.fetch_add(1, Ordering::Relaxed);
+        Some(s)
     }
 
     /// Drops every sheet of `partition`, as when its session ends.
@@ -155,6 +195,7 @@ impl SheetCache {
         SheetCacheStats {
             parses: self.parses.load(Ordering::Relaxed),
             hits: self.hits.load(Ordering::Relaxed),
+            unread: self.unread.load(Ordering::Relaxed),
             entries: i.by_hash.len(),
             weight: i.weight,
         }
@@ -197,6 +238,7 @@ impl Inner {
     fn remove(&mut self, h: u64) {
         let e = self.by_hash.remove(&h).expect("every use has its entry");
         self.by_use.remove(&e.used);
+        self.known.forget(&e.known);
         self.weight -= e.weight;
     }
 
@@ -223,49 +265,11 @@ impl Inner {
                 sheet,
                 weight,
                 used,
+                known: Vec::new(),
             },
         );
         self.weight += weight;
     }
-}
-
-/// The same, the stylesheets parsed once for the pages of `scope` that
-/// have them and held in `cache`. The styles are the same as `style_document`'s.
-pub fn style_document_shared(
-    dom: &Dom,
-    device: Device,
-    load: &mut dyn FnMut(&str) -> Option<String>,
-    cache: &SheetCache,
-    scope: Scope,
-) -> Styles {
-    style_parsed_by(dom, device, load, &mut |t| cache.get(scope, t).ok())
-}
-
-pub(super) fn style_parsed_by(
-    dom: &Dom,
-    device: Device,
-    load: &mut dyn FnMut(&str) -> Option<String>,
-    parse: &mut dyn FnMut(String) -> Option<Arc<Stylesheet>>,
-) -> Styles {
-    let mut sheets = Vec::new();
-    for s in sheet_sources(dom) {
-        let (text, media) = match s {
-            SheetSource::Inline { text, media } => (Some(text), media),
-            SheetSource::Link { href, media } => (load(&href), media),
-        };
-        let applies = media
-            .as_deref()
-            .is_none_or(|m| matches_media(m, Span::new(0, m.len()), &device));
-        if let Some(sheet) = text.filter(|_| applies).and_then(&mut *parse) {
-            sheets.push(sheet);
-        }
-    }
-    let mut c = Cascade::new(device);
-    c.add(ua_sheet(), Origin::UserAgent);
-    for s in &sheets {
-        c.add(s, Origin::Author);
-    }
-    c.compute(dom)
 }
 
 #[cfg(test)]

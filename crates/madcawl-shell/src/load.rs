@@ -31,7 +31,9 @@ pub fn parse(bytes: &[u8], transport: Option<Encoding>) -> (Dom, Encoding) {
     p.end();
     assert_eq!(p.run(), Step::Done, "all input was given");
     let e = p.encoding();
-    (p.into_sink(), e)
+    let mut dom = p.into_sink();
+    dom.trim();
+    (dom, e)
 }
 
 /// The path a stylesheet `href` names below `base`, when it is a
@@ -56,6 +58,11 @@ const O_NONBLOCK: i32 = 0o4000;
 /// and what was opened is checked again, so a swap after the first
 /// check is caught too.
 pub fn read_file(path: &Path, max: u64) -> std::io::Result<Vec<u8>> {
+    read_open(&open_regular(path)?, max)
+}
+
+/// `path` opened for reading, when it is a regular file, as `read_file` checks it.
+pub(crate) fn open_regular(path: &Path) -> std::io::Result<std::fs::File> {
     let not_file = || std::io::Error::other("not a regular file");
     if !std::fs::metadata(path)?.is_file() {
         return Err(not_file());
@@ -67,7 +74,14 @@ pub fn read_file(path: &Path, max: u64) -> std::io::Result<Vec<u8>> {
     if !f.metadata()?.is_file() {
         return Err(not_file());
     }
-    let mut out = Vec::new();
+    Ok(f)
+}
+
+/// The rest of `f`, when it is at most `max` bytes.
+pub(crate) fn read_open(f: &std::fs::File, max: u64) -> std::io::Result<Vec<u8>> {
+    // sized once from the file's length: grown by doubling, a 2.4 MB page
+    // would take a 4 MiB buffer and leave three smaller ones freed
+    let mut out = Vec::with_capacity(f.metadata()?.len().min(max + 1) as usize);
     f.take(max + 1).read_to_end(&mut out)?;
     if out.len() as u64 > max {
         return Err(std::io::Error::other(format!(
@@ -80,6 +94,11 @@ pub fn read_file(path: &Path, max: u64) -> std::io::Result<Vec<u8>> {
 /// The stylesheet a `<link>` names, when it is a regular file under one
 /// of `allow` (any file when `allow` is None).
 pub fn sheet_file(base: &Path, href: &str, allow: Option<&[PathBuf]>) -> Option<Vec<u8>> {
+    read_file(&sheet_path(base, href, allow)?, MAX_FILE).ok()
+}
+
+/// The file a `<link>` names, as `sheet_file` checks it, not yet read.
+pub fn sheet_path(base: &Path, href: &str, allow: Option<&[PathBuf]>) -> Option<PathBuf> {
     let mut p = local(base, href)?;
     if let Some(allow) = allow {
         // read the checked path itself, so a link swapped in between is not followed
@@ -88,7 +107,7 @@ pub fn sheet_file(base: &Path, href: &str, allow: Option<&[PathBuf]>) -> Option<
             return None;
         }
     }
-    read_file(&p, MAX_FILE).ok()
+    Some(p)
 }
 
 pub fn style(dom: &Dom, base: Option<&Path>, encoding: Encoding, sheets: &mut Sheets) -> Styles {

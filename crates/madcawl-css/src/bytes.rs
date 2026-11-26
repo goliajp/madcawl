@@ -3,6 +3,8 @@
 //! spelled exactly as the standard has it, the referring document's
 //! encoding, and UTF-8, in that order.
 
+use std::borrow::Cow;
+
 use madcawl_html::{Decoder, Encoding};
 
 const CHARSET: &[u8] = b"@charset \"";
@@ -36,17 +38,33 @@ pub fn decode_stylesheet(
     protocol: Option<&[u8]>,
     environment: Option<Encoding>,
 ) -> (String, Encoding) {
+    let (text, encoding) = decode_stylesheet_borrowed(bytes, protocol, environment);
+    (text.into_owned(), encoding)
+}
+
+/// The same, borrowing `bytes` when they are the text already: valid
+/// UTF-8 decoded as UTF-8, a byte order mark aside.
+pub fn decode_stylesheet_borrowed<'a>(
+    bytes: &'a [u8],
+    protocol: Option<&[u8]>,
+    environment: Option<Encoding>,
+) -> (Cow<'a, str>, Encoding) {
     let (encoding, body) = match bytes {
         [0xEF, 0xBB, 0xBF, rest @ ..] => (Encoding::Utf8, rest),
         [0xFE, 0xFF, rest @ ..] => (Encoding::Utf16be, rest),
         [0xFF, 0xFE, rest @ ..] => (Encoding::Utf16le, rest),
         _ => (fallback(bytes, protocol, environment), bytes),
     };
+    if encoding == Encoding::Utf8
+        && let Ok(text) = std::str::from_utf8(body)
+    {
+        return (Cow::Borrowed(text), encoding);
+    }
     let mut out = Vec::with_capacity(body.len());
     Decoder::new(encoding).decode(body, &mut out, true);
     let text = String::from_utf8(out).unwrap_or_else(|e| {
         // the decoders write only UTF-8
         unreachable!("decoder output: {e}")
     });
-    (text, encoding)
+    (Cow::Owned(text), encoding)
 }

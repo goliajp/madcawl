@@ -35,7 +35,7 @@ mod tree;
 mod worker;
 
 pub use anb::parse_anb;
-pub use bytes::decode_stylesheet;
+pub use bytes::{decode_stylesheet, decode_stylesheet_borrowed};
 pub use escape::Unescape;
 pub use madcawl_html::Encoding;
 pub use names::{Name, Names};

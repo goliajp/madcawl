@@ -14,12 +14,13 @@ use madcawl_html::Encoding;
 use madcawl_net::Url;
 use madcawl_net::submit::{Navigation, fetch_frame};
 
-use super::doc::Doc;
+use super::doc::{Doc, HeldSheets};
 use super::loader::{Loaded, Loader, Pending};
 use super::net::{Net, NetConn};
 use super::reqlog::{Entry, RequestLog};
 use super::target;
 use crate::load;
+use crate::sheet_files::FileSheets;
 
 /// What a page may do, from the host's configuration.
 pub(crate) struct Env<'a> {
@@ -86,7 +87,8 @@ impl Page {
     /// agent session starts on the first document it loads.
     pub(crate) fn blank(id: u32, size: (f32, f32), net: Option<&Arc<Net>>, owner: u32) -> Page {
         let (dom, encoding) = load::parse(b"", Some(Encoding::Utf8));
-        let doc = Doc::new(dom, encoding, size, (owner, "about:blank"), &mut |_| None);
+        let mut links = FileSheets::new(None, None);
+        let doc = Doc::new(dom, encoding, size, (owner, "about:blank"), &mut links);
         Page {
             id,
             url: "about:blank".into(),
@@ -124,9 +126,9 @@ impl Page {
         let bytes = load::read_file(path, load::MAX_FILE)?;
         let (dom, encoding) = load::parse(&bytes, charset);
         let base = path.parent().map(Path::to_path_buf);
-        let doc = Doc::new(dom, encoding, (self.width, self.height), (self.owner, &url), &mut |href| {
-            base.as_deref().and_then(|b| load::sheet_file(b, href, Some(allow)))
-        });
+        let mut links = FileSheets::new(base.as_deref(), Some(allow));
+        let size = (self.width, self.height);
+        let doc = Doc::new(dom, encoding, size, (self.owner, &url), &mut links);
         self.log.push(Entry {
             what: "document",
             method: "GET".into(),
@@ -193,7 +195,9 @@ impl Page {
             Loaded::Failed(why) => Some(format!("the load failed: {why}")),
             Loaded::Downloaded { file, bytes } => Some(self.downloaded(&file, bytes, env)),
             Loaded::Committed(p, sheets) => {
-                let doc = Doc::new(p.dom, p.encoding, (self.width, self.height), (self.owner, &p.url), &mut |href| sheets.get(href).cloned());
+                let size = (self.width, self.height);
+                let mut links = HeldSheets(&sheets);
+                let doc = Doc::new(p.dom, p.encoding, size, (self.owner, &p.url), &mut links);
                 let status = p.status;
                 self.commit(doc, p.url, p.masked);
                 Some(format!("navigated to {} (status {status})", self.url))

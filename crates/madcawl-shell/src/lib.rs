@@ -12,6 +12,7 @@ pub mod load;
 pub mod read;
 pub mod rusage;
 pub mod serve;
+pub mod sheet_files;
 pub mod shot;
 pub mod shown;
 

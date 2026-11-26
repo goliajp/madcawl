@@ -2,12 +2,15 @@
 //! in the page's viewport, laid out only once something asks where they
 //! are. A new navigation makes a new one.
 
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use madcawl_agent::{Frame, Geometry, Inputs, kind, tag};
-use madcawl_css::decode_stylesheet;
-use madcawl_css::style::{Device, Scope, SheetCache, Styles, style_document_shared};
+use madcawl_css::style::{
+    Device, Fetched, LinkedSheets, Scope, SheetCache, Styles, style_document_cached,
+};
 use madcawl_dom::Dom;
 use madcawl_html::Encoding;
 use madcawl_layout::Layout;
@@ -40,6 +43,20 @@ pub(crate) fn site(url: &str) -> String {
 /// Drops the stylesheets of agent session `session`, which has ended.
 pub(crate) fn forget_session(session: u32) {
     SHEETS.forget(partition_of(session));
+}
+
+/// Linked stylesheets a load already holds the bytes of, by `href`.
+pub struct HeldSheets<'a>(pub &'a HashMap<String, Vec<u8>>);
+
+impl LinkedSheets for HeldSheets<'_> {
+    fn identity(&mut self, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn fetch(&mut self, href: &str) -> Option<Fetched<'_>> {
+        let bytes = Cow::Borrowed(self.0.get(href)?.as_slice());
+        Some(Fetched { bytes, identity: None })
+    }
 }
 
 /// A view request whose answer needs geometry: one of the viewport.
@@ -85,25 +102,19 @@ pub fn parse(body: &[u8], content_type: &str, charset: Option<Encoding>) -> (Dom
 
 impl Doc {
     /// Styles `dom`, a document at `url` of agent session `session`, for a
-    /// viewport of `size`; a linked stylesheet's text comes from `sheet`,
-    /// by its `href` as written. It is not laid out yet.
+    /// viewport of `size`; a linked stylesheet comes from `links`, by its
+    /// `href` as written. It is not laid out yet.
     pub fn new(
         dom: Dom,
         encoding: Encoding,
         size: (f32, f32),
         (session, url): (u32, &str),
-        sheet: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+        links: &mut dyn LinkedSheets,
     ) -> Doc {
         let site = site(url);
         let scope = Scope { partition: partition_of(session), site: &site };
         let device = Device { width: size.0 as f64, height: size.1 as f64, ..Device::default() };
-        let styles = style_document_shared(
-            &dom,
-            device,
-            &mut |href| sheet(href).map(|b| decode_stylesheet(&b, None, Some(encoding)).0),
-            &SHEETS,
-            scope,
-        );
+        let styles = style_document_cached(&dom, device, encoding, links, &SHEETS, scope);
         Doc { dom, styles, geometry: None, size, layouts: 0, laid_out_at: None }
     }
 

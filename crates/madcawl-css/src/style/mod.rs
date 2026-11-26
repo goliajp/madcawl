@@ -68,6 +68,7 @@ mod keys;
 mod kw;
 mod layers;
 mod length;
+mod linked;
 mod logical;
 mod longhand;
 mod matching;
@@ -121,7 +122,8 @@ pub use media::matches_media;
 pub use props::Prop;
 pub use restyle::{Change, Restyled};
 pub use rules::Origin;
-pub use shared::{Scope, SheetCache, SheetCacheStats, style_document_shared};
+pub use linked::{Fetched, LinkedSheets, style_document_cached, style_document_shared};
+pub use shared::{Scope, SheetCache, SheetCacheStats};
 pub use sources::{SheetSource, sheet_sources};
 pub use states::ElementStates;
 pub use styles::{StyleStats, Styles};
@@ -288,5 +290,5 @@ pub fn style_document(
     device: Device,
     load: &mut dyn FnMut(&str) -> Option<String>,
 ) -> Styles {
-    shared::style_parsed_by(dom, device, load, &mut |t| Stylesheet::parse(t).ok().map(Arc::new))
+    linked::style_parsed_by(dom, device, load, &mut |t| Stylesheet::parse(t).ok().map(Arc::new))
 }

@@ -4,7 +4,13 @@
 #[allow(dead_code)]
 mod style;
 
-use madcawl_css::style::{Device, Scope, SheetCache, style_document, style_document_shared};
+use std::borrow::Cow;
+
+use madcawl_css::style::{
+    Device, Fetched, LinkedSheets, Scope, SheetCache, style_document, style_document_cached,
+    style_document_shared,
+};
+use madcawl_html::Encoding;
 use style::{differences, parse};
 
 const SITE: &str = "
@@ -104,4 +110,186 @@ fn a_full_cache_still_styles_every_page() {
     }
     let s = cache.stats();
     assert_eq!((s.hits, s.entries, s.weight), (0, 0, 0));
+}
+
+/// Linked sheets from a table of files, each named by a version that a
+/// change of its bytes moves, as a file's identity does.
+#[derive(Default)]
+struct Files {
+    files: Vec<(&'static str, Vec<u8>, u32)>,
+    named: bool,
+    fetches: u32,
+}
+
+impl Files {
+    fn write(&mut self, href: &'static str, bytes: &[u8]) {
+        match self.files.iter_mut().find(|f| f.0 == href) {
+            Some(f) => {
+                f.1 = bytes.to_vec();
+                f.2 += 1;
+            }
+            None => self.files.push((href, bytes.to_vec(), 0)),
+        }
+    }
+
+    fn name(&self, href: &str) -> Option<Vec<u8>> {
+        let f = self.files.iter().find(|f| f.0 == href)?;
+        self.named.then(|| format!("{href}@{}", f.2).into_bytes())
+    }
+}
+
+impl LinkedSheets for Files {
+    fn identity(&mut self, href: &str) -> Option<Vec<u8>> {
+        self.name(href)
+    }
+
+    fn fetch(&mut self, href: &str) -> Option<Fetched<'_>> {
+        self.fetches += 1;
+        let identity = self.name(href);
+        let f = self.files.iter().find(|f| f.0 == href)?;
+        Some(Fetched {
+            bytes: Cow::Borrowed(&f.1),
+            identity,
+        })
+    }
+}
+
+fn site_files(named: bool) -> Files {
+    let mut f = Files {
+        named,
+        ..Files::default()
+    };
+    f.write("site.css", SITE.as_bytes());
+    f.write("other.css", b".x { color: red }");
+    f
+}
+
+#[test]
+fn a_named_sheet_held_is_not_fetched_again() {
+    let cache = SheetCache::new(1 << 20);
+    let mut files = site_files(true);
+    let device = Device::default();
+    for round in 0..2 {
+        for html in pages() {
+            let dom = parse(html);
+            let alone = style_document(&dom, device, &mut load);
+            let cached =
+                style_document_cached(&dom, device, Encoding::Utf8, &mut files, &cache, SCOPE);
+            assert_eq!(differences(&dom, &alone, &cached), 0, "{html}");
+        }
+        // site.css and other.css read in the first round only; the third
+        // page's site.css does not apply, so it is never read
+        assert_eq!(files.fetches, 2, "round {round}");
+    }
+    // the second page's <style> is found by its text, as before
+    let s = cache.stats();
+    assert_eq!((s.parses, s.unread, s.hits), (3, 4, 1), "{s:?}");
+}
+
+#[test]
+fn a_sheet_whose_name_moved_is_read_again() {
+    let cache = SheetCache::new(1 << 20);
+    let mut files = site_files(true);
+    let html = r#"<!doctype html><link rel=stylesheet href=other.css><p class=x id=p>d</p>"#;
+    let dom = parse(html);
+    let red = style_document_cached(
+        &dom,
+        Device::default(),
+        Encoding::Utf8,
+        &mut files,
+        &cache,
+        SCOPE,
+    );
+    files.write("other.css", b".x { color: blue }");
+    let blue = style_document_cached(
+        &dom,
+        Device::default(),
+        Encoding::Utf8,
+        &mut files,
+        &cache,
+        SCOPE,
+    );
+    assert_eq!(files.fetches, 2);
+    let want = style_document(&dom, Device::default(), &mut |_| {
+        Some(".x { color: blue }".into())
+    });
+    assert_eq!(differences(&dom, &want, &blue), 0);
+    assert!(differences(&dom, &red, &blue) > 0);
+    // the same bytes again under a new name: read, then found by text
+    files.write("other.css", b".x { color: blue }");
+    style_document_cached(
+        &dom,
+        Device::default(),
+        Encoding::Utf8,
+        &mut files,
+        &cache,
+        SCOPE,
+    );
+    let s = cache.stats();
+    assert_eq!(
+        (files.fetches, s.parses, s.hits, s.unread),
+        (3, 2, 1, 0),
+        "{s:?}"
+    );
+}
+
+#[test]
+fn an_unnamed_sheet_is_read_every_time_and_parsed_once() {
+    let cache = SheetCache::new(1 << 20);
+    let mut files = site_files(false);
+    let dom = parse(pages()[0]);
+    for _ in 0..3 {
+        let cached = style_document_cached(
+            &dom,
+            Device::default(),
+            Encoding::Utf8,
+            &mut files,
+            &cache,
+            SCOPE,
+        );
+        assert_eq!(
+            differences(
+                &dom,
+                &style_document(&dom, Device::default(), &mut load),
+                &cached
+            ),
+            0
+        );
+    }
+    let s = cache.stats();
+    assert_eq!(
+        (files.fetches, s.parses, s.hits, s.unread),
+        (3, 1, 2, 0),
+        "{s:?}"
+    );
+}
+
+#[test]
+fn a_name_holds_for_one_fallback_encoding() {
+    // windows-1252 and UTF-8 read the byte E9 differently
+    let cache = SheetCache::new(1 << 20);
+    let mut files = Files {
+        named: true,
+        ..Files::default()
+    };
+    files.write("a.css", b"p { font-family: \"\xe9\" }");
+    let dom = parse(r#"<!doctype html><link rel=stylesheet href=a.css><p>x</p>"#);
+    let latin = style_document_cached(
+        &dom,
+        Device::default(),
+        Encoding::Windows1252,
+        &mut files,
+        &cache,
+        SCOPE,
+    );
+    let utf8 = style_document_cached(
+        &dom,
+        Device::default(),
+        Encoding::Utf8,
+        &mut files,
+        &cache,
+        SCOPE,
+    );
+    assert_eq!(files.fetches, 2);
+    assert!(differences(&dom, &latin, &utf8) > 0);
 }
