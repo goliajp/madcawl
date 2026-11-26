@@ -50,6 +50,9 @@ pub struct Config {
     /// The memory cap of the process the session's pages are in (see
     /// `memory`); over it the process exits
     pub memory_cap: Option<u64>,
+    /// Run the network service in a process of its own, this program
+    /// started with `--netd`, and start it again when it ends
+    pub isolate: Option<PathBuf>,
 }
 
 impl Config {
@@ -80,11 +83,12 @@ impl Config {
             stats: false,
             watch: None,
             memory_cap: None,
+            isolate: None,
         }
     }
 }
 
-pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds>] [--listen-fd N] [--exit-idle <seconds>] [--net] [--downloads <dir>] [--upload-allow <dir>]... [--approve <origin>]... [--stats] [--watch-ms N] [--memory-cap-mib N]
+pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds>] [--listen-fd N] [--exit-idle <seconds>] [--net] [--downloads <dir>] [--upload-allow <dir>]... [--approve <origin>]... [--stats] [--watch-ms N] [--memory-cap-mib N] [--isolate]
          pages and their stylesheets open only from below the --allow directories;
          without --allow, only from below the current directory;
          --net lets pages come from http and https URLs, each session's in a cookie jar of its own that starts empty and ends with it;
@@ -95,6 +99,7 @@ pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--au
          long (at least 10 s), naming the stage it is in, and a slow request's time by stage when it ends;
          --memory-cap-mib drops the stylesheet cache past three quarters of N MiB of footprint and exits
          past N (a host without --isolate holds every session's pages and exits with them);
+         --isolate runs the network service in a process of its own and starts it again when it ends;
          --stats answers the host's own counters (shared stylesheet cache, pages open) to any session;
          --listen-fd accepts on an inherited listening socket instead of binding <socket>;
          --exit-idle exits once no session has been open for that long (checked once a period
@@ -112,6 +117,10 @@ pub fn parse_args(args: &[&str]) -> Option<Config> {
     let mut allow = Vec::new();
     let mut rest = rest.iter();
     while let Some(&opt) = rest.next() {
+        if opt == "--isolate" {
+            c.isolate = Some(std::env::current_exe().ok()?);
+            continue;
+        }
         let flag = match opt {
             "--net" => Some(&mut c.net),
             "--stats" => Some(&mut c.stats),

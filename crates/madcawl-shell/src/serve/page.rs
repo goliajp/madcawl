@@ -158,9 +158,6 @@ impl Page {
         let Some(net) = self.net.clone() else {
             return Err("this host does not fetch pages from the network (start it with --net)".into());
         };
-        if self.conn.is_none() {
-            self.conn = Some(net.connect(env.owner).map_err(|e| format!("the network service: {e}"))?);
-        }
         let initiator = Url::parse(&self.url).ok().filter(|u| matches!(u.scheme(), "http" | "https"));
         let nav = Navigation {
             id: 0,
@@ -171,8 +168,7 @@ impl Page {
             initiator: initiator.as_ref(),
             body_origins: &r.body_origins,
         };
-        let conn = self.conn.as_mut().expect("connected");
-        let id = conn.fetch(fetch_frame(&nav)).map_err(|e| format!("the network service: {e}"))?;
+        let id = net.fetch(&mut self.conn, env.owner, fetch_frame(&nav)).map_err(|e| format!("the network service: {e}"))?;
         let mut p = Pending::new("document", r.method, r.shown);
         p.mask = r.mask;
         self.loader.begin(id, p, &mut self.log);

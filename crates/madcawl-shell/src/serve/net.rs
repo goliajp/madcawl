@@ -1,5 +1,6 @@
 //! The host's network: the network service (`madcawl-netd`'s guarded
-//! service, run on a thread of this process), the control channel the
+//! service, run on a thread of this process, or with `--isolate` in a
+//! process of its own, see `netproc`), the control channel the
 //! host registers on, and a connection per page. A page in this host is
 //! the host's own: its navigations and the requests of its document go
 //! on a connection registered for the host, which the service lets
@@ -9,16 +10,19 @@
 //! no profile, so an agent's pages never carry the user's logins, nor
 //! another session's.
 
-use std::io::{self, Read as _, Write as _};
+use std::io;
 use std::os::unix::fs::FileTypeExt as _;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use madcawl_net::wire::{Frame, FrameError, MAX_FRAME, kind, tag};
+use madcawl_net::wire::{Frame, kind, tag};
 use madcawl_net::{Client, Config};
 use madcawl_netd::{Downloads, ServerLimits, serve_guarded};
+
+use super::netctl::{Control, read_frame, write_with_id};
+use super::netproc::{self, Process, Spec};
 
 /// How long a control-channel answer or a write to the service may take.
 const CONTROL_WAIT: Duration = Duration::from_secs(10);
@@ -26,85 +30,16 @@ const CONTROL_WAIT: Duration = Duration::from_secs(10);
 pub struct Net {
     socket: PathBuf,
     control: Mutex<Control>,
+    /// Signalled when the network process is replaced, or will not be
+    replaced: Condvar,
     pub downloads: Option<PathBuf>,
+    /// The network process, when the service runs in one of its own
+    pub process: Option<Process>,
 }
 
-/// The host's end of the control channel. Each request has an id of its
-/// own and only the reply with that id answers it: a reply that comes
-/// after its request gave up would otherwise answer the next request,
-/// handing one session another's registration.
-struct Control {
-    s: UnixStream,
-    buf: Vec<u8>,
-    next_id: u64,
-    wait: Duration,
-}
-
-impl Control {
-    fn new(s: UnixStream, wait: Duration) -> io::Result<Control> {
-        s.set_write_timeout(Some(wait))?;
-        Ok(Control { s, buf: Vec::new(), next_id: 0, wait })
-    }
-
-    fn request(&mut self, f: Frame) -> io::Result<Frame> {
-        self.next_id += 1;
-        let id = self.next_id;
-        write_with_id(&mut self.s, f, id)?;
-        let deadline = Instant::now() + self.wait;
-        loop {
-            match read_frame(&mut self.s, &mut self.buf, deadline)? {
-                Some(r) if r.get_num(tag::ID) == Some(id) => return Ok(r),
-                Some(_) => {}
-                None => return Err(io::Error::new(io::ErrorKind::TimedOut, "the network service did not answer in time")),
-            }
-        }
-    }
-}
-
-/// Sends `f` with `id` as its only id.
-fn write_with_id(s: &mut UnixStream, mut f: Frame, id: u64) -> io::Result<()> {
-    f.fields.retain(|(t, _)| *t != tag::ID);
-    f.fields.insert(0, (tag::ID, varint(id)));
-    let mut out = Vec::new();
-    f.encode(&mut out);
-    s.write_all(&out)
-}
-
-/// The next whole frame on `s`, kept in `buf` across reads that time
-/// out, or `None` once `deadline` passes without one.
-fn read_frame(s: &mut UnixStream, buf: &mut Vec<u8>, deadline: Instant) -> io::Result<Option<Frame>> {
-    loop {
-        match Frame::decode(buf) {
-            Ok((f, used)) => {
-                buf.drain(..used);
-                return Ok(Some(f));
-            }
-            Err(FrameError::Short) => {}
-            Err(e) => return Err(io::Error::other(format!("a bad frame from the network service: {e:?}"))),
-        }
-        let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return Ok(None);
-        }
-        match s.set_read_timeout(Some(left.max(Duration::from_millis(1)))) {
-            // macos rejects it once the peer has closed; read without waiting
-            Err(e) if e.kind() == io::ErrorKind::InvalidInput => s.set_nonblocking(true)?,
-            r => r?,
-        }
-        let mut chunk = [0u8; 64 << 10];
-        match s.read(&mut chunk) {
-            Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
-            Ok(n) if buf.len() + n > MAX_FRAME + 4 => {
-                return Err(io::Error::other("a frame longer than the network service sends"));
-            }
-            Ok(n) => buf.extend_from_slice(&chunk[..n]),
-            Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => return Ok(None),
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(e),
-        }
-    }
-}
-
+/// How long a request that found the network process gone waits for the
+/// next one.
+const RESTART_WAIT: Duration = Duration::from_secs(10);
 /// A session's cookie partition; never 0, which is the profile's.
 pub(crate) fn partition_of(session: u32) -> u64 {
     u64::from(session) + 1
@@ -134,11 +69,66 @@ impl Net {
                 eprintln!("madcawl-shell: network service: {e}");
             }
         })?;
-        Ok(Net { socket: socket.to_path_buf(), control: Mutex::new(control), downloads: downloads.map(|d| d.0.to_path_buf()) })
+        Ok(Net::new(socket, control, downloads.map(|d| d.0.to_path_buf()), None))
     }
 
+    fn new(socket: &Path, control: Control, downloads: Option<PathBuf>, process: Option<Process>) -> Net {
+        Net { socket: socket.to_path_buf(), control: Mutex::new(control), replaced: Condvar::new(), downloads, process }
+    }
+
+    /// Starts the service in a process of its own, `exe --netd`, and keeps
+    /// it running (see `netproc`); otherwise as `start`.
+    pub fn spawn(exe: &Path, socket: &Path, downloads: Option<(&Path, u64, u64)>, sessions: usize) -> io::Result<Arc<Net>> {
+        let spec = Spec::new(exe, socket, sessions, downloads);
+        let dir = downloads.map(|d| d.0.to_path_buf());
+        netproc::start(spec, |host, pid| {
+            let process = Process::default();
+            process.pid.store(pid, std::sync::atomic::Ordering::SeqCst);
+            Ok(Arc::new(Net::new(socket, Control::new(host, CONTROL_WAIT)?, dir, Some(process))))
+        })
+    }
+
+    /// The network process was replaced by process `pid`, whose control
+    /// channel `host` is.
+    pub(crate) fn replaced(&self, host: UnixStream, pid: i32) {
+        let mut c = self.control.lock().unwrap_or_else(|e| e.into_inner());
+        match Control::new(host, CONTROL_WAIT) {
+            Ok(mut new) => {
+                new.generation = c.generation + 1;
+                *c = new;
+            }
+            Err(e) => eprintln!("madcawl-shell: the new network process's channel: {e}"),
+        }
+        if let Some(p) = &self.process {
+            p.pid.store(pid, std::sync::atomic::Ordering::SeqCst);
+            p.restarts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        drop(c);
+        self.replaced.notify_all();
+    }
+
+    /// The network process will not be started again.
+    pub(crate) fn braked(&self) {
+        self.control.lock().unwrap_or_else(|e| e.into_inner()).braked = true;
+        self.replaced.notify_all();
+    }
+
+    /// One request on the control channel. When the network process is
+    /// found gone, the request waits for the next one and goes to it.
     fn control(&self, f: Frame) -> io::Result<Frame> {
-        self.control.lock().unwrap_or_else(|e| e.into_inner()).request(f)
+        let mut c = self.control.lock().unwrap_or_else(|e| e.into_inner());
+        let generation = c.generation;
+        match c.request(f.clone()) {
+            Err(e) if self.process.is_some() && e.kind() != io::ErrorKind::TimedOut => {
+                let wait = self.replaced.wait_timeout_while(c, RESTART_WAIT, |c| c.generation == generation && !c.braked);
+                let mut c = wait.unwrap_or_else(|e| e.into_inner()).0;
+                if c.generation == generation {
+                    return Err(e);
+                }
+                c.request(f)
+            }
+            r => r,
+        }
     }
 
     /// A connection of the host's own, for one page of agent session
@@ -158,6 +148,18 @@ impl Net {
             Some(f) if f.kind == kind::HELLO && f.get_num(tag::OK) == Some(1) => Ok(conn),
             _ => Err(io::Error::other("the network service refused the host's connection")),
         }
+    }
+
+    /// Sends a FETCH for a page of session `session` on `conn`, connected
+    /// first when it is not; its id. A connection to a network process
+    /// that has since been replaced gets one more try on a new one.
+    pub fn fetch(&self, conn: &mut Option<NetConn>, session: u32, f: Frame) -> io::Result<u64> {
+        if let Some(c) = conn.as_mut()
+            && let Ok(id) = c.fetch(f.clone())
+        {
+            return Ok(id);
+        }
+        conn.insert(self.connect(session)?).fetch(f)
     }
 
     /// Drops a page's registration; its connection is refused after.
@@ -201,55 +203,9 @@ impl NetConn {
     }
 }
 
-fn varint(mut v: u64) -> Vec<u8> {
-    let mut out = Vec::new();
-    while v >= 0x80 {
-        out.push((v as u8) | 0x80);
-        v >>= 7;
-    }
-    out.push(v as u8);
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_late_reply_does_not_answer_the_next_request() {
-        let (host, mut peer) = UnixStream::pair().unwrap();
-        let mut c = Control::new(host, Duration::from_secs(1)).unwrap();
-        let (timed_out_tx, timed_out_rx) = std::sync::mpsc::channel();
-        // the peer answers the first request only once it has timed out,
-        // so the test holds however slowly either thread is scheduled
-        let slow = std::thread::spawn(move || {
-            let first = Frame::read_from(&mut peer).unwrap().unwrap();
-            timed_out_rx.recv().unwrap();
-            let late = Frame::new(kind::REGISTERED).num(tag::ID, first.get_num(tag::ID).unwrap()).bytes(tag::TOKEN, b"session-x-token!");
-            late.write_to(&mut peer).unwrap();
-            let second = Frame::read_from(&mut peer).unwrap().unwrap();
-            let mine = Frame::new(kind::REGISTERED).num(tag::ID, second.get_num(tag::ID).unwrap()).bytes(tag::TOKEN, b"session-y-token!");
-            mine.write_to(&mut peer).unwrap();
-        });
-        let reg = || Frame::new(kind::REGISTER).num(tag::NAVIGATION, 1).num(tag::ID, 1);
-        let timed_out = c.request(reg()).unwrap_err();
-        assert_eq!(timed_out.kind(), io::ErrorKind::TimedOut);
-        timed_out_tx.send(()).unwrap();
-        // the late reply is on the stream ahead of the second one
-        let r = c.request(reg()).unwrap();
-        assert_eq!(r.field(tag::TOKEN), Some(&b"session-y-token!"[..]));
-        slow.join().unwrap();
-    }
-
-    #[test]
-    fn a_reply_written_just_before_the_service_closed_is_read() {
-        let (mut host, mut peer) = UnixStream::pair().unwrap();
-        Frame::new(kind::REGISTERED).num(tag::ID, 7).write_to(&mut peer).unwrap();
-        drop(peer);
-        let mut buf = Vec::new();
-        let f = read_frame(&mut host, &mut buf, Instant::now() + Duration::from_secs(1)).unwrap().unwrap();
-        assert_eq!(f.get_num(tag::ID), Some(7));
-    }
 
     #[test]
     fn no_session_is_in_the_profiles_partition() {

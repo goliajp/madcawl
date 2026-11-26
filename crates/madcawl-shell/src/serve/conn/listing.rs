@@ -44,6 +44,10 @@ impl Conn<'_> {
             s.unread,
             self.shared.pages.load(Ordering::SeqCst),
         );
+        let mut text = text;
+        if let Some(p) = self.shared.net.as_ref().and_then(|n| n.process.as_ref()) {
+            text.push_str(&format!("netd-pid {}\nnetd-restarts {}\n", p.pid(), p.restarts.load(Ordering::SeqCst)));
+        }
         let reply = Frame::new(kind::RESULT).str(tag::TEXT, &text);
         self.log("-", "stats", ("", ""), &reply);
         reply

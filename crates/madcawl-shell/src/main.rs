@@ -266,6 +266,7 @@ fn main() -> ExitCode {
                 None => usage(),
             };
         }
+        ["--netd", rest @ ..] => return serve::netproc::child_main(rest),
         ["reftest", rest @ ..] => {
             return match reftest::command(rest) {
                 Err(None) => usage(),

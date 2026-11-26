@@ -22,6 +22,9 @@ mod loader;
 mod log;
 pub mod memory;
 mod net;
+mod netctl;
+pub mod netproc;
+mod orphan;
 mod page;
 mod reqlog;
 mod shot;
@@ -135,7 +138,11 @@ impl Server {
                 let mut sock = config.socket.clone().into_os_string();
                 sock.push(".net");
                 let d = config.downloads.as_deref().map(|d| (d, config.download_cap, config.download_cap * 4));
-                Some(Arc::new(Net::start(std::path::Path::new(&sock), d, config.max_sessions)?))
+                let sock = std::path::Path::new(&sock);
+                match &config.isolate {
+                    Some(exe) => Some(Net::spawn(exe, sock, d, config.max_sessions)?),
+                    None => Some(Arc::new(Net::start(sock, d, config.max_sessions)?)),
+                }
             }
             false => None,
         };
