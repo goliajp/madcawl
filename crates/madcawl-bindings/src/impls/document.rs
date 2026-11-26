@@ -5,7 +5,11 @@ use madcawl_str::{Atom, DomString};
 use crate::convert::{Thrown, throw_dom};
 use crate::host::DomHost;
 
-pub(crate) use super::parent::{get_elements_by_tag_name, query_selector, query_selector_all};
+pub(crate) use super::collections::{
+    child_element_count, children, first_element_child, get_elements_by_class_name, get_elements_by_tag_name,
+    last_element_child,
+};
+pub(crate) use super::parent::{query_selector, query_selector_all};
 
 pub(crate) fn document_element<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<Option<NodeId>, Thrown> {
     Ok(h.dom.children(this).find(|&c| h.dom.kind(c) == NodeKind::Element))

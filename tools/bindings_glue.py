@@ -1,7 +1,8 @@
 """The Rust glue tools/gen-bindings.py writes for each member: a function
 generic over the engine that converts `this` and calls the member's
-implementation, and the C-ABI shell its table holds; and the IDL types
-and effects in the signature of each table entry."""
+implementation, and the C-ABI shell its table holds; the index getter and
+length of an interface with an indexed getter; and the IDL types and
+effects in the signature of each table entry."""
 import re
 import sys
 
@@ -44,8 +45,8 @@ def glue(fn, iface, body, kind, uses_args=True):
 
 
 STRINGS = ('DOMString', 'DOMString?', '[Atom] DOMString', '[LegacyNullToEmptyString] DOMString')
-# list types a [StaticList] operation returns: the implementation gives a
-# `cv::StaticList`, made an array of wrappers
+# list types: a collection the implementation gives as its side object,
+# and composedPath's sequence, made an array of wrappers
 LISTS = ('NodeList', 'HTMLCollection', 'sequence<EventTarget>')
 
 
@@ -94,3 +95,23 @@ def op_sig(o, names):
     args = ', '.join(f"IdlType::{idl_type(a['type'], names)}" for a in o['args'])
     return (f"Signature {{ args: &[{args}], result: IdlType::{idl_type(o['ret'], names)}, "
             f"effects: {effects(bits)} }}")
+
+
+def interceptor_glue(i, m):
+    n, item = i['name'], ident(i['getter']['name'])
+    if not any(a['name'] == 'length' for a in i['attrs']):
+        sys.exit(f'{n}: an indexed getter needs a length attribute')
+    return [
+        f'fn {m}_index<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, index: u32) -> Owned<E::Value> {{',
+        '    cv::run(e, h, |e, h| {',
+        f'        let this = cv::this_side(e, h, this, &{n}Class::<E>::DEF)?;',
+        f'        impls::{m}::{item}(e, h, this, index).map(lists::OrAbsent)',
+        '    })', '}', '',
+        '// SAFETY: called as the index getter of its table',
+        f'unsafe extern "C" fn {m}_index_abi<E: Engine>(ctx: *mut Ctx, this: u64, index: u32) -> u64 {{ unsafe {{ shell::index(ctx, this, index, {m}_index::<E>) }} }}',
+        '',
+        f'fn {m}_count<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> u32 {{',
+        f'    lists::count(e, h, this, &{n}Class::<E>::DEF, impls::{m}::length)', '}', '',
+        '// SAFETY: called as the length of its table',
+        f'unsafe extern "C" fn {m}_count_abi<E: Engine>(ctx: *mut Ctx, this: u64) -> u32 {{ unsafe {{ shell::count(ctx, this, {m}_count::<E>) }} }}',
+        '']

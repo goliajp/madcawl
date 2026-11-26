@@ -91,6 +91,8 @@ pub struct Dom {
     /// The nodes inserted or removed, once the bindings track them
     /// (`moves.rs`).
     pub(crate) moves: Option<Vec<u32>>,
+    /// Counts the changes to trees and attributes (`tree.rs`).
+    pub(crate) version: u64,
 }
 
 /// An attribute as stored.
@@ -138,6 +140,7 @@ impl Dom {
             by_count: false,
             observer: None,
             moves: None,
+            version: 0,
         };
         dom.doc = dom.new_document(false).expect("room for the document");
         dom
@@ -302,29 +305,6 @@ impl Dom {
         let b = self.n(n.index()).attrs;
         let k = if b == 0 { 0 } else { self.attrs.classes(b) };
         (k, self.tables.list(k))
-    }
-
-    /// The bytes counted against `Limits::bytes`.
-    pub fn bytes(&self) -> usize {
-        self.bytes
-    }
-
-    /// Which limit the DOM has reached, if one.
-    pub fn refused(&self) -> Option<Refused> {
-        if self.cut.is_some() {
-            self.cut
-        } else if self.arena.count() + HEADROOM > self.limits.nodes {
-            Some(Refused::Nodes)
-        } else if self.bytes >= self.limits.bytes {
-            Some(Refused::Bytes)
-        } else {
-            None
-        }
-    }
-
-    /// The parser stopped because the DOM was full.
-    pub fn parser_stopped(&self) -> bool {
-        self.stopped
     }
 }
 

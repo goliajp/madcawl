@@ -51,6 +51,8 @@ pub type SetPropertyCallback =
     Option<unsafe extern "C" fn(JSContextRef, JSObjectRef, JSStringRef, JSValueRef, *mut JSValueRef) -> bool>;
 pub type GetPropertyCallback =
     Option<unsafe extern "C" fn(JSContextRef, JSObjectRef, JSStringRef, *mut JSValueRef) -> JSValueRef>;
+pub type HasPropertyCallback = Option<unsafe extern "C" fn(JSContextRef, JSObjectRef, JSStringRef) -> bool>;
+pub type GetPropertyNamesCallback = Option<unsafe extern "C" fn(JSContextRef, JSObjectRef, JSPropertyNameAccumulatorRef)>;
 pub type CallAsFunctionCallback = Option<
     unsafe extern "C" fn(JSContextRef, JSObjectRef, JSObjectRef, usize, *const JSValueRef, *mut JSValueRef) -> JSValueRef,
 >;
@@ -68,11 +70,11 @@ pub struct JSClassDefinition {
     pub static_functions: *const c_void,
     pub initialize: *const c_void,
     pub finalize: FinalizeCallback,
-    pub has_property: *const c_void,
+    pub has_property: HasPropertyCallback,
     pub get_property: GetPropertyCallback,
     pub set_property: SetPropertyCallback,
     pub delete_property: *const c_void,
-    pub get_property_names: *const c_void,
+    pub get_property_names: GetPropertyNamesCallback,
     pub call_as_function: CallAsFunctionCallback,
     pub call_as_constructor: CallAsConstructorCallback,
     pub has_instance: HasInstanceCallback,
@@ -89,11 +91,11 @@ impl JSClassDefinition {
         static_functions: std::ptr::null(),
         initialize: std::ptr::null(),
         finalize: None,
-        has_property: std::ptr::null(),
+        has_property: None,
         get_property: None,
         set_property: None,
         delete_property: std::ptr::null(),
-        get_property_names: std::ptr::null(),
+        get_property_names: None,
         call_as_function: None,
         call_as_constructor: None,
         has_instance: None,
@@ -204,4 +206,5 @@ unsafe extern "C" {
     pub fn JSStringRelease(s: JSStringRef);
     pub fn JSStringGetLength(s: JSStringRef) -> usize;
     pub fn JSStringGetCharactersPtr(s: JSStringRef) -> *const JSChar;
+    pub fn JSPropertyNameAccumulatorAddName(accumulator: JSPropertyNameAccumulatorRef, name: JSStringRef);
 }

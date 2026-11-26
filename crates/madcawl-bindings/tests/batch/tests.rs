@@ -105,3 +105,8 @@ fn a_custom_event_whose_detail_holds_it_is_freed() {
 fn character_data_is_edited_by_code_unit() {
     batch::character_data_is_edited_by_code_unit::<E>();
 }
+
+#[test]
+fn collections_are_live_and_child_lists_the_same_object() {
+    batch::collections_are_live_and_child_lists_the_same_object::<E>();
+}

@@ -94,17 +94,6 @@ impl<E: Engine, T: IntoJs<E>> IntoJs<E> for Option<T> {
     }
 }
 
-/// A list made when asked for, as an array of wrappers: what an
-/// operation returns until `NodeList` and `HTMLCollection` are bound.
-pub(crate) struct StaticList(pub Vec<NodeId>);
-
-impl<E: Engine> IntoJs<E> for StaticList {
-    fn into_js(self, e: &mut E, h: &mut DomHost<E>) -> Owned<E::Value> {
-        let items: Vec<Owned<E::Value>> = self.0.into_iter().map(|n| h.wrap(e, n)).collect();
-        array_of(e, h, items)
-    }
-}
-
 /// An array of `items`, made by the realm's `Array.of`; their counts are
 /// given back.
 pub(crate) fn array_of<E: Engine>(e: &mut E, h: &mut DomHost<E>, items: Vec<Owned<E::Value>>) -> Owned<E::Value> {

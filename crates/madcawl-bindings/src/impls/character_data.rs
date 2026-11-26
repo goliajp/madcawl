@@ -8,6 +8,8 @@ use madcawl_str::DomString;
 use crate::convert::{Thrown, throw_dom};
 use crate::host::DomHost;
 
+pub(crate) use super::collections::{next_element_sibling, previous_element_sibling};
+
 fn text_of<E: Engine>(h: &DomHost<E>, n: NodeId) -> &DomString {
     h.dom.text(n).expect("character data")
 }

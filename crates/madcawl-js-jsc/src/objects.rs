@@ -79,6 +79,9 @@ pub(crate) struct Classes {
     /// framework answers `Symbol.toStringTag` on a callback object with
     /// its class name, before the prototype chain is looked at.
     pub by_class: std::collections::HashMap<u16, JSClassRef>,
+    /// The index getter and length of each host class whose wrappers
+    /// answer indices (`lists.rs`), by id.
+    pub lists: std::collections::HashMap<u16, crate::lists::ListCalls>,
 }
 
 impl Classes {
@@ -104,18 +107,25 @@ impl Classes {
             }),
             wrapper: make(c"Object", |d| d.finalize = Some(finalize_wrapper)),
             by_class: std::collections::HashMap::new(),
+            lists: std::collections::HashMap::new(),
         }
     }
 
-    /// The class of the wrappers of host class `id`, called `name`.
-    pub(crate) fn wrapper_of(&mut self, id: u16, name: &str) -> JSClassRef {
+    /// The class of the wrappers of host class `id`, called `name`; one
+    /// that answers indices when the class has `list` calls.
+    pub(crate) fn wrapper_of(&mut self, id: u16, name: &str, list: Option<crate::lists::ListCalls>) -> JSClassRef {
         let base = self.wrapper;
+        let lists = &mut self.lists;
         *self.by_class.entry(id).or_insert_with(|| {
             let name = std::ffi::CString::new(name).expect("an interface name has no NUL");
             let mut def = JSClassDefinition::EMPTY;
             def.class_name = name.as_ptr();
             def.attributes = ffi::kJSClassAttributeNoAutomaticPrototype;
             def.parent_class = base;
+            if let Some(calls) = list {
+                crate::lists::add_callbacks(&mut def);
+                lists.insert(id, calls);
+            }
             // SAFETY: a complete definition; the framework copies the name
             unsafe { ffi::JSClassCreate(&def) }
         })

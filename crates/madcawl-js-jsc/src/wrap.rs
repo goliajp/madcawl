@@ -40,7 +40,10 @@ impl Jsc {
             members: Vec::new(),
             shared: self.shared,
         }));
-        let jsclass = self.classes.wrapper_of(class.id.0, class.name);
+        let list = class.chain().find_map(|c| c.interceptors).and_then(|x| {
+            Some(crate::lists::ListCalls::of::<H>(x.index?.get(), x.length?.get()))
+        });
+        let jsclass = self.classes.wrapper_of(class.id.0, class.name, list);
         // SAFETY: the record lives until the host is told the wrapper died
         let w = Value(unsafe { ffi::JSObjectMake(ctx, jsclass, rec.cast()) } as u64);
         // one count for the caller, one that keeps it while strong

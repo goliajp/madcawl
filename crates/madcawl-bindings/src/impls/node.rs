@@ -5,6 +5,8 @@ use madcawl_str::DomString;
 use crate::convert::{Thrown, throw_dom};
 use crate::host::DomHost;
 
+pub(crate) use super::collections::child_nodes;
+
 pub(crate) fn node_type<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<u16, Thrown> {
     Ok(match h.dom.kind(this) {
         NodeKind::Element => 1,

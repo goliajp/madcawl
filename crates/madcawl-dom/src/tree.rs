@@ -45,7 +45,15 @@ impl Dom {
         }
     }
 
+    /// A number that changes whenever a tree, an attribute or a text
+    /// does: what a live collection checks before it trusts the nodes it
+    /// found last.
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
     pub(crate) fn notify(&mut self, change: Change) {
+        self.version += 1;
         // one predictable branch while nothing observes
         if self.observer.is_some() {
             self.record(&change);

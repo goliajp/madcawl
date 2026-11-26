@@ -2,6 +2,7 @@
 //! with converted arguments.
 
 pub(crate) mod character_data;
+pub(crate) mod collections;
 pub(crate) mod custom_event;
 pub(crate) mod document;
 pub(crate) mod document_fragment;
@@ -14,6 +15,14 @@ pub(crate) mod parent;
 
 pub(crate) mod text {
     pub(crate) use super::character_data::{new_text as constructor, split_text, whole_text};
+}
+
+pub(crate) mod node_list {
+    pub(crate) use super::collections::{item, length};
+}
+
+pub(crate) mod html_collection {
+    pub(crate) use super::collections::{item, length, named_item};
 }
 
 pub(crate) mod comment {

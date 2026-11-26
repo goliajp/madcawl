@@ -22,10 +22,11 @@ pub(crate) enum Helper {
     DerefAll = 16,
     Constructor = 17,
     ErrorProto = 18,
+    Iterable = 19,
 }
 
 impl Helper {
-    pub(crate) const LAST: Helper = Helper::ErrorProto;
+    pub(crate) const LAST: Helper = Helper::Iterable;
 }
 
 // Page script runs in the realm and may replace any global or
@@ -46,6 +47,9 @@ pub(crate) const HELPERS: &str = r#"(function () {
     dp(f, 'length', ({ __proto__: null, value: l, configurable: true }));
   };
   const errors = [TypeError, RangeError, SyntaxError, ReferenceError];
+  const AP = Array.prototype;
+  const iterating = [['entries', AP.entries], ['keys', AP.keys], ['values', AP.values], ['forEach', AP.forEach]];
+  const iterator = Symbol.iterator;
   const then = Promise.prototype.then;
   const resolved = Promise.resolve();
   // `then` reads the promise's constructor for its species: an own
@@ -188,5 +192,14 @@ pub(crate) const HELPERS: &str = r#"(function () {
       return apply(bind, inner, [undefined]);
     },
     Error.prototype,
+    // prototype object `p` of a class with an index getter gets
+    // `Array.prototype`'s iterator, and with `all` (a value iterator)
+    // its entries, keys, values and forEach
+    (p, all) => {
+      dp(p, iterator, ({ __proto__: null, value: iterating[2][1], writable: true, configurable: true }));
+      for (let i = 0; all && i < 4; i++) {
+        dp(p, iterating[i][0], ({ __proto__: null, value: iterating[i][1], writable: true, enumerable: true, configurable: true }));
+      }
+    },
   ];
 })()"#;

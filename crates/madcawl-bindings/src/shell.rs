@@ -43,3 +43,24 @@ pub(crate) unsafe fn set<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, 
     let ((e, h), args) = unsafe { (Ctx::parts::<E, DomHost<E>>(ctx), E::values(argv, argc)) };
     E::to_bits(f(e, h, E::from_bits(this), arg::<E>(args, 0)).into_raw())
 }
+
+pub(crate) type Index<E> = fn(&mut E, &mut DomHost<E>, Value<E>, u32) -> Owned<Value<E>>;
+pub(crate) type Count<E> = fn(&mut E, &mut DomHost<E>, Value<E>) -> u32;
+
+/// # Safety
+/// As for [`op`], with no arguments.
+#[inline(always)]
+pub(crate) unsafe fn index<E: Engine>(ctx: *mut Ctx, this: u64, index: u32, f: Index<E>) -> u64 {
+    // SAFETY: the caller's
+    let (e, h) = unsafe { Ctx::parts::<E, DomHost<E>>(ctx) };
+    E::to_bits(f(e, h, E::from_bits(this), index).into_raw())
+}
+
+/// # Safety
+/// As for [`index`].
+#[inline(always)]
+pub(crate) unsafe fn count<E: Engine>(ctx: *mut Ctx, this: u64, f: Count<E>) -> u32 {
+    // SAFETY: the caller's
+    let (e, h) = unsafe { Ctx::parts::<E, DomHost<E>>(ctx) };
+    f(e, h, E::from_bits(this))
+}

@@ -1,4 +1,4 @@
-//! Host objects that are not nodes: events so far. Each is a box that
+//! Host objects that are not nodes: events, collections and the like. Each is a box that
 //! starts with the engine's 8-byte object header and a wrapper word, as
 //! a node slot does, so the engine treats it as it treats a node: the
 //! wrapper holds it by a count, and the collector asks for its edges.
@@ -31,19 +31,25 @@ pub(crate) enum SideData {
     /// `side_listeners`.
     Target,
     DomException(crate::impls::dom_exception::DomException),
+    /// A `NodeList` or `HTMLCollection` (`lists.rs`).
+    List(crate::lists::ListState),
 }
 
 impl SideData {
     /// The targets it holds by count, for `traverse`.
     pub(crate) fn held(&self, f: &mut impl FnMut(&Held)) {
-        if let SideData::Event(ev) = self {
-            ev.held(f);
+        match self {
+            SideData::Event(ev) => ev.held(f),
+            SideData::List(l) => l.held(f),
+            _ => {}
         }
     }
 
     pub(crate) fn release(&mut self, out: &mut Vec<Held>) {
-        if let SideData::Event(ev) = self {
-            ev.release(out);
+        match self {
+            SideData::Event(ev) => ev.release(out),
+            SideData::List(l) => l.release(out),
+            _ => {}
         }
     }
 }
@@ -176,6 +182,9 @@ impl<E: Engine> DomHost<E> {
         let changed = !zero.is_empty();
         for addr in zero {
             let live = self.sides.map.get(&addr).is_some_and(|s| abi::refcount(s.header) == 0);
+            if live {
+                self.forget_list(SideRef(addr));
+            }
             if live && let Some(mut s) = self.sides.map.remove(&addr) {
                 s.data.release(&mut held);
                 if let Some(mut d) = self.details.remove(&SideRef(addr)) {

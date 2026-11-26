@@ -48,7 +48,9 @@ impl<E: Engine> DomHost<E> {
     }
 
     /// On an engine that places wrappers, keep the wrapper of the target
-    /// of event `r` as a member of the event's wrapper `event`: script
+    /// of event `r` as a member of the event's wrapper `event` (of a
+    /// collection: its root's wrapper, or an array of a fixed one's
+    /// nodes' wrappers, the same way): script
     /// that reaches the event reaches the target's tree, with what it
     /// put there, and a cycle back through script (a listener keeping
     /// the event, the target keeping it in a property) is one the
@@ -62,12 +64,30 @@ impl<E: Engine> DomHost<E> {
         if let Some(mut m) = self.target_edges.remove(&r) {
             m.clear(e);
         }
-        let SideData::Event(ev) = &self.sides.get(r).data else { return };
-        let t = match ev.target.as_ref().map(Held::target) {
-            Some(t @ (Target::Node(_) | Target::Side(_))) => t,
+        let w = match &self.sides.get(r).data {
+            SideData::Event(ev) => match ev.target.as_ref().map(Held::target) {
+                Some(t @ (Target::Node(_) | Target::Side(_))) => t.into_js(e, self),
+                _ => return,
+            },
+            SideData::List(l) => match l.root.as_ref().map(Held::target) {
+                Some(t) => t.into_js(e, self),
+                None => {
+                    let nodes = self.list_nodes(r);
+                    let items = nodes.into_iter().map(|n| self.wrap(e, n)).collect();
+                    crate::convert::array_of(e, self, items)
+                }
+            },
             _ => return,
         };
-        let w = t.into_js(e, self);
+        // a page that replaced `Array.of` gets a fixed collection whose
+        // nodes' trees it does not keep
+        if E::is_thrown(w.get()) {
+            let _sentinel = w.into_raw();
+            if let Some(x) = e.take_exception() {
+                e.release(x);
+            }
+            return;
+        }
         let m = madcawl_js::Member::of(e, event, w.get());
         e.release(w);
         self.target_edges.insert(r, m);

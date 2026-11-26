@@ -19,12 +19,17 @@ The parser reads the subset of Web IDL the files use: interfaces with
 a parent, a constructor, constants, attributes, operations with
 optional arguments and defaults (boolean, string literals, and
 null for `any`),
-nullable types, and extended attribute
+nullable types, an indexed `getter` operation with an `iterable<T>`
+declaration, and extended attribute
 lists (only `[HostOps]`, `[Side]` (its objects are not nodes),
 `[Targets]` (nodes, and side objects of its own) and `[ErrorPrototype]`
 (its prototype object inherits from Error.prototype) on an interface, `[Atom]` on an argument, and `[CEReactions]` and
-`[NewObject]` on a member are acted on; `[StaticList]` documents a list
-result).
+`[NewObject]` on a member are acted on; `[SameObject]` documents the
+implementation's caching).
+An interface with a `getter` operation of one `unsigned long` argument
+gets interceptors: its index getter calls the operation's
+implementation and gives no property for `None`, and its length calls
+the implementation of its `length` attribute.
 A `[Atom] DOMString` argument is a name, such as an event type: the
 implementation gets an atom made from the value, with no string block
 for a short string.
@@ -41,7 +46,7 @@ check.
 import re
 import sys
 
-from bindings_glue import glue, ident, idl_type, op_sig, setter_effects, snake
+from bindings_glue import glue, ident, idl_type, interceptor_glue, op_sig, setter_effects, snake
 
 # the conversion of an argument of each IDL type; interface types are
 # converted by `convert`
@@ -70,13 +75,18 @@ def parse(text):
                  'side': bool(ext and re.search(r'\bSide\b', ext)),
                  'targets': bool(ext and re.search(r'\bTargets\b', ext)),
                  'error_proto': bool(ext and re.search(r'\bErrorPrototype\b', ext)), 'consts': [], 'attrs': [], 'ops': [],
-                 'ctor': None}
+                 'ctor': None, 'getter': None, 'iterable': False}
         for member in body.split(';'):
             ext = re.match(r'^\s*\[([^\]]*)\]', member)
             flags = set(re.findall(r'\w+', ext.group(1))) if ext else set()
             member = re.sub(r'^\s*\[[^\]]*\]', '', member).strip()
             if not member:
                 continue
+            if re.fullmatch(r'iterable\s*<\s*\w+\s*>', member):
+                iface['iterable'] = True
+                continue
+            getter = member.startswith('getter ')
+            member = member[len('getter '):] if getter else member
             if member.startswith('const '):
                 c = re.fullmatch(r'const\s+(.+?)\s+(\w+)\s*=\s*(\S+)', member)
                 iface['consts'].append((c.group(2), c.group(3)))
@@ -93,6 +103,10 @@ def parse(text):
                     args.append({'type': ('[Atom] ' if a.group(1) else '') + a.group(3), 'name': a.group(4),
                                  'optional': bool(a.group(2)), 'default': a.group(5)})
                 op = {'name': o.group(2), 'ret': o.group(1), 'args': args, 'flags': flags}
+                if getter:
+                    if [a['type'] for a in args] != ['unsigned long']:
+                        sys.exit(f"{name}.{op['name']}: only an indexed getter is supported")
+                    iface['getter'] = op
                 if ctor:
                     iface['ctor'] = op
                 else:
@@ -141,9 +155,9 @@ def emit(ifaces, sources):
            '//! The class tables of the bound interfaces, and the glue between',
            '//! script values and the implementations in `impls`.', '',
            'use std::marker::PhantomData;', '',
-           'use madcawl_js::{', '    Attribute, AttributeSig, Bound, ClassDef, ClassId, Constant, Ctx, Effects, Engine, IdlType, Operation, Owned,',
-           '    Signature,', '};', '',
-           'use crate::convert as cv;', 'use crate::gc::NodeOps;', 'use crate::host::DomHost;', 'use crate::impls;',
+           'use madcawl_js::{', '    Attribute, AttributeSig, Bound, ClassDef, ClassId, Constant, Ctx, Effects, Engine, IdlType, Interceptors,',
+           '    Operation, Owned, Signature,', '};', '',
+           'use crate::convert as cv;', 'use crate::gc::NodeOps;', 'use crate::host::DomHost;', 'use crate::impls;', 'use crate::lists;',
            'use crate::shell;', 'use crate::side_ops::SideOps;', '']
     for i in sorted(ifaces, key=lambda i: i['id']):
         n, m = i['name'], snake(i['name'])
@@ -172,8 +186,18 @@ def emit(ifaces, sources):
         ops_of = 'Some(&SideOps::<E>::OPS)' if i['side'] or i['targets'] else 'Some(&NodeOps::<E>::OPS)' if i['host_ops'] else 'None'
         ctor = f"Some(unsafe {{ Bound::host_fn({m}_constructor_abi::<E>) }})" if i['ctor'] else 'None'
         length = sum(1 for a in i['ctor']['args'] if not a['optional']) if i['ctor'] else 0
-        out += ['        interceptors: None,', f"        ops: {ops_of},", f'        constructor: {ctor},', f'        length: {length},',
-                f"        error_prototype: {'true' if i['error_proto'] else 'false'},", '    };', '}', '']
+        icpt = 'Some(&Self::INTERCEPTORS)' if i['getter'] else 'None'
+        out += [f'        interceptors: {icpt},', f"        ops: {ops_of},", f'        constructor: {ctor},', f'        length: {length},',
+                f"        error_prototype: {'true' if i['error_proto'] else 'false'},", '    };']
+        if i['getter']:
+            out += ['', '    // SAFETY: as for DEF',
+                    '    const INTERCEPTORS: Interceptors<E, DomHost<E>> = Interceptors {',
+                    f'        index: Some(unsafe {{ Bound::index({m}_index_abi::<E>) }}),',
+                    f'        length: Some(unsafe {{ Bound::length({m}_count_abi::<E>) }}),',
+                    f"        iterable: {'true' if i['iterable'] else 'false'},", '    };']
+        out += ['}', '']
+        if i['getter']:
+            out += interceptor_glue(i, m)
         for a in i['attrs']:
             out += glue(f"{m}_get_{snake(a['name'])}", i,
                         [f"impls::{m}::{ident(a['name'])}(e, h, this)"], 'get')

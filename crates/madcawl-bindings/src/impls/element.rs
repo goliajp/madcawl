@@ -5,7 +5,11 @@ use madcawl_str::{Atom, DomString};
 use crate::convert::{Thrown, throw_dom};
 use crate::host::DomHost;
 
-pub(crate) use super::parent::{get_elements_by_tag_name, query_selector, query_selector_all};
+pub(crate) use super::collections::{
+    child_element_count, children, first_element_child, get_elements_by_class_name, get_elements_by_tag_name,
+    last_element_child, next_element_sibling, previous_element_sibling,
+};
+pub(crate) use super::parent::{query_selector, query_selector_all};
 
 /// An HTML element's name in ASCII upper case; others' as they are.
 pub(crate) fn html_upper(dom: &Dom, el: NodeId) -> DomString {

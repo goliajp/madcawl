@@ -5,14 +5,15 @@
 use std::marker::PhantomData;
 
 use madcawl_js::{
-    Attribute, AttributeSig, Bound, ClassDef, ClassId, Constant, Ctx, Effects, Engine, IdlType, Operation, Owned,
-    Signature,
+    Attribute, AttributeSig, Bound, ClassDef, ClassId, Constant, Ctx, Effects, Engine, IdlType, Interceptors,
+    Operation, Owned, Signature,
 };
 
 use crate::convert as cv;
 use crate::gc::NodeOps;
 use crate::host::DomHost;
 use crate::impls;
+use crate::lists;
 use crate::shell;
 use crate::side_ops::SideOps;
 
@@ -105,6 +106,7 @@ impl<E: Engine> NodeClass<E> {
             Attribute { name: "ownerDocument", get: unsafe { Bound::host_fn(node_get_owner_document_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "parentNode", get: unsafe { Bound::host_fn(node_get_parent_node_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "parentElement", get: unsafe { Bound::host_fn(node_get_parent_element_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "childNodes", get: unsafe { Bound::host_fn(node_get_child_nodes_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Object, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "firstChild", get: unsafe { Bound::host_fn(node_get_first_child_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "lastChild", get: unsafe { Bound::host_fn(node_get_last_child_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "previousSibling", get: unsafe { Bound::host_fn(node_get_previous_sibling_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
@@ -194,6 +196,16 @@ fn node_get_parent_element<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Va
 
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn node_get_parent_element_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, node_get_parent_element::<E>) } }
+
+fn node_get_child_nodes<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &NodeClass::<E>::DEF)?;
+        impls::node::child_nodes(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_get_child_nodes_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, node_get_child_nodes::<E>) } }
 
 fn node_get_first_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -329,15 +341,22 @@ impl<E: Engine> ElementClass<E> {
             Attribute { name: "tagName", get: unsafe { Bound::host_fn(element_get_tag_name_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "id", get: unsafe { Bound::host_fn(element_get_id_abi::<E>) }, set: Some(unsafe { Bound::host_fn(element_set_id_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
             Attribute { name: "className", get: unsafe { Bound::host_fn(element_get_class_name_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "previousElementSibling", get: unsafe { Bound::host_fn(element_get_previous_element_sibling_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "nextElementSibling", get: unsafe { Bound::host_fn(element_get_next_element_sibling_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "children", get: unsafe { Bound::host_fn(element_get_children_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Object, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "firstElementChild", get: unsafe { Bound::host_fn(element_get_first_element_child_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "lastElementChild", get: unsafe { Bound::host_fn(element_get_last_element_child_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "childElementCount", get: unsafe { Bound::host_fn(element_get_child_element_count_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
         ],
         operations: &[
             Operation { name: "getAttribute", length: 1, call: unsafe { Bound::host_fn(element_get_attribute_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::NullableString, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
             Operation { name: "hasAttribute", length: 1, call: unsafe { Bound::host_fn(element_has_attribute_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Boolean, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
             Operation { name: "setAttribute", length: 2, call: unsafe { Bound::host_fn(element_set_attribute_abi::<E>) }, sig: Signature { args: &[IdlType::String, IdlType::String], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+            Operation { name: "getElementsByTagName", length: 1, call: unsafe { Bound::host_fn(element_get_elements_by_tag_name_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "getElementsByClassName", length: 1, call: unsafe { Bound::host_fn(element_get_elements_by_class_name_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
             Operation { name: "remove", length: 0, call: unsafe { Bound::host_fn(element_remove_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::WRITES) } },
             Operation { name: "querySelector", length: 1, call: unsafe { Bound::host_fn(element_query_selector_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::NullableObject, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
-            Operation { name: "querySelectorAll", length: 1, call: unsafe { Bound::host_fn(element_query_selector_all_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
-            Operation { name: "getElementsByTagName", length: 1, call: unsafe { Bound::host_fn(element_get_elements_by_tag_name_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "querySelectorAll", length: 1, call: unsafe { Bound::host_fn(element_query_selector_all_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::NEW_OBJECT) } },
         ],
         constants: &[],
         interceptors: None,
@@ -399,6 +418,66 @@ fn element_get_class_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Val
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn element_get_class_name_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, element_get_class_name::<E>) } }
 
+fn element_get_previous_element_sibling<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
+        impls::element::previous_element_sibling(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_get_previous_element_sibling_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, element_get_previous_element_sibling::<E>) } }
+
+fn element_get_next_element_sibling<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
+        impls::element::next_element_sibling(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_get_next_element_sibling_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, element_get_next_element_sibling::<E>) } }
+
+fn element_get_children<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
+        impls::element::children(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_get_children_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, element_get_children::<E>) } }
+
+fn element_get_first_element_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
+        impls::element::first_element_child(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_get_first_element_child_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, element_get_first_element_child::<E>) } }
+
+fn element_get_last_element_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
+        impls::element::last_element_child(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_get_last_element_child_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, element_get_last_element_child::<E>) } }
+
+fn element_get_child_element_count<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
+        impls::element::child_element_count(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_get_child_element_count_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, element_get_child_element_count::<E>) } }
+
 fn element_get_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
@@ -436,6 +515,30 @@ fn element_set_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Valu
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn element_set_attribute_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_set_attribute::<E>) } }
 
+fn element_get_elements_by_tag_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        impls::element::get_elements_by_tag_name(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_get_elements_by_tag_name_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_get_elements_by_tag_name::<E>) } }
+
+fn element_get_elements_by_class_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        impls::element::get_elements_by_class_name(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_get_elements_by_class_name_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_get_elements_by_class_name::<E>) } }
+
 fn element_remove<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
@@ -470,18 +573,6 @@ fn element_query_selector_all<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E:
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn element_query_selector_all_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_query_selector_all::<E>) } }
 
-fn element_get_elements_by_tag_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
-    cv::run(e, h, |e, h| {
-        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
-        cv::need(e, args, 1)?;
-        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
-        impls::element::get_elements_by_tag_name(e, h, this, a0)
-    })
-}
-
-// SAFETY: called as the host function of its table entry
-unsafe extern "C" fn element_get_elements_by_tag_name_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_get_elements_by_tag_name::<E>) } }
-
 pub struct DocumentClass<E>(PhantomData<E>);
 
 impl<E: Engine> DocumentClass<E> {
@@ -493,6 +584,10 @@ impl<E: Engine> DocumentClass<E> {
         parent: Some(&NodeClass::<E>::DEF),
         attributes: &[
             Attribute { name: "documentElement", get: unsafe { Bound::host_fn(document_get_document_element_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "children", get: unsafe { Bound::host_fn(document_get_children_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Object, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "firstElementChild", get: unsafe { Bound::host_fn(document_get_first_element_child_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "lastElementChild", get: unsafe { Bound::host_fn(document_get_last_element_child_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "childElementCount", get: unsafe { Bound::host_fn(document_get_child_element_count_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
         ],
         operations: &[
             Operation { name: "createElement", length: 1, call: unsafe { Bound::host_fn(document_create_element_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::NEW_OBJECT) } },
@@ -500,10 +595,11 @@ impl<E: Engine> DocumentClass<E> {
             Operation { name: "createTextNode", length: 1, call: unsafe { Bound::host_fn(document_create_text_node_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::NEW_OBJECT) } },
             Operation { name: "createComment", length: 1, call: unsafe { Bound::host_fn(document_create_comment_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::NEW_OBJECT) } },
             Operation { name: "getElementById", length: 1, call: unsafe { Bound::host_fn(document_get_element_by_id_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::NullableObject, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "getElementsByTagName", length: 1, call: unsafe { Bound::host_fn(document_get_elements_by_tag_name_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "getElementsByClassName", length: 1, call: unsafe { Bound::host_fn(document_get_elements_by_class_name_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
             Operation { name: "createEvent", length: 1, call: unsafe { Bound::host_fn(document_create_event_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::NEW_OBJECT) } },
             Operation { name: "querySelector", length: 1, call: unsafe { Bound::host_fn(document_query_selector_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::NullableObject, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
-            Operation { name: "querySelectorAll", length: 1, call: unsafe { Bound::host_fn(document_query_selector_all_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
-            Operation { name: "getElementsByTagName", length: 1, call: unsafe { Bound::host_fn(document_get_elements_by_tag_name_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "querySelectorAll", length: 1, call: unsafe { Bound::host_fn(document_query_selector_all_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::NEW_OBJECT) } },
             Operation { name: "write", length: 1, call: unsafe { Bound::host_fn(document_write_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
         ],
         constants: &[],
@@ -524,6 +620,46 @@ fn document_get_document_element<E: Engine>(e: &mut E, h: &mut DomHost<E>, this:
 
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn document_get_document_element_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, document_get_document_element::<E>) } }
+
+fn document_get_children<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
+        impls::document::children(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_get_children_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, document_get_children::<E>) } }
+
+fn document_get_first_element_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
+        impls::document::first_element_child(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_get_first_element_child_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, document_get_first_element_child::<E>) } }
+
+fn document_get_last_element_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
+        impls::document::last_element_child(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_get_last_element_child_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, document_get_last_element_child::<E>) } }
+
+fn document_get_child_element_count<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
+        impls::document::child_element_count(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_get_child_element_count_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, document_get_child_element_count::<E>) } }
 
 fn document_create_element<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -583,6 +719,30 @@ fn document_get_element_by_id<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E:
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn document_get_element_by_id_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, document_get_element_by_id::<E>) } }
 
+fn document_get_elements_by_tag_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        impls::document::get_elements_by_tag_name(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_get_elements_by_tag_name_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, document_get_elements_by_tag_name::<E>) } }
+
+fn document_get_elements_by_class_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        impls::document::get_elements_by_class_name(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_get_elements_by_class_name_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, document_get_elements_by_class_name::<E>) } }
+
 fn document_create_event<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
@@ -619,18 +779,6 @@ fn document_query_selector_all<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn document_query_selector_all_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, document_query_selector_all::<E>) } }
 
-fn document_get_elements_by_tag_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
-    cv::run(e, h, |e, h| {
-        let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
-        cv::need(e, args, 1)?;
-        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
-        impls::document::get_elements_by_tag_name(e, h, this, a0)
-    })
-}
-
-// SAFETY: called as the host function of its table entry
-unsafe extern "C" fn document_get_elements_by_tag_name_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, document_get_elements_by_tag_name::<E>) } }
-
 fn document_write<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
@@ -652,11 +800,16 @@ impl<E: Engine> DocumentFragmentClass<E> {
         id: ClassId(5),
         last: ClassId(5),
         parent: Some(&NodeClass::<E>::DEF),
-        attributes: &[],
+        attributes: &[
+            Attribute { name: "children", get: unsafe { Bound::host_fn(document_fragment_get_children_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Object, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "firstElementChild", get: unsafe { Bound::host_fn(document_fragment_get_first_element_child_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "lastElementChild", get: unsafe { Bound::host_fn(document_fragment_get_last_element_child_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "childElementCount", get: unsafe { Bound::host_fn(document_fragment_get_child_element_count_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
+        ],
         operations: &[
             Operation { name: "getElementById", length: 1, call: unsafe { Bound::host_fn(document_fragment_get_element_by_id_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::NullableObject, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
             Operation { name: "querySelector", length: 1, call: unsafe { Bound::host_fn(document_fragment_query_selector_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::NullableObject, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
-            Operation { name: "querySelectorAll", length: 1, call: unsafe { Bound::host_fn(document_fragment_query_selector_all_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "querySelectorAll", length: 1, call: unsafe { Bound::host_fn(document_fragment_query_selector_all_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::NEW_OBJECT) } },
         ],
         constants: &[],
         interceptors: None,
@@ -666,6 +819,46 @@ impl<E: Engine> DocumentFragmentClass<E> {
         error_prototype: false,
     };
 }
+
+fn document_fragment_get_children<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &DocumentFragmentClass::<E>::DEF)?;
+        impls::document_fragment::children(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_fragment_get_children_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, document_fragment_get_children::<E>) } }
+
+fn document_fragment_get_first_element_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &DocumentFragmentClass::<E>::DEF)?;
+        impls::document_fragment::first_element_child(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_fragment_get_first_element_child_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, document_fragment_get_first_element_child::<E>) } }
+
+fn document_fragment_get_last_element_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &DocumentFragmentClass::<E>::DEF)?;
+        impls::document_fragment::last_element_child(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_fragment_get_last_element_child_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, document_fragment_get_last_element_child::<E>) } }
+
+fn document_fragment_get_child_element_count<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &DocumentFragmentClass::<E>::DEF)?;
+        impls::document_fragment::child_element_count(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_fragment_get_child_element_count_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, document_fragment_get_child_element_count::<E>) } }
 
 fn document_fragment_get_element_by_id<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -724,6 +917,8 @@ impl<E: Engine> CharacterDataClass<E> {
         attributes: &[
             Attribute { name: "data", get: unsafe { Bound::host_fn(character_data_get_data_abi::<E>) }, set: Some(unsafe { Bound::host_fn(character_data_set_data_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
             Attribute { name: "length", get: unsafe { Bound::host_fn(character_data_get_length_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "previousElementSibling", get: unsafe { Bound::host_fn(character_data_get_previous_element_sibling_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "nextElementSibling", get: unsafe { Bound::host_fn(character_data_get_next_element_sibling_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
         ],
         operations: &[
             Operation { name: "substringData", length: 2, call: unsafe { Bound::host_fn(character_data_substring_data_abi::<E>) }, sig: Signature { args: &[IdlType::Number, IdlType::Number], result: IdlType::String, effects: Effects::THROWS } },
@@ -772,6 +967,26 @@ fn character_data_get_length<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::
 
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn character_data_get_length_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, character_data_get_length::<E>) } }
+
+fn character_data_get_previous_element_sibling<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &CharacterDataClass::<E>::DEF)?;
+        impls::character_data::previous_element_sibling(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn character_data_get_previous_element_sibling_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, character_data_get_previous_element_sibling::<E>) } }
+
+fn character_data_get_next_element_sibling<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &CharacterDataClass::<E>::DEF)?;
+        impls::character_data::next_element_sibling(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn character_data_get_next_element_sibling_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, character_data_get_next_element_sibling::<E>) } }
 
 fn character_data_substring_data<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -1348,3 +1563,156 @@ fn custom_event_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::
 
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn custom_event_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, custom_event_constructor::<E>) } }
+
+pub struct NodeListClass<E>(PhantomData<E>);
+
+impl<E: Engine> NodeListClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "NodeList",
+        id: ClassId(12),
+        last: ClassId(12),
+        parent: None,
+        attributes: &[
+            Attribute { name: "length", get: unsafe { Bound::host_fn(node_list_get_length_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
+        ],
+        operations: &[
+            Operation { name: "item", length: 1, call: unsafe { Bound::host_fn(node_list_item_abi::<E>) }, sig: Signature { args: &[IdlType::Number], result: IdlType::NullableObject, effects: Effects::THROWS } },
+        ],
+        constants: &[],
+        interceptors: Some(&Self::INTERCEPTORS),
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: None,
+        length: 0,
+        error_prototype: false,
+    };
+
+    // SAFETY: as for DEF
+    const INTERCEPTORS: Interceptors<E, DomHost<E>> = Interceptors {
+        index: Some(unsafe { Bound::index(node_list_index_abi::<E>) }),
+        length: Some(unsafe { Bound::length(node_list_count_abi::<E>) }),
+        iterable: true,
+    };
+}
+
+fn node_list_index<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, index: u32) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &NodeListClass::<E>::DEF)?;
+        impls::node_list::item(e, h, this, index).map(lists::OrAbsent)
+    })
+}
+
+// SAFETY: called as the index getter of its table
+unsafe extern "C" fn node_list_index_abi<E: Engine>(ctx: *mut Ctx, this: u64, index: u32) -> u64 { unsafe { shell::index(ctx, this, index, node_list_index::<E>) } }
+
+fn node_list_count<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> u32 {
+    lists::count(e, h, this, &NodeListClass::<E>::DEF, impls::node_list::length)
+}
+
+// SAFETY: called as the length of its table
+unsafe extern "C" fn node_list_count_abi<E: Engine>(ctx: *mut Ctx, this: u64) -> u32 { unsafe { shell::count(ctx, this, node_list_count::<E>) } }
+
+fn node_list_get_length<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &NodeListClass::<E>::DEF)?;
+        impls::node_list::length(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_list_get_length_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, node_list_get_length::<E>) } }
+
+fn node_list_item<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &NodeListClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::to_uint32(e, h, cv::arg::<E>(args, 0))?;
+        impls::node_list::item(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn node_list_item_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, node_list_item::<E>) } }
+
+pub struct HTMLCollectionClass<E>(PhantomData<E>);
+
+impl<E: Engine> HTMLCollectionClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "HTMLCollection",
+        id: ClassId(13),
+        last: ClassId(13),
+        parent: None,
+        attributes: &[
+            Attribute { name: "length", get: unsafe { Bound::host_fn(html_collection_get_length_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
+        ],
+        operations: &[
+            Operation { name: "item", length: 1, call: unsafe { Bound::host_fn(html_collection_item_abi::<E>) }, sig: Signature { args: &[IdlType::Number], result: IdlType::NullableObject, effects: Effects::THROWS } },
+            Operation { name: "namedItem", length: 1, call: unsafe { Bound::host_fn(html_collection_named_item_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::NullableObject, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+        ],
+        constants: &[],
+        interceptors: Some(&Self::INTERCEPTORS),
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: None,
+        length: 0,
+        error_prototype: false,
+    };
+
+    // SAFETY: as for DEF
+    const INTERCEPTORS: Interceptors<E, DomHost<E>> = Interceptors {
+        index: Some(unsafe { Bound::index(html_collection_index_abi::<E>) }),
+        length: Some(unsafe { Bound::length(html_collection_count_abi::<E>) }),
+        iterable: false,
+    };
+}
+
+fn html_collection_index<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, index: u32) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &HTMLCollectionClass::<E>::DEF)?;
+        impls::html_collection::item(e, h, this, index).map(lists::OrAbsent)
+    })
+}
+
+// SAFETY: called as the index getter of its table
+unsafe extern "C" fn html_collection_index_abi<E: Engine>(ctx: *mut Ctx, this: u64, index: u32) -> u64 { unsafe { shell::index(ctx, this, index, html_collection_index::<E>) } }
+
+fn html_collection_count<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> u32 {
+    lists::count(e, h, this, &HTMLCollectionClass::<E>::DEF, impls::html_collection::length)
+}
+
+// SAFETY: called as the length of its table
+unsafe extern "C" fn html_collection_count_abi<E: Engine>(ctx: *mut Ctx, this: u64) -> u32 { unsafe { shell::count(ctx, this, html_collection_count::<E>) } }
+
+fn html_collection_get_length<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &HTMLCollectionClass::<E>::DEF)?;
+        impls::html_collection::length(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_collection_get_length_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, html_collection_get_length::<E>) } }
+
+fn html_collection_item<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &HTMLCollectionClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::to_uint32(e, h, cv::arg::<E>(args, 0))?;
+        impls::html_collection::item(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_collection_item_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, html_collection_item::<E>) } }
+
+fn html_collection_named_item<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &HTMLCollectionClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        impls::html_collection::named_item(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_collection_named_item_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, html_collection_named_item::<E>) } }

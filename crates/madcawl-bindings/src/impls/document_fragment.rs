@@ -8,6 +8,7 @@ use madcawl_str::DomString;
 use crate::convert::{Thrown, throw_dom};
 use crate::host::DomHost;
 
+pub(crate) use super::collections::{child_element_count, children, first_element_child, last_element_child};
 pub(crate) use super::parent::{query_selector, query_selector_all};
 
 pub(crate) fn constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>) -> Result<NodeId, Thrown> {

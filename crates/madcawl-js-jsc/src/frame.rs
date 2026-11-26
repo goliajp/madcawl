@@ -45,3 +45,10 @@ pub(crate) fn enter<H: madcawl_js::Host<Jsc>>(engine: *mut Jsc, host: *mut H) ->
 pub(crate) fn current() -> Frame {
     FRAME.with(Cell::get).expect("a callback from JavaScriptCore inside an engine call that took the host")
 }
+
+/// The frame of the engine call in progress, if there is one: a
+/// property callback can also be reached from the adapter's own calls,
+/// which take no host.
+pub(crate) fn try_current() -> Option<Frame> {
+    FRAME.with(Cell::get)
+}

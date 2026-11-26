@@ -1,6 +1,7 @@
 //! How much one DOM may hold.
 
 use crate::arena::SLOTS;
+use crate::dom::Dom;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
@@ -39,4 +40,29 @@ impl Default for Limits {
 pub enum Refused {
     Nodes,
     Bytes,
+}
+
+impl Dom {
+    /// The bytes counted against `Limits::bytes`.
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    /// Which limit the DOM has reached, if one.
+    pub fn refused(&self) -> Option<Refused> {
+        if self.cut.is_some() {
+            self.cut
+        } else if self.arena.count() + HEADROOM > self.limits.nodes {
+            Some(Refused::Nodes)
+        } else if self.bytes >= self.limits.bytes {
+            Some(Refused::Bytes)
+        } else {
+            None
+        }
+    }
+
+    /// The parser stopped because the DOM was full.
+    pub fn parser_stopped(&self) -> bool {
+        self.stopped
+    }
 }

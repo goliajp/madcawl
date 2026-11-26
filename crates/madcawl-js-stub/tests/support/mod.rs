@@ -31,7 +31,7 @@ pub static OPS: HostOps<Stub, Log> = HostOps {
 };
 
 // SAFETY: these functions read their context as Stub and Log
-pub static INTERCEPTORS: Interceptors<Stub, Log> = Interceptors { index: Some(unsafe { Bound::index(item) }), length: None };
+pub static INTERCEPTORS: Interceptors<Stub, Log> = Interceptors { index: Some(unsafe { Bound::index(item) }), length: None, iterable: false };
 
 pub static CLASS: ClassDef<Stub, Log> = ClassDef {
     name: "List",

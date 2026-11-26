@@ -118,6 +118,7 @@ interface Node : EventTarget {
   readonly attribute Node? parentNode;
   readonly attribute Element? parentElement;
   boolean hasChildNodes();
+  [SameObject] readonly attribute NodeList childNodes;
   readonly attribute Node? firstChild;
   readonly attribute Node? lastChild;
   readonly attribute Node? previousSibling;
@@ -144,15 +145,21 @@ interface Element : Node {
   boolean hasAttribute(DOMString qualifiedName);
   [CEReactions] undefined setAttribute(DOMString qualifiedName, DOMString value);
 
-  // the ChildNode mixin
-  [CEReactions] undefined remove();
+  HTMLCollection getElementsByTagName(DOMString qualifiedName);
+  HTMLCollection getElementsByClassName(DOMString classNames);
 
-  // the ParentNode mixin; [StaticList] (not in the standard) marks a
-  // list made when called, an array, until NodeList and HTMLCollection
-  // are bound: getElementsByTagName's is not live
+  // the ChildNode and NonDocumentTypeChildNode mixins
+  [CEReactions] undefined remove();
+  readonly attribute Element? previousElementSibling;
+  readonly attribute Element? nextElementSibling;
+
+  // the ParentNode mixin
+  [SameObject] readonly attribute HTMLCollection children;
+  readonly attribute Element? firstElementChild;
+  readonly attribute Element? lastElementChild;
+  readonly attribute unsigned long childElementCount;
   Element? querySelector(DOMString selectors);
-  [StaticList] NodeList querySelectorAll(DOMString selectors);
-  [StaticList] HTMLCollection getElementsByTagName(DOMString qualifiedName);
+  [NewObject] NodeList querySelectorAll(DOMString selectors);
 };
 
 [Exposed=Window]
@@ -165,14 +172,20 @@ interface Document : Node {
   [NewObject] Comment createComment(DOMString data);
 
   Element? getElementById(DOMString elementId);
+  HTMLCollection getElementsByTagName(DOMString qualifiedName);
+  HTMLCollection getElementsByClassName(DOMString classNames);
 
   // the legacy interface names of Event only, until more event
   // interfaces are bound
   [NewObject] Event createEvent(DOMString interface);
 
+  // the ParentNode mixin
+  [SameObject] readonly attribute HTMLCollection children;
+  readonly attribute Element? firstElementChild;
+  readonly attribute Element? lastElementChild;
+  readonly attribute unsigned long childElementCount;
   Element? querySelector(DOMString selectors);
-  [StaticList] NodeList querySelectorAll(DOMString selectors);
-  [StaticList] HTMLCollection getElementsByTagName(DOMString qualifiedName);
+  [NewObject] NodeList querySelectorAll(DOMString selectors);
 
   // one string, not the standard's variadic list, until variadic
   // arguments are bound
@@ -183,10 +196,14 @@ interface Document : Node {
 interface DocumentFragment : Node {
   constructor();
 
-  // the NonElementParentNode and ParentNode mixins, in part
+  // the NonElementParentNode and ParentNode mixins
   Element? getElementById(DOMString elementId);
+  [SameObject] readonly attribute HTMLCollection children;
+  readonly attribute Element? firstElementChild;
+  readonly attribute Element? lastElementChild;
+  readonly attribute unsigned long childElementCount;
   Element? querySelector(DOMString selectors);
-  [StaticList] NodeList querySelectorAll(DOMString selectors);
+  [NewObject] NodeList querySelectorAll(DOMString selectors);
 };
 
 [Exposed=Window]
@@ -199,8 +216,10 @@ interface CharacterData : Node {
   undefined deleteData(unsigned long offset, unsigned long count);
   undefined replaceData(unsigned long offset, unsigned long count, DOMString data);
 
-  // the ChildNode mixin
+  // the ChildNode and NonDocumentTypeChildNode mixins
   [CEReactions] undefined remove();
+  readonly attribute Element? previousElementSibling;
+  readonly attribute Element? nextElementSibling;
 };
 
 [Exposed=Window]
@@ -214,4 +233,21 @@ interface Text : CharacterData {
 [Exposed=Window]
 interface Comment : CharacterData {
   constructor(optional DOMString data = "");
+};
+
+// [Side]: a collection is a side object; one from querySelectorAll is
+// fixed, the others are live
+[Exposed=Window, Side]
+interface NodeList {
+  getter Node? item(unsigned long index);
+  readonly attribute unsigned long length;
+  iterable<Node>;
+};
+
+// named properties are not intercepted yet: namedItem only
+[Exposed=Window, Side]
+interface HTMLCollection {
+  readonly attribute unsigned long length;
+  getter Element? item(unsigned long index);
+  Element? namedItem(DOMString name);
 };

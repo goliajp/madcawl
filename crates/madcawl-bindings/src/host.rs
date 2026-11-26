@@ -51,6 +51,9 @@ pub struct DomHost<E: Engine> {
     /// The wrapper of each event's target, a member of the event, on an
     /// engine that places wrappers (`holds.rs`).
     pub(crate) target_edges: HashMap<crate::side::SideRef, Member<E>>,
+    /// The live `childNodes` (false) and `children` (true) of a node, by
+    /// node index, while alive (`lists.rs`).
+    pub(crate) same_lists: HashMap<(u32, bool), crate::side::SideRef>,
 }
 
 impl<E: Engine> DomHost<E> {
@@ -82,6 +85,7 @@ impl<E: Engine> DomHost<E> {
             details: HashMap::new(),
             target_edges: HashMap::new(),
             side_listeners: HashMap::new(),
+            same_lists: HashMap::new(),
         };
         if E::PLACES_WRAPPERS {
             h.dom.track_moves();
@@ -272,5 +276,7 @@ pub(crate) fn side_class<E: Engine>(data: &crate::side::SideData) -> &'static Cl
         crate::side::SideData::Event(_) => &crate::generated::EventClass::<E>::DEF,
         crate::side::SideData::Target => &crate::generated::EventTargetClass::<E>::DEF,
         crate::side::SideData::DomException(_) => &crate::generated::DOMExceptionClass::<E>::DEF,
+        crate::side::SideData::List(l) if l.is_node_list() => &crate::generated::NodeListClass::<E>::DEF,
+        crate::side::SideData::List(_) => &crate::generated::HTMLCollectionClass::<E>::DEF,
     }
 }

@@ -206,10 +206,15 @@ pub struct Constant {
 /// Indexed and named property interception (collections, `window`'s
 /// named access). When a getter has no such property it returns the
 /// bits of [`Engine::absent`], and lookup continues on the class's
-/// static members.
+/// static members. A class with an index getter and a length has
+/// `%Array.prototype.values%` as its prototype object's
+/// `@@iterator`, as Web IDL gives it.
 pub struct Interceptors<E: 'static, H: 'static> {
     pub index: Option<Bound<IndexGetter, E, H>>,
     pub length: Option<Bound<Length, E, H>>,
+    /// A value iterator (`iterable<T>`): `entries`, `keys`, `values`
+    /// and `forEach` are `Array.prototype`'s too.
+    pub iterable: bool,
 }
 
 /// What the collector and the wrapper protocol ask of a host object.

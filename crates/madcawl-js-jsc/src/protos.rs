@@ -114,6 +114,9 @@ impl Jsc {
         let name = self.string_of(&madcawl_str::DomString::from_wtf8(class.name.as_bytes()));
         self.define(realm, Helper::Interface, &[iface, proto, name, Value::number(f64::from(class.length))]);
         self.define_members(realm, ctx, class, iface, proto);
+        if let Some(x) = class.interceptors.filter(|x| x.index.is_some() && x.length.is_some()) {
+            self.define(realm, Helper::Iterable, &[proto, if x.iterable { crate::value::TRUE } else { crate::value::FALSE }]);
+        }
         self.unprotect(name);
         (iface, proto)
     }
