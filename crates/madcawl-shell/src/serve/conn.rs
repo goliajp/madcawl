@@ -83,23 +83,7 @@ impl<'a> Conn<'a> {
                 }
                 Got::Closed => break,
                 Got::Frame(f) if f.kind == internal::END && self.shared.link.is_some() => break,
-                Got::Frame(f) => {
-                    if let Some(w) = &self.watch {
-                        w.begin(kind_name(f.kind));
-                    }
-                    // the host's own questions are not the agent's requests
-                    let reply = match internal::is_internal(f.kind) && self.shared.link.is_some() {
-                        true => self.answer(&f),
-                        false => self.admit(&f),
-                    };
-                    if let Some(w) = &self.watch {
-                        w.end();
-                    }
-                    if let Some(cap) = self.shared.config.memory_cap {
-                        memory::check(Cap::new(cap), self.id);
-                    }
-                    (reply, false)
-                }
+                Got::Frame(f) => (self.request(&f), false),
                 Got::TooLong(n) => {
                     let msg = format!("a request of {n} bytes is more than the {max} one may be");
                     (error_frame(code::REQUEST_TOO_LARGE, &msg), true)
@@ -115,6 +99,31 @@ impl<'a> Conn<'a> {
                 break;
             }
         }
+        self.end();
+    }
+
+    /// One request, timed by the watchdog and followed by a look at the
+    /// memory cap.
+    fn request(&mut self, f: &Frame) -> Frame {
+        if let Some(w) = &self.watch {
+            w.begin(kind_name(f.kind));
+        }
+        // the host's own questions are not the agent's requests
+        let reply = match internal::is_internal(f.kind) && self.shared.link.is_some() {
+            true => self.answer(f),
+            false => self.admit(f),
+        };
+        if let Some(w) = &self.watch {
+            w.end();
+        }
+        if let Some(cap) = self.shared.config.memory_cap {
+            memory::check(Cap::new(cap), self.id);
+        }
+        reply
+    }
+
+    /// The session ended: its pages close and its cookies go.
+    fn end(&mut self) {
         self.log_refused(true);
         if let Some(w) = self.watch.take() {
             w.stop();

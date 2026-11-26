@@ -138,30 +138,7 @@ pub fn parse_args(args: &[&str]) -> Option<Config> {
             *f = true;
             continue;
         }
-        let v = *rest.next()?;
-        let n = || v.parse::<usize>().ok().filter(|&n| n > 0);
-        match opt {
-            "--allow" => allow.push(PathBuf::from(v).canonicalize().ok()?),
-            "--audit" => c.audit = PathBuf::from(v),
-            "--sessions" => c.max_sessions = n()?,
-            "--pages" => c.max_pages = n()?,
-            "--total-pages" => c.max_total_pages = n()?,
-            "--idle" => c.idle = Duration::from_secs(n()? as u64),
-            "--idle-ms" => c.idle = Duration::from_millis(n()? as u64),
-            "--rate" => c.rate = v.parse().ok().filter(|r: &f64| *r > 0.0)?,
-            "--burst" => c.burst = v.parse().ok().filter(|b: &f64| *b >= 1.0)?,
-            "--max-request" => c.max_request = n()?,
-            "--max-reply" => c.max_reply = n()?,
-            "--listen-fd" => c.listen_fd = Some(v.parse::<i32>().ok().filter(|&fd| fd > 2)?),
-            "--exit-idle" => c.exit_idle = Some(Duration::from_secs(n()? as u64)),
-            "--downloads" => c.downloads = Some(PathBuf::from(v)),
-            "--upload-allow" => c.uploads.push(PathBuf::from(v).canonicalize().ok()?),
-            "--memory-cap-mib" => c.memory_cap = Some(n()? as u64 * (1 << 20)),
-            "--hang-secs" => c.hang = Duration::from_secs(n()? as u64),
-            "--watch-ms" => c.watch = Some(Duration::from_millis(n()? as u64)),
-            "--approve" => c.approve.push(v.trim_end_matches('/').to_ascii_lowercase()),
-            _ => return None,
-        }
+        set(&mut c, &mut allow, opt, rest.next()?)?;
     }
     if !allow.is_empty() {
         c.allow = allow;
@@ -172,6 +149,34 @@ pub fn parse_args(args: &[&str]) -> Option<Config> {
         c.downloads = Some(d.into());
     }
     Some(c)
+}
+
+/// Sets option `opt` to `v`; `None` when either is not one.
+fn set(c: &mut Config, allow: &mut Vec<PathBuf>, opt: &str, v: &str) -> Option<()> {
+    let n = || v.parse::<usize>().ok().filter(|&n| n > 0);
+    match opt {
+        "--allow" => allow.push(PathBuf::from(v).canonicalize().ok()?),
+        "--audit" => c.audit = PathBuf::from(v),
+        "--sessions" => c.max_sessions = n()?,
+        "--pages" => c.max_pages = n()?,
+        "--total-pages" => c.max_total_pages = n()?,
+        "--idle" => c.idle = Duration::from_secs(n()? as u64),
+        "--idle-ms" => c.idle = Duration::from_millis(n()? as u64),
+        "--rate" => c.rate = v.parse().ok().filter(|r: &f64| *r > 0.0)?,
+        "--burst" => c.burst = v.parse().ok().filter(|b: &f64| *b >= 1.0)?,
+        "--max-request" => c.max_request = n()?,
+        "--max-reply" => c.max_reply = n()?,
+        "--listen-fd" => c.listen_fd = Some(v.parse::<i32>().ok().filter(|&fd| fd > 2)?),
+        "--exit-idle" => c.exit_idle = Some(Duration::from_secs(n()? as u64)),
+        "--downloads" => c.downloads = Some(PathBuf::from(v)),
+        "--upload-allow" => c.uploads.push(PathBuf::from(v).canonicalize().ok()?),
+        "--memory-cap-mib" => c.memory_cap = Some(n()? as u64 * (1 << 20)),
+        "--hang-secs" => c.hang = Duration::from_secs(n()? as u64),
+        "--watch-ms" => c.watch = Some(Duration::from_millis(n()? as u64)),
+        "--approve" => c.approve.push(v.trim_end_matches('/').to_ascii_lowercase()),
+        _ => return None,
+    }
+    Some(())
 }
 
 #[cfg(test)]

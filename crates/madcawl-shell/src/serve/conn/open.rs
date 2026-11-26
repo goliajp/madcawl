@@ -80,26 +80,8 @@ impl Conn<'_> {
             ),
             None => None,
         };
+        let id = self.page_number()?;
         let total = &self.shared.pages;
-        if total.fetch_add(1, Ordering::SeqCst) >= config.max_total_pages {
-            total.fetch_sub(1, Ordering::SeqCst);
-            let msg = format!("the host has {} pages open across its sessions already", config.max_total_pages);
-            return Err(error_frame(code::TOO_MANY_PAGES, &msg));
-        }
-        let id = match &self.shared.link {
-            None => self.shared.next_page.fetch_add(1, Ordering::SeqCst),
-            Some(link) => match link.new_page() {
-                Ok(Ok(id)) => id,
-                Ok(Err(msg)) => {
-                    total.fetch_sub(1, Ordering::SeqCst);
-                    return Err(error_frame(code::TOO_MANY_PAGES, &msg));
-                }
-                Err(e) => {
-                    total.fetch_sub(1, Ordering::SeqCst);
-                    return Err(error_frame(code::IO, &format!("the host: {e}")));
-                }
-            },
-        };
         let loaded = self.load(id, u, file, size, charset);
         let (page, note) = loaded.inspect_err(|_| {
             total.fetch_sub(1, Ordering::SeqCst);
@@ -107,6 +89,24 @@ impl Conn<'_> {
         self.shared.owners.lock().unwrap_or_else(|e| e.into_inner()).insert(page.id, self.id);
         self.pages.push(page);
         Ok((self.pages.last_mut().expect("pushed"), note))
+    }
+
+    /// A number for a new page, counted against the host's page limit;
+    /// in a content process, the host gives it out.
+    fn page_number(&self) -> Result<u32, Frame> {
+        let (total, max) = (&self.shared.pages, self.shared.config.max_total_pages);
+        if total.fetch_add(1, Ordering::SeqCst) >= max {
+            total.fetch_sub(1, Ordering::SeqCst);
+            return Err(error_frame(code::TOO_MANY_PAGES, &format!("the host has {max} pages open across its sessions already")));
+        }
+        let Some(link) = &self.shared.link else { return Ok(self.shared.next_page.fetch_add(1, Ordering::SeqCst)) };
+        let r = match link.new_page() {
+            Ok(Ok(id)) => return Ok(id),
+            Ok(Err(msg)) => error_frame(code::TOO_MANY_PAGES, &msg),
+            Err(e) => error_frame(code::IO, &format!("the host: {e}")),
+        };
+        total.fetch_sub(1, Ordering::SeqCst);
+        Err(r)
     }
 
     /// A new page with `file`, or the web URL `u`, loaded into it.
