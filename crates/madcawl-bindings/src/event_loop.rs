@@ -73,11 +73,22 @@ impl<E: Engine> EventLoop<E> {
     /// A timer of `ms` milliseconds, already a Web IDL `long`.
     pub(crate) fn add_timer(&mut self, handler: Root<E>, args: Vec<Root<E>>, ms: i32, repeat: bool) -> u32 {
         let ms = ms.max(0) as u32;
-        let id = self.next_id;
-        self.next_id = if self.next_id == i32::MAX as u32 { 1 } else { self.next_id + 1 };
+        let id = self.take_id();
         let t = Timer { id, handler, args, repeat: repeat.then_some(ms), nesting: self.nesting + 1 };
         self.schedule(t, ms);
         id
+    }
+
+    /// The next id from 1 to 2^31 - 1, wrapping, that no live timer has:
+    /// a page may keep an interval for as long as it likes.
+    fn take_id(&mut self) -> u32 {
+        loop {
+            let id = self.next_id;
+            self.next_id = if id == i32::MAX as u32 { 1 } else { id + 1 };
+            if !self.by_id.contains_key(&id) {
+                return id;
+            }
+        }
     }
 
     fn schedule(&mut self, t: Timer<E>, ms: u32) {
@@ -221,5 +232,30 @@ impl<E: Engine> DomHost<E> {
         for cb in std::mem::take(&mut self.event_loop.tasks) {
             cb.release(e);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use madcawl_js::{Engine, Owned, Root};
+    use madcawl_js_stub::Stub;
+
+    use super::EventLoop;
+
+    fn handler() -> Root<Stub> {
+        // SAFETY: undefined carries no count
+        Root::new(unsafe { Owned::from_raw(Stub::undefined()) })
+    }
+
+    #[test]
+    fn timer_ids_wrap_past_live_ones() {
+        let mut l = EventLoop::<Stub>::new();
+        let kept = l.add_timer(handler(), Vec::new(), 1000, true);
+        assert_eq!(kept, 1);
+        l.next_id = i32::MAX as u32 - 1;
+        let ids: Vec<u32> = (0..3).map(|_| l.add_timer(handler(), Vec::new(), 1000, false)).collect();
+        assert_eq!(ids, [i32::MAX as u32 - 1, i32::MAX as u32, 2], "1 is still the interval's");
+        assert_eq!(l.pending(), 4);
+        assert!(l.remove_timer(1).is_some_and(|t| t.repeat == Some(1000)), "clearing 1 clears the interval");
     }
 }

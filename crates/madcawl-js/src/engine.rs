@@ -99,7 +99,8 @@ pub trait Engine: Control + Sized + 'static {
     fn new_realm(&mut self) -> Self::Realm;
     /// A WindowProxy: the object script gets for a browsing context's
     /// window, forwarding every property access to the global object of
-    /// `realm`. Which object the global's own accessors see as `this`
+    /// `realm`; thrown, with nothing registered, when script is halted
+    /// and the engine needs script to make one. Which object the global's own accessors see as `this`
     /// (the proxy, as the web requires) is not settled here yet: it
     /// comes with the global as a host object.
     fn new_window_proxy(&mut self, realm: Self::Realm) -> Owned<Self::Value>;
@@ -117,6 +118,8 @@ pub trait Engine: Control + Sized + 'static {
     /// Let the realm go: no more script runs in it, and what only it
     /// holds is left to the collector. Objects other realms hold stay.
     fn detach_realm(&mut self, realm: Self::Realm);
+    /// How many realms are not detached.
+    fn live_realms(&self) -> usize;
 
     fn new_object(&mut self, realm: Self::Realm) -> Owned<Self::Value>;
     fn get<H: Host<Self>>(

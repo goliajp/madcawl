@@ -33,6 +33,7 @@ mod ffi;
 mod frame;
 mod groups;
 mod halt;
+mod helpers;
 mod isolate;
 mod micro;
 mod objects;

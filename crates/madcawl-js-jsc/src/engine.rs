@@ -144,6 +144,10 @@ impl Engine for Jsc {
         crate::protos::detach(self, i);
     }
 
+    fn live_realms(&self) -> usize {
+        self.realms.iter().filter(|r| !r.detached).count()
+    }
+
     fn new_object(&mut self, realm: Realm) -> Owned<Value> {
         let ctx = self.realm_ctx(realm);
         // SAFETY: a live realm

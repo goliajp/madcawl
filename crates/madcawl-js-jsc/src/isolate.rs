@@ -70,9 +70,12 @@ pub struct Jsc {
     pub(crate) pressure_told: bool,
     /// UTF-16 scratch for strings going in.
     pub(crate) scratch: Vec<u16>,
-    /// Each WindowProxy's word: the function that retargets it, counted,
-    /// and the realm it forwards to.
+    /// Each WindowProxy's word: the record whose `g` is its target,
+    /// counted, and the realm it forwards to.
     pub(crate) proxies: HashMap<u64, (Value, Realm)>,
+    /// The first realm's `deref` helper, counted: weak handles read
+    /// through it once no realm is live.
+    pub(crate) deref: Value,
 }
 
 impl Jsc {
@@ -125,6 +128,7 @@ impl Jsc {
             pressure_told: false,
             scratch: Vec::new(),
             proxies: HashMap::new(),
+            deref: Value(0),
         }
     }
 
@@ -206,6 +210,7 @@ impl Drop for Jsc {
             self.unprotect(e);
         }
         self.drop_pending();
+        self.unprotect(self.deref);
         for (p, (f, _)) in std::mem::take(&mut self.proxies) {
             self.unprotect(Value(p));
             self.unprotect(f);

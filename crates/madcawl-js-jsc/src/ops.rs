@@ -150,7 +150,10 @@ impl Jsc {
         // the framework takes only an object as `this`, and passes the
         // global for none: anything else goes through
         // `Function.prototype.call`, which passes it as it is
-        let call = self.helper(self.current, Helper::Call);
+        let Some(realm) = self.live_realm() else {
+            return self.throw_new(madcawl_js::ErrorKind::Type, "no realm is live");
+        };
+        let call = self.helper(realm, Helper::Call);
         let mut all = Vec::with_capacity(args.len() + 1);
         all.push(this);
         all.extend_from_slice(args);
@@ -228,7 +231,15 @@ impl Jsc {
             Reference => 3.0,
         };
         let msg = self.string_of(&DomString::from_wtf8(message.as_bytes()));
-        let r = self.call_helper(self.current, Helper::Error, &[Value::number(k), msg]);
+        let r = match self.live_realm() {
+            Some(realm) => self.call_helper(realm, Helper::Error, &[Value::number(k), msg]),
+            // every realm detached: a plain Error, made with no script
+            None => {
+                // SAFETY: a live string on the context of no realm
+                let e = unsafe { ffi::JSObjectMakeError(self.base, 1, &msg.raw(), std::ptr::null_mut()) };
+                Ok(Value(e as u64))
+            }
+        };
         self.unprotect(msg);
         match r {
             Ok(e) if !self.halted() => self.register(e),

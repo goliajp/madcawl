@@ -77,11 +77,16 @@ impl Jsc {
         let jobs = std::mem::take(&mut self.pending);
         let ctx = self.realms[realm as usize].ctx;
         let arr = self.array(ctx, &jobs);
-        for t in jobs {
+        for &t in &jobs {
             self.unprotect(t);
         }
         if self.call_helper(realm, Helper::EnqueueAll, &[arr]).is_err() {
+            // stopped partway: the jobs go, as when queued under script;
+            // one the framework queued after all runs nothing
             self.after_stop();
+            for &t in &jobs {
+                self.release_job(t);
+            }
         }
         self.unprotect(arr);
         self.in_checkpoint = false;
@@ -106,15 +111,21 @@ impl Jsc {
     }
 
     /// Drop trampoline `t`'s count, and its job and argument unless it
-    /// ran: a finalizer cannot release them.
+    /// ran.
     pub(crate) fn release_trampoline(&self, t: Value) {
+        self.release_job(t);
+        self.unprotect(t);
+    }
+
+    /// Drop the job and argument of trampoline `t` unless it ran, and
+    /// make it run nothing: a finalizer cannot release them.
+    fn release_job(&self, t: Value) {
         if let Some(kind) = trampoline(t)
             && let FnKind::Micro { job, arg, .. } = std::mem::replace(kind, FnKind::Ran)
         {
             self.unprotect(job);
             self.unprotect(arg);
         }
-        self.unprotect(t);
     }
 
     /// An array of `items`, counted.

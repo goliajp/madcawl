@@ -232,3 +232,19 @@ fn query_selector_takes_braces_and_semicolons_in_strings() {
     assert_eq!(eval(&mut e, &mut h, threw), 1.0);
     h.close(&mut e);
 }
+
+#[test]
+fn a_page_that_replaced_set_and_weak_map_members_still_frees_its_detached_trees() {
+    guard(60, "hostile page");
+    let hostile = "<script>var boom = function () { throw new Error('page code ran'); };\
+Set.prototype.add = boom; Set.prototype.delete = boom; WeakMap.prototype.get = boom; WeakMap.prototype.set = boom;\
+WeakRef.prototype.deref = boom; Array.prototype.push = boom;</script><p>x</p>";
+    let (mut e, mut h) = page(hostile, true);
+    let before = h.dom.node_count();
+    let src = "var b = document.querySelector('body'); var s; for (let i = 0; i < 50; i++) { let d = document.createElement('div'); s = document.createElement('span'); d.appendChild(s); b.appendChild(d); b.removeChild(d); } s.parentNode.x = 1; s = null; 0";
+    eval(&mut e, &mut h, src);
+    assert_eq!(h.reported, 0);
+    collect_everything(&mut e, &mut h);
+    assert_eq!(h.dom.node_count(), before);
+    h.close(&mut e);
+}

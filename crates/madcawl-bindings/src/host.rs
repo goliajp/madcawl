@@ -43,8 +43,13 @@ pub struct DomHost<E: Engine> {
 }
 
 impl<E: Engine> DomHost<E> {
+    /// A host for `dom` in a new realm of `e`, which has no other live
+    /// realm: the engine hands every wrapper notice and cycle candidate
+    /// of the isolate to the host that settles, which must be the one
+    /// whose nodes they are. A host of a closed realm is no obstacle.
     pub fn new(e: &mut E, dom: Dom) -> Self {
         let () = E::VALUE_IS_ONE_WORD;
+        assert_eq!(e.live_realms(), 0, "one live host per isolate");
         let mut h = DomHost {
             dom,
             realm: e.new_realm(),
