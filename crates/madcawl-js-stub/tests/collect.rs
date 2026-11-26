@@ -96,7 +96,7 @@ static CLASS: ClassDef<Stub, Objs> = ClassDef {
     parent: None,
     attributes: &[],
     operations: &[],
-    constants: &[],
+    statics: &[], constants: &[],
     interceptors: None,
     ops: Some(&OPS),
     constructor: None,

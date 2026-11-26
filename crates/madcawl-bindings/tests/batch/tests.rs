@@ -115,3 +115,18 @@ fn collections_are_live_and_child_lists_the_same_object() {
 fn attributes_are_removed_and_toggled_with_their_id_and_classes() {
     batch::attributes_are_removed_and_toggled_with_their_id_and_classes::<E>();
 }
+
+#[test]
+fn a_timeout_signal_aborts_on_the_event_loop_and_removes_its_listeners() {
+    batch::a_timeout_signal_aborts_on_the_event_loop_and_removes_its_listeners::<E>();
+}
+
+#[test]
+fn an_aborted_signal_carries_its_reason_and_its_handler_is_an_object_or_null() {
+    batch::an_aborted_signal_carries_its_reason_and_its_handler_is_an_object_or_null::<E>();
+}
+
+#[test]
+fn a_timeout_signal_is_kept_by_its_timer_and_freed_after() {
+    batch::a_timeout_signal_is_kept_by_its_timer_and_freed_after::<E>();
+}

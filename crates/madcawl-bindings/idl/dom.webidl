@@ -3,6 +3,10 @@
 //
 // [HostOps] marks the class whose table carries the host object
 // callbacks; its subclasses inherit them
+//
+// [RunsScript] and [Throws] (not in the standard) mark an operation
+// that calls script itself (event listeners) or that may throw where
+// nothing else in its declaration says so
 
 // [Targets] (not in the standard): its own objects are side objects,
 // and its members take nodes and those as `this`
@@ -10,13 +14,11 @@
 interface EventTarget {
   constructor();
 
-  // the options, a boolean or a dictionary, are read as any: of the
-  // dictionary capture, once and passive are acted on, and a signal
-  // that is present throws a TypeError, since no AbortSignal is bound
-  // yet; [Atom] (not in the standard) takes the type as an atom
+  // the options, a boolean or a dictionary, are read as any; [Atom]
+  // (not in the standard) takes the type as an atom
   undefined addEventListener([Atom] DOMString type, EventListener? callback, optional any options);
   undefined removeEventListener([Atom] DOMString type, EventListener? callback, optional any options);
-  boolean dispatchEvent(Event event);
+  [RunsScript] boolean dispatchEvent(Event event);
 };
 
 // from Web IDL; [ErrorPrototype] (not in the standard): its interface
@@ -89,6 +91,28 @@ interface Event {
   readonly attribute DOMHighResTimeStamp timeStamp;
 
   undefined initEvent(DOMString type, optional boolean bubbles = false, optional boolean cancelable = false);
+};
+
+[Exposed=*, Side]
+interface AbortController {
+  constructor();
+
+  [SameObject] readonly attribute AbortSignal signal;
+
+  [RunsScript] undefined abort(optional any reason);
+};
+
+// AbortSignal.any is not bound yet
+[Exposed=*, Side]
+interface AbortSignal : EventTarget {
+  [NewObject] static AbortSignal abort(optional any reason);
+  [NewObject] static AbortSignal timeout([EnforceRange] unsigned long long milliseconds);
+
+  readonly attribute boolean aborted;
+  readonly attribute any reason;
+  [Throws] undefined throwIfAborted();
+
+  attribute EventHandler onabort;
 };
 
 // the CustomEventInit dictionary is read as any

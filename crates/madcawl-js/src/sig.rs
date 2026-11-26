@@ -31,7 +31,8 @@ pub struct Effects(pub u8);
 impl Effects {
     pub const NONE: Effects = Effects(0);
     /// Converting an argument may run script (ToString of an object),
-    /// or the member may run script itself (custom element reactions).
+    /// or the member may run script itself (custom element reactions,
+    /// event listeners).
     pub const RUNS_SCRIPT: Effects = Effects(1);
     /// It may throw: a missing argument, an argument of the wrong type,
     /// a `DOMException`.

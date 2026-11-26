@@ -44,6 +44,7 @@ pub static CLASS: ClassDef<Stub, Log> = ClassDef {
         Attribute { name: "stop", get: unsafe { Bound::host_fn(size) }, set: Some(unsafe { Bound::host_fn(set_stop) }), sig: NUMBER },
     ],
     operations: &[],
+    statics: &[],
     constants: &[],
     interceptors: Some(&INTERCEPTORS),
     ops: Some(&OPS),

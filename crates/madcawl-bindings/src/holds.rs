@@ -50,7 +50,9 @@ impl<E: Engine> DomHost<E> {
     /// On an engine that places wrappers, keep the wrapper of the target
     /// of event `r` as a member of the event's wrapper `event` (of a
     /// live collection: its root's wrapper; of a fixed one: an array of
-    /// the wrappers of its nodes outside the document): script
+    /// the wrappers of its nodes outside the document; of a controller:
+    /// its signal's wrapper, which is then the same object while the
+    /// controller's lives): script
     /// that reaches the event reaches the target's tree, with what it
     /// put there, and a cycle back through script (a listener keeping
     /// the event, the target keeping it in a property) is one the
@@ -69,6 +71,7 @@ impl<E: Engine> DomHost<E> {
             m.clear(e);
         }
         let w = match &self.sides.get(r).data {
+            SideData::Controller(s) => s.target().into_js(e, self),
             SideData::Event(ev) => match ev.target.as_ref().map(Held::target) {
                 Some(t @ (Target::Node(_) | Target::Side(_))) => t.into_js(e, self),
                 _ => return,

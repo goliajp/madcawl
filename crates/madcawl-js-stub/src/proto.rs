@@ -85,10 +85,14 @@ impl Stub {
                 let (_, p) = self.class_objects(realm, class_as::<H>(class));
                 Some(self.retain(p))
             }
-            // constants are on the interface object too, and an interface
-            // object inherits its parent's
+            // static operations and constants are on the interface object
+            // too, and an interface object inherits its parent's
             (Body::Function { call: Call::Interface { class }, .. }, _) => {
-                let k = class_as::<H>(class).chain().flat_map(|c| c.constants).find(|k| k.name.as_bytes() == name)?;
+                let def = class_as::<H>(class);
+                if let Some((c, i)) = def.chain().find_map(|c| c.statics.iter().position(|o| o.name.as_bytes() == name).map(|i| (c, i))) {
+                    return Some(self.static_op::<H>(realm, c, i));
+                }
+                let k = def.chain().flat_map(|c| c.constants).find(|k| k.name.as_bytes() == name)?;
                 Some(Stub::owned(Value::number(k.value)))
             }
             (Body::Prototype { class }, b"constructor") => {
@@ -97,6 +101,23 @@ impl Stub {
             }
             _ => None,
         }
+    }
+
+    /// Static operation `i` of `def` as a function, the same one on
+    /// every read; it shares the methods table by an index no operation
+    /// or getter has.
+    fn static_op<H: Host<Stub>>(&mut self, realm: u32, def: &'static ClassDef<Stub, H>, i: usize) -> Owned<Value> {
+        let key = (def.id.0, 0x4000 | i as u16);
+        let f = match self.realm_data(realm).methods.get(&key) {
+            Some(&f) => f,
+            None => {
+                let o = &def.statics[i];
+                let f = self.function::<H>(realm, o.name, o.length, o.call, 0).into_raw();
+                self.realm_data(realm).methods.insert(key, f);
+                f
+            }
+        };
+        self.retain(f)
     }
 
     /// The interface object and prototype object of `class` in `realm`,

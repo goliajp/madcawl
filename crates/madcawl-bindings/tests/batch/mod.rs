@@ -21,9 +21,11 @@ pub trait Driver: Engine {
     fn collect_all(&mut self, h: &mut DomHost<Self>);
 }
 
+mod abort;
 mod events;
 mod nodes;
 mod trees;
+pub use abort::*;
 pub use events::*;
 pub use nodes::*;
 pub use trees::*;
@@ -347,42 +349,4 @@ pub fn a_dom_exception_carries_name_message_and_code<E: Driver>() {
     assert!(js.is(ex.get(), "constructor", iface.get()), "an object of the DOMException interface");
     assert_eq!(js.read(iface.get(), "INVALID_CHARACTER_ERR"), "5");
     js.drop_all([iface, ex, bad, doc]);
-}
-
-pub fn timers_and_microtasks_run_on_the_event_loop<E: Driver>() {
-    let mut js = Js::<E>::new();
-    js.h.install_window(&mut js.e);
-    js.h.use_virtual_time();
-    let g = js.e.global(js.h.realm);
-    assert!(js.is(g.get(), "window", g.get()) && js.is(g.get(), "self", g.get()));
-    let doc = js.doc();
-    assert!(js.is(g.get(), "document", doc.get()));
-    let node = js.get(g.get(), "Node");
-    assert_eq!(js.read(node.get(), "DOCUMENT_NODE"), "9");
-    let (log, other) = (js.e.new_object(js.h.realm), js.e.new_object(js.h.realm));
-    let f = js.e.counting(&mut js.h, log.get());
-    let f2 = js.e.counting(&mut js.h, other.get());
-    let a = js.call(g.get(), "setTimeout", &[f.get(), E::number(20.0)]);
-    let b = js.call(g.get(), "setTimeout", &[f2.get(), E::number(10.0)]);
-    let c = js.call(g.get(), "setTimeout", &[f.get(), E::number(5.0)]);
-    assert!(a.get() != b.get() && js.e.as_number(c.get()).is_some_and(|n| n >= 1.0));
-    js.run(g.get(), "clearTimeout", &[c.get()]);
-    assert_eq!(js.h.event_loop().pending(), 2);
-    assert_eq!(js.h.run_tasks(&mut js.e, 100), 2, "virtual time reaches both");
-    assert_eq!((js.read(log.get(), "calls"), js.read(other.get(), "calls")), ("1".into(), "1".into()));
-    let i = js.call(g.get(), "setInterval", &[f.get(), E::number(1.0)]);
-    assert_eq!(js.h.run_tasks(&mut js.e, 3), 3);
-    assert_eq!(js.read(log.get(), "calls"), "4");
-    js.run(g.get(), "clearInterval", &[i.get()]);
-    assert_eq!(js.h.event_loop().pending(), 0);
-    js.run(g.get(), "queueMicrotask", &[f2.get()]);
-    // the checkpoint after the call: an engine that drains its queue as
-    // the outermost call returns has run it already; the stub, here
-    js.e.run_microtasks(&mut js.h);
-    assert_eq!(js.read(other.get(), "calls"), "2");
-    let r = js.call(g.get(), "queueMicrotask", &[E::number(1.0)]);
-    assert_eq!(js.threw(r), "TypeError");
-    js.drop_all([i, c, b, a, f2, f, other, log, node, doc, g]);
-    let Js { mut e, h } = js;
-    h.close(&mut e);
 }

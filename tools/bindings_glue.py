@@ -55,9 +55,10 @@ def idl_type(t, names):
         return 'NullableString' if t.endswith('?') else 'String'
     if t in ('undefined', 'boolean', 'any'):
         return t.capitalize()
-    if t in ('unsigned short', 'short', 'unsigned long', 'long', 'double', 'DOMHighResTimeStamp'):
+    if t.removeprefix('[EnforceRange] ') in ('unsigned short', 'short', 'unsigned long', 'long', 'unsigned long long', 'double',
+                                             'DOMHighResTimeStamp'):
         return 'Number'
-    if t == 'EventListener?':
+    if t in ('EventListener?', 'EventHandler'):
         return 'Callback'
     if t.rstrip('?') in names:
         return 'NullableObject' if t.endswith('?') else 'Object'
@@ -84,13 +85,14 @@ def setter_effects(a):
 
 def op_sig(o, names):
     bits = []
-    if any(a['type'] in STRINGS for a in o['args']) or 'CEReactions' in o['flags']:
+    runs = o['flags'] & {'CEReactions', 'RunsScript'}
+    if any(a['type'] in STRINGS for a in o['args']) or runs:
         bits.append('RUNS_SCRIPT')
-    if o['args'] or 'NewObject' in o['flags']:
+    if o['args'] or o['flags'] & {'NewObject', 'Throws'}:
         bits.append('THROWS')
     if 'NewObject' in o['flags']:
         bits.append('NEW_OBJECT')
-    if 'CEReactions' in o['flags']:
+    if runs:
         bits.append('WRITES')
     args = ', '.join(f"IdlType::{idl_type(a['type'], names)}" for a in o['args'])
     return (f"Signature {{ args: &[{args}], result: IdlType::{idl_type(o['ret'], names)}, "

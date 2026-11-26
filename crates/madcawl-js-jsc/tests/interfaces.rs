@@ -132,7 +132,8 @@ return [a.foo(), a instanceof A, a instanceof EventTarget, Object.getPrototypeOf
 fn every_bound_interface_has_its_prototype_chain_and_class_string() {
     let (mut e, mut h) = page("<p>x</p>");
     let src = "var parents = { EventTarget: null, Node: 'EventTarget', Document: 'Node', Element: 'Node', DocumentFragment: 'Node',
-  CharacterData: 'Node', Text: 'CharacterData', Comment: 'CharacterData', Event: null, CustomEvent: 'Event', DOMException: null };
+  CharacterData: 'Node', Text: 'CharacterData', Comment: 'CharacterData', Event: null, CustomEvent: 'Event', DOMException: null,
+  AbortController: null, AbortSignal: 'EventTarget' };
 var bad = [];
 for (const n in parents) {
   const I = globalThis[n], P = parents[n];
@@ -144,7 +145,8 @@ for (const n in parents) {
 }
 var objects = [[document, 'Document'], [document.querySelector('p'), 'Element'], [new Text(), 'Text'], [new Comment(), 'Comment'],
   [new DocumentFragment(), 'DocumentFragment'], [new EventTarget(), 'EventTarget'], [new Event('x'), 'Event'],
-  [new CustomEvent('x'), 'CustomEvent'], [new DOMException(), 'DOMException']];
+  [new CustomEvent('x'), 'CustomEvent'], [new DOMException(), 'DOMException'], [new AbortController(), 'AbortController'],
+  [AbortSignal.abort(), 'AbortSignal']];
 for (const [o, n] of objects) if (Object.prototype.toString.call(o) !== '[object ' + n + ']') bad.push(n + ' object ' + Object.prototype.toString.call(o));
 var x = new DOMException('m', 'NotFoundError');
 return [bad.join('; ') || 'ok', x instanceof Error, String(x), x.toString === Error.prototype.toString].join('|');";
@@ -156,7 +158,7 @@ return [bad.join('; ') || 'ok', x instanceof Error, String(x), x.toString === Er
 fn interface_objects_look_native_and_have_their_lengths() {
     let (mut e, mut h) = page("<p>x</p>");
     let src = "var names = ['EventTarget', 'Node', 'Document', 'Element', 'DocumentFragment', 'CharacterData', 'Text', 'Comment',
-  'Event', 'CustomEvent', 'DOMException'];
+  'Event', 'CustomEvent', 'DOMException', 'AbortController', 'AbortSignal'];
 var foreign = [], lengths = [];
 for (const n of names) {
   const s = Function.prototype.toString.call(globalThis[n]);
@@ -170,7 +172,7 @@ for (const f of [() => new Node(), () => Event('x')]) {
 }
 TypeError = TE;
 return [foreign.join('; ') || 'ok', lengths.join(' '), thrown.join(' '), new Text('t') instanceof Text, new Text('t') instanceof Node].join('|');";
-    assert_eq!(eval(&mut e, &mut h, src), "ok|0 0 0 0 0 0 0 0 1 1 0|true true|true|true");
+    assert_eq!(eval(&mut e, &mut h, src), "ok|0 0 0 0 0 0 0 0 1 1 0 0 0|true true|true|true");
     h.close(&mut e);
 }
 

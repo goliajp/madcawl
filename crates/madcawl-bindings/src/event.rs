@@ -207,14 +207,14 @@ impl<E: Engine> DomHost<E> {
             return;
         }
         let ty = self.event(r).ty;
-        let list: Vec<(Root<E>, u64, bool, bool)> = self
+        let list: Vec<(Root<E>, u64, bool, bool, bool)> = self
             .list_of(t)
             .iter()
             .filter(|l| l.ty == ty && l.capture == capture)
-            .filter_map(|l| l.callback.get().map(|cb| (cb, l.id, l.once, l.passive)))
+            .filter_map(|l| l.callback.get().map(|cb| (cb, l.id, l.once, l.passive, l.handler)))
             .collect::<Vec<_>>()
             .into_iter()
-            .map(|(cb, id, once, passive)| (Root::new(e.retain(cb)), id, once, passive))
+            .map(|(cb, id, once, passive, handler)| (Root::new(e.retain(cb)), id, once, passive, handler))
             .collect();
         if list.is_empty() {
             return;
@@ -222,13 +222,17 @@ impl<E: Engine> DomHost<E> {
         self.event_mut(r).phase = phase;
         self.set_held(r, |ev| &mut ev.current, Some(t));
         let this = t.into_js(e, self);
-        for (cb, id, once, passive) in list {
+        for (cb, id, once, passive, handler) in list {
             if self.listening(t, id) && !self.event(r).stop_now && e.halt() == Halt::Running {
                 if once {
-                    self.remove_listener(e, t, ty, capture, cb.get());
+                    self.remove_listener_id(e, t, id);
                 }
                 self.event_mut(r).in_passive = passive;
-                self.call_listener(e, cb.get(), this.get(), event);
+                if handler {
+                    self.call_handler(e, r, t, id, this.get(), event);
+                } else {
+                    self.call_listener(e, cb.get(), this.get(), event);
+                }
                 self.event_mut(r).in_passive = false;
             }
             cb.release(e);
@@ -253,6 +257,27 @@ impl<E: Engine> DomHost<E> {
         } else {
             e.release(res);
         }
+    }
+
+    /// Event handler `id` of `t`, with the value it has now, which a
+    /// listener before it may have changed: a callable one is called,
+    /// and its result false cancels the event; one that is not callable
+    /// does nothing.
+    fn call_handler(&mut self, e: &mut E, r: SideRef, t: Target, id: u64, this: E::Value, event: E::Value) {
+        let Some(f) = self.list_of(t).iter().find(|l| l.id == id).and_then(|l| l.callback.get()) else { return };
+        if !e.is_callable(f) {
+            return;
+        }
+        let f = e.retain(f);
+        let res = e.call(self, f.get(), this, &[event]);
+        e.release(f);
+        if E::is_thrown(res.get()) {
+            return self.report_thrown(e, res);
+        }
+        if res.get() == E::boolean(false) {
+            self.event_mut(r).cancel();
+        }
+        e.release(res);
     }
 
     fn report_thrown(&mut self, e: &mut E, r: madcawl_js::Owned<E::Value>) {

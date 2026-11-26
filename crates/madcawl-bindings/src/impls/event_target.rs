@@ -17,7 +17,7 @@ pub(crate) fn add_event_listener<E: Engine>(
 ) -> Result<(), Thrown> {
     let o = options(e, h, opts, true)?;
     if let Some(cb) = callback {
-        h.add_listener(e, this, ty, cb, &o);
+        crate::listeners::add(e, h, this, ty, cb, &o);
     }
     Ok(())
 }

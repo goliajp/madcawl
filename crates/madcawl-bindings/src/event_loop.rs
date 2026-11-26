@@ -20,6 +20,8 @@ const MIN_NESTED_MS: u32 = 4;
 const NS_PER_MS: u64 = 1_000_000;
 /// How long the collection after a task may take before it yields.
 const COLLECT_SLICE_NS: u64 = 2 * NS_PER_MS;
+/// The first id of the abort timers; those of script's are below.
+const ABORT_IDS: u32 = 1 << 31;
 
 pub(crate) struct Timer<E: Engine> {
     pub id: u32,
@@ -29,6 +31,9 @@ pub(crate) struct Timer<E: Engine> {
     /// The interval asked for, in milliseconds.
     pub repeat: Option<u32>,
     pub nesting: u32,
+    /// The timer of `AbortSignal.timeout`: the handler is the signal's
+    /// wrapper, and its id is above any `clearTimeout` reaches.
+    pub abort: bool,
 }
 
 pub enum Clock {
@@ -43,6 +48,8 @@ pub struct EventLoop<E: Engine> {
     /// clearing it removes.
     by_id: HashMap<u32, (u64, u64)>,
     next_id: u32,
+    /// The next id of an abort timer, from 2^31.
+    next_abort: u32,
     seq: u64,
     tasks: VecDeque<Root<E>>,
     clock: Clock,
@@ -56,6 +63,7 @@ impl<E: Engine> EventLoop<E> {
             timers: BTreeMap::new(),
             by_id: HashMap::new(),
             next_id: 1,
+            next_abort: ABORT_IDS,
             seq: 0,
             tasks: VecDeque::new(),
             clock: Clock::Real(Instant::now()),
@@ -73,27 +81,37 @@ impl<E: Engine> EventLoop<E> {
     /// A timer of `ms` milliseconds, already a Web IDL `long`.
     pub(crate) fn add_timer(&mut self, handler: Root<E>, args: Vec<Root<E>>, ms: i32, repeat: bool) -> u32 {
         let ms = ms.max(0) as u32;
-        let id = self.take_id();
-        let t = Timer { id, handler, args, repeat: repeat.then_some(ms), nesting: self.nesting + 1 };
-        self.schedule(t, ms);
+        let id = self.take_id(false);
+        let t = Timer { id, handler, args, repeat: repeat.then_some(ms), nesting: self.nesting + 1, abort: false };
+        self.schedule(t, u64::from(ms));
         id
     }
 
-    /// The next id from 1 to 2^31 - 1, wrapping, that no live timer has:
-    /// a page may keep an interval for as long as it likes.
-    fn take_id(&mut self) -> u32 {
+    /// A timer that aborts the signal whose wrapper is `signal` after
+    /// `ms` milliseconds.
+    pub(crate) fn add_abort_timer(&mut self, signal: Root<E>, ms: u64) {
+        let id = self.take_id(true);
+        let t = Timer { id, handler: signal, args: Vec::new(), repeat: None, nesting: 0, abort: true };
+        self.schedule(t, ms);
+    }
+
+    /// The next id that no live timer has, wrapping: from 1 to 2^31 - 1
+    /// for script's, so a page may keep an interval for as long as it
+    /// likes, and from 2^31 up for abort timers.
+    fn take_id(&mut self, abort: bool) -> u32 {
         loop {
-            let id = self.next_id;
-            self.next_id = if id == i32::MAX as u32 { 1 } else { id + 1 };
+            let (next, first, last) = if abort { (&mut self.next_abort, ABORT_IDS, u32::MAX) } else { (&mut self.next_id, 1, ABORT_IDS - 1) };
+            let id = *next;
+            *next = if id == last { first } else { id + 1 };
             if !self.by_id.contains_key(&id) {
                 return id;
             }
         }
     }
 
-    fn schedule(&mut self, t: Timer<E>, ms: u32) {
-        let ms = if t.nesting > NESTING_CLAMP { ms.max(MIN_NESTED_MS) } else { ms };
-        let key = (self.now_ns().saturating_add(u64::from(ms) * NS_PER_MS), self.seq);
+    fn schedule(&mut self, t: Timer<E>, ms: u64) {
+        let ms = if t.nesting > NESTING_CLAMP { ms.max(u64::from(MIN_NESTED_MS)) } else { ms };
+        let key = (self.now_ns().saturating_add(ms.saturating_mul(NS_PER_MS)), self.seq);
         self.seq += 1;
         self.by_id.insert(t.id, key);
         self.timers.insert(key, t);
@@ -165,6 +183,13 @@ impl<E: Engine> DomHost<E> {
     }
 
     fn run_timer(&mut self, e: &mut E, t: Timer<E>) {
+        if t.abort {
+            self.event_loop.by_id.remove(&t.id);
+            self.timed_out(e, t.handler.get());
+            t.handler.release(e);
+            // SAFETY: undefined carries no count
+            return self.finish_task(e, unsafe { Owned::from_raw(E::undefined()) });
+        }
         let saved = std::mem::replace(&mut self.event_loop.nesting, t.nesting);
         let r = if e.is_callable(t.handler.get()) {
             let window = e.global(self.realm);
@@ -186,7 +211,7 @@ impl<E: Engine> DomHost<E> {
                 // each run nests one deeper, so a fast interval is clamped
                 // after the first few as nested timeouts are
                 let t = Timer { nesting: t.nesting + 1, ..t };
-                self.event_loop.schedule(t, ms);
+                self.event_loop.schedule(t, u64::from(ms));
             }
             _ => {
                 t.handler.release(e);

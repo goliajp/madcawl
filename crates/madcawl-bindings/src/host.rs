@@ -46,10 +46,12 @@ pub struct DomHost<E: Engine> {
     pub(crate) sides: crate::side::Sides,
     /// The listeners of each `EventTarget` script made, members of it.
     pub(crate) side_listeners: HashMap<crate::side::SideRef, Vec<Listener<E>>>,
-    /// The detail of each CustomEvent that has one, a member of the event.
+    /// The detail of each CustomEvent that has one and the reason of each
+    /// aborted signal, a member of the side object.
     pub(crate) details: HashMap<crate::side::SideRef, Member<E>>,
-    /// The wrapper of each event's target, a member of the event, on an
-    /// engine that places wrappers (`holds.rs`).
+    /// The wrapper of each event's target (of a controller: its signal),
+    /// a member of the side object, on an engine that places wrappers
+    /// (`holds.rs`).
     pub(crate) target_edges: HashMap<crate::side::SideRef, Member<E>>,
     /// The live `childNodes` (false) and `children` (true) of a node, by
     /// node index, while alive (`lists.rs`).
@@ -259,7 +261,7 @@ impl<E: Engine> DomHost<E> {
 impl<E: Engine> Host<E> for DomHost<E> {
     fn class_of(&self, obj: HostRef) -> &'static ClassDef<E, Self> {
         if let Some(r) = self.sides.of(obj) {
-            return side_class::<E>(&self.sides.get(r).data);
+            return self.sides.get(r).data.class::<E>();
         }
         match self.dom.kind(self.node(obj)) {
             NodeKind::Document => &DocumentClass::<E>::DEF,
@@ -282,17 +284,5 @@ impl<E: Engine> Host<E> for DomHost<E> {
         let _sentinel = err.into_raw();
         let ex = e.take_exception().expect("just thrown");
         e.finish_loading_module(self, payload, ex);
-    }
-}
-
-/// The class of a side object.
-pub(crate) fn side_class<E: Engine>(data: &crate::side::SideData) -> &'static ClassDef<E, DomHost<E>> {
-    match data {
-        crate::side::SideData::Event(ev) if ev.custom => &crate::generated::CustomEventClass::<E>::DEF,
-        crate::side::SideData::Event(_) => &crate::generated::EventClass::<E>::DEF,
-        crate::side::SideData::Target => &crate::generated::EventTargetClass::<E>::DEF,
-        crate::side::SideData::DomException(_) => &crate::generated::DOMExceptionClass::<E>::DEF,
-        crate::side::SideData::List(l) if l.is_node_list() => &crate::generated::NodeListClass::<E>::DEF,
-        crate::side::SideData::List(_) => &crate::generated::HTMLCollectionClass::<E>::DEF,
     }
 }

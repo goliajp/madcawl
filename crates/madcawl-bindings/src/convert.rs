@@ -6,6 +6,7 @@ use madcawl_dom::NodeId;
 use madcawl_js::{ClassDef, Engine, ErrorKind, Owned, ValueKind};
 use madcawl_str::{Atom, DomString};
 
+pub(crate) use crate::args::*;
 use crate::host::DomHost;
 use crate::side::SideRef;
 
@@ -18,18 +19,9 @@ pub(crate) fn throw<E: Engine>(e: &mut E, kind: ErrorKind, message: &str) -> Thr
     Thrown
 }
 
-/// Throw a `DOMException` named `name`. The host makes the object: a
-/// plain one with the members script reads (`name`, `message`, `code`)
-/// until the interface is bound. The members go in by [[Set]], which a
-/// page's setter on Object.prototype can intercept or refuse; that is
-/// accepted until the interface is bound and they are defined instead.
+/// Throw a `DOMException` named `name`.
 pub(crate) fn throw_dom<E: Engine>(e: &mut E, h: &mut DomHost<E>, name: &'static str, message: &str) -> Thrown {
-    let x = crate::impls::dom_exception::DomException {
-        name: DomString::from_wtf8(name.as_bytes()),
-        message: DomString::from_wtf8(message.as_bytes()),
-    };
-    let r = h.sides.add(crate::side::SideData::DomException(x));
-    let ex = h.wrap_side(e, r);
+    let ex = h.dom_exception(e, name, message);
     let _sentinel = e.throw(ex).into_raw();
     Thrown
 }
@@ -124,14 +116,6 @@ pub(crate) fn need<E: Engine>(e: &mut E, args: &[E::Value], n: usize) -> Result<
         return Err(throw(e, ErrorKind::Type, "not enough arguments"));
     }
     Ok(())
-}
-
-/// A number as a Web IDL `long`: ECMAScript ToInt32, which wraps.
-pub(crate) fn to_int32(n: f64) -> i32 {
-    if !n.is_finite() {
-        return 0;
-    }
-    n.trunc().rem_euclid(4_294_967_296.0) as u32 as i32
 }
 
 pub(crate) fn arg<E: Engine>(args: &[E::Value], i: usize) -> E::Value {
@@ -248,12 +232,6 @@ pub(crate) fn dom_string_or_null<E: Engine>(
     dom_string(e, h, v).map(Some)
 }
 
-/// A Web IDL `unsigned long`: ECMAScript ToNumber, then modulo 2^32.
-pub(crate) fn to_uint32<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Value) -> Result<u32, Thrown> {
-    let n = e.to_number(h, v).ok_or(Thrown)?;
-    Ok(to_int32(n) as u32)
-}
-
 /// A `[LegacyNullToEmptyString] DOMString`: null is the empty string.
 pub(crate) fn dom_string_null_empty<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Value) -> Result<DomString, Thrown> {
     if e.kind(v) == ValueKind::Null {
@@ -262,33 +240,12 @@ pub(crate) fn dom_string_null_empty<E: Engine>(e: &mut E, h: &mut DomHost<E>, v:
     dom_string(e, h, v)
 }
 
-/// An `any` argument whose default is null.
-pub(crate) fn any_or_null<E: Engine>(e: &E, v: E::Value) -> E::Value {
-    if e.kind(v) == ValueKind::Undefined { E::null() } else { v }
-}
-
 /// A script value an `any` member returns, with its count.
 pub(crate) struct Any<E: Engine>(pub Owned<E::Value>);
 
 impl<E: Engine> IntoJs<E> for Any<E> {
     fn into_js(self, _: &mut E, _: &mut DomHost<E>) -> Owned<E::Value> {
         self.0
-    }
-}
-
-/// A `DOMString` argument with a default: `default` when undefined.
-pub(crate) fn dom_string_or<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Value, default: &[u8]) -> Result<DomString, Thrown> {
-    if e.kind(v) == ValueKind::Undefined {
-        return Ok(DomString::from_wtf8(default));
-    }
-    dom_string(e, h, v)
-}
-
-pub(crate) fn boolean_or<E: Engine>(e: &mut E, v: E::Value, default: bool) -> bool {
-    if e.kind(v) == ValueKind::Undefined {
-        default
-    } else {
-        e.to_boolean(v)
     }
 }
 

@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use madcawl_js::{Engine, HostRef, Owned, Tree};
+use madcawl_js::{ClassDef, Engine, HostRef, Owned, Tree};
 use madcawl_str::abi;
 
 use crate::event::{EventState, Held};
@@ -33,6 +33,10 @@ pub(crate) enum SideData {
     DomException(crate::impls::dom_exception::DomException),
     /// A `NodeList` or `HTMLCollection` (`lists.rs`).
     List(crate::lists::ListState),
+    /// An `AbortSignal` (`abort.rs`).
+    Signal(crate::abort::SignalState),
+    /// An `AbortController`: its signal, by a count.
+    Controller(Held),
 }
 
 impl SideData {
@@ -41,6 +45,7 @@ impl SideData {
         match self {
             SideData::Event(ev) => ev.held(f),
             SideData::List(l) => l.held(f),
+            SideData::Controller(s) => f(s),
             _ => {}
         }
     }
@@ -49,7 +54,25 @@ impl SideData {
         match self {
             SideData::Event(ev) => ev.release(out),
             SideData::List(l) => l.release(out),
+            // the signal is given back once: the controller is freed or
+            // unlinked after this
+            SideData::Controller(s) => out.push(std::mem::replace(s, Held::Window)),
             _ => {}
+        }
+    }
+
+    /// The class of a side object.
+    pub(crate) fn class<E: Engine>(&self) -> &'static ClassDef<E, DomHost<E>> {
+        use crate::generated as g;
+        match self {
+            SideData::Event(ev) if ev.custom => &g::CustomEventClass::<E>::DEF,
+            SideData::Event(_) => &g::EventClass::<E>::DEF,
+            SideData::Target => &g::EventTargetClass::<E>::DEF,
+            SideData::DomException(_) => &g::DOMExceptionClass::<E>::DEF,
+            SideData::List(l) if l.is_node_list() => &g::NodeListClass::<E>::DEF,
+            SideData::List(_) => &g::HTMLCollectionClass::<E>::DEF,
+            SideData::Signal(_) => &g::AbortSignalClass::<E>::DEF,
+            SideData::Controller(_) => &g::AbortControllerClass::<E>::DEF,
         }
     }
 }
@@ -126,7 +149,7 @@ impl<E: Engine> DomHost<E> {
             self.side_wrapper_gone(e, r);
         }
         let obj = r.host_ref();
-        let v = e.new_wrapper(self.realm, crate::host::side_class::<E>(&self.sides.get(r).data), obj);
+        let v = e.new_wrapper(self.realm, self.sides.get(r).data.class::<E>(), obj);
         let word = E::wrapper_word(v.get());
         self.sides.get_mut(r).wrapper = word;
         self.sides.inc(r);

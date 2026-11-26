@@ -1,7 +1,7 @@
 //! The DOMException interface of Web IDL: what the bindings throw for
 //! a DOM error, and what script may make itself.
 
-use madcawl_js::Engine;
+use madcawl_js::{Engine, Owned};
 use madcawl_str::DomString;
 
 use crate::convert::Thrown;
@@ -48,4 +48,13 @@ pub(crate) fn message<E: Engine>(_: &mut E, h: &mut DomHost<E>, r: SideRef) -> R
 
 pub(crate) fn code<E: Engine>(_: &mut E, h: &mut DomHost<E>, r: SideRef) -> Result<u16, Thrown> {
     Ok(legacy_code(&this(h, r).name))
+}
+
+impl<E: Engine> DomHost<E> {
+    /// A new DOMException named `name`, as a script value.
+    pub(crate) fn dom_exception(&mut self, e: &mut E, name: &str, message: &str) -> Owned<E::Value> {
+        let x = DomException { name: DomString::from_wtf8(name.as_bytes()), message: DomString::from_wtf8(message.as_bytes()) };
+        let r = self.sides.add(SideData::DomException(x));
+        self.wrap_side(e, r)
+    }
 }

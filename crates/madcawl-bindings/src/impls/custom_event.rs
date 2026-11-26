@@ -42,11 +42,18 @@ pub(crate) fn init_custom_event<E: Engine>(
 impl<E: Engine> DomHost<E> {
     /// Make `v` the detail of event `r`; null is kept as no member.
     pub(crate) fn set_detail(&mut self, e: &mut E, r: SideRef, v: E::Value) {
+        if v != E::null() {
+            return self.set_value(e, r, v);
+        }
         if let Some(mut old) = self.details.remove(&r) {
             old.clear(e);
         }
-        if v == E::null() {
-            return;
+    }
+
+    /// Make `v` the script value side object `r` carries (`details`).
+    pub(crate) fn set_value(&mut self, e: &mut E, r: SideRef, v: E::Value) {
+        if let Some(mut old) = self.details.remove(&r) {
+            old.clear(e);
         }
         let owner = self.wrap_side(e, r);
         let m = Member::of(e, owner.get(), v);

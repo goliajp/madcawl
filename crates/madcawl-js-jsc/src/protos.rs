@@ -155,10 +155,11 @@ impl Jsc {
                 self.unprotect(v);
             }
         }
-        for o in class.operations {
+        let ops = class.operations.iter().map(|o| (proto, o)).chain(class.statics.iter().map(|o| (iface, o)));
+        for (target, o) in ops {
             let name = self.string_of(&madcawl_str::DomString::from_wtf8(o.name.as_bytes()));
             let f = host_fn(self, o.call.get());
-            self.define(realm, Helper::Method, &[proto, name, f, Value::number(f64::from(o.length))]);
+            self.define(realm, Helper::Method, &[target, name, f, Value::number(f64::from(o.length))]);
             self.unprotect(name);
             self.unprotect(f);
         }

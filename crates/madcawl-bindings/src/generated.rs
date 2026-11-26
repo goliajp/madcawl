@@ -24,14 +24,15 @@ impl<E: Engine> EventTargetClass<E> {
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "EventTarget",
         id: ClassId(1),
-        last: ClassId(8),
+        last: ClassId(9),
         parent: None,
         attributes: &[],
         operations: &[
             Operation { name: "addEventListener", length: 2, call: unsafe { Bound::host_fn(event_target_add_event_listener_abi::<E>) }, sig: Signature { args: &[IdlType::String, IdlType::Callback, IdlType::Any], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
             Operation { name: "removeEventListener", length: 2, call: unsafe { Bound::host_fn(event_target_remove_event_listener_abi::<E>) }, sig: Signature { args: &[IdlType::String, IdlType::Callback, IdlType::Any], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
-            Operation { name: "dispatchEvent", length: 1, call: unsafe { Bound::host_fn(event_target_dispatch_event_abi::<E>) }, sig: Signature { args: &[IdlType::Object], result: IdlType::Boolean, effects: Effects::THROWS } },
+            Operation { name: "dispatchEvent", length: 1, call: unsafe { Bound::host_fn(event_target_dispatch_event_abi::<E>) }, sig: Signature { args: &[IdlType::Object], result: IdlType::Boolean, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
         ],
+        statics: &[],
         constants: &[],
         interceptors: None,
         ops: Some(&SideOps::<E>::OPS),
@@ -90,14 +91,116 @@ fn event_target_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn event_target_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, event_target_constructor::<E>) } }
 
+pub struct AbortSignalClass<E>(PhantomData<E>);
+
+impl<E: Engine> AbortSignalClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "AbortSignal",
+        id: ClassId(2),
+        last: ClassId(2),
+        parent: Some(&EventTargetClass::<E>::DEF),
+        attributes: &[
+            Attribute { name: "aborted", get: unsafe { Bound::host_fn(abort_signal_get_aborted_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Boolean, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "reason", get: unsafe { Bound::host_fn(abort_signal_get_reason_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Any, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "onabort", get: unsafe { Bound::host_fn(abort_signal_get_onabort_abi::<E>) }, set: Some(unsafe { Bound::host_fn(abort_signal_set_onabort_abi::<E>) }), sig: AttributeSig { ty: IdlType::Callback, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+        ],
+        operations: &[
+            Operation { name: "throwIfAborted", length: 0, call: unsafe { Bound::host_fn(abort_signal_throw_if_aborted_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Undefined, effects: Effects::THROWS } },
+        ],
+        statics: &[
+            Operation { name: "abort", length: 0, call: unsafe { Bound::host_fn(abort_signal_abort_abi::<E>) }, sig: Signature { args: &[IdlType::Any], result: IdlType::Object, effects: Effects::THROWS.with(Effects::NEW_OBJECT) } },
+            Operation { name: "timeout", length: 1, call: unsafe { Bound::host_fn(abort_signal_timeout_abi::<E>) }, sig: Signature { args: &[IdlType::Number], result: IdlType::Object, effects: Effects::THROWS.with(Effects::NEW_OBJECT) } },
+        ],
+        constants: &[],
+        interceptors: None,
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: None,
+        length: 0,
+        error_prototype: false,
+    };
+}
+
+fn abort_signal_get_aborted<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &AbortSignalClass::<E>::DEF)?;
+        impls::abort_signal::aborted(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn abort_signal_get_aborted_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, abort_signal_get_aborted::<E>) } }
+
+fn abort_signal_get_reason<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &AbortSignalClass::<E>::DEF)?;
+        impls::abort_signal::reason(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn abort_signal_get_reason_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, abort_signal_get_reason::<E>) } }
+
+fn abort_signal_get_onabort<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &AbortSignalClass::<E>::DEF)?;
+        impls::abort_signal::onabort(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn abort_signal_get_onabort_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, abort_signal_get_onabort::<E>) } }
+
+fn abort_signal_set_onabort<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &AbortSignalClass::<E>::DEF)?;
+        let value = cv::event_handler::<E>(e, value);
+        impls::abort_signal::set_onabort(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn abort_signal_set_onabort_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, abort_signal_set_onabort::<E>) } }
+
+fn abort_signal_throw_if_aborted<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &AbortSignalClass::<E>::DEF)?;
+        impls::abort_signal::throw_if_aborted(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn abort_signal_throw_if_aborted_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, abort_signal_throw_if_aborted::<E>) } }
+
+fn abort_signal_abort<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let a0 = cv::arg::<E>(args, 0);
+        impls::abort_signal::abort(e, h, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn abort_signal_abort_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, abort_signal_abort::<E>) } }
+
+fn abort_signal_timeout<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        cv::need(e, args, 1)?;
+        let a0 = cv::enforce_u64(e, h, cv::arg::<E>(args, 0))?;
+        impls::abort_signal::timeout(e, h, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn abort_signal_timeout_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, abort_signal_timeout::<E>) } }
+
 pub struct NodeClass<E>(PhantomData<E>);
 
 impl<E: Engine> NodeClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Node",
-        id: ClassId(2),
-        last: ClassId(8),
+        id: ClassId(3),
+        last: ClassId(9),
         parent: Some(&EventTargetClass::<E>::DEF),
         attributes: &[
             Attribute { name: "nodeType", get: unsafe { Bound::host_fn(node_get_node_type_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
@@ -120,6 +223,7 @@ impl<E: Engine> NodeClass<E> {
             Operation { name: "appendChild", length: 1, call: unsafe { Bound::host_fn(node_append_child_abi::<E>) }, sig: Signature { args: &[IdlType::Object], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
             Operation { name: "removeChild", length: 1, call: unsafe { Bound::host_fn(node_remove_child_abi::<E>) }, sig: Signature { args: &[IdlType::Object], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
         ],
+        statics: &[],
         constants: &[
             Constant { name: "ELEMENT_NODE", value: 1.0 },
             Constant { name: "TEXT_NODE", value: 3.0 },
@@ -333,8 +437,8 @@ impl<E: Engine> ElementClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Element",
-        id: ClassId(3),
-        last: ClassId(3),
+        id: ClassId(4),
+        last: ClassId(4),
         parent: Some(&NodeClass::<E>::DEF),
         attributes: &[
             Attribute { name: "localName", get: unsafe { Bound::host_fn(element_get_local_name_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
@@ -362,6 +466,7 @@ impl<E: Engine> ElementClass<E> {
             Operation { name: "querySelector", length: 1, call: unsafe { Bound::host_fn(element_query_selector_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::NullableObject, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
             Operation { name: "querySelectorAll", length: 1, call: unsafe { Bound::host_fn(element_query_selector_all_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::NEW_OBJECT) } },
         ],
+        statics: &[],
         constants: &[],
         interceptors: None,
         ops: None,
@@ -639,8 +744,8 @@ impl<E: Engine> DocumentClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Document",
-        id: ClassId(4),
-        last: ClassId(4),
+        id: ClassId(5),
+        last: ClassId(5),
         parent: Some(&NodeClass::<E>::DEF),
         attributes: &[
             Attribute { name: "documentElement", get: unsafe { Bound::host_fn(document_get_document_element_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
@@ -662,6 +767,7 @@ impl<E: Engine> DocumentClass<E> {
             Operation { name: "querySelectorAll", length: 1, call: unsafe { Bound::host_fn(document_query_selector_all_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::NEW_OBJECT) } },
             Operation { name: "write", length: 1, call: unsafe { Bound::host_fn(document_write_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
         ],
+        statics: &[],
         constants: &[],
         interceptors: None,
         ops: None,
@@ -857,8 +963,8 @@ impl<E: Engine> DocumentFragmentClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "DocumentFragment",
-        id: ClassId(5),
-        last: ClassId(5),
+        id: ClassId(6),
+        last: ClassId(6),
         parent: Some(&NodeClass::<E>::DEF),
         attributes: &[
             Attribute { name: "children", get: unsafe { Bound::host_fn(document_fragment_get_children_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Object, get: Effects::NONE, set: Effects::NONE } },
@@ -871,6 +977,7 @@ impl<E: Engine> DocumentFragmentClass<E> {
             Operation { name: "querySelector", length: 1, call: unsafe { Bound::host_fn(document_fragment_query_selector_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::NullableObject, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
             Operation { name: "querySelectorAll", length: 1, call: unsafe { Bound::host_fn(document_fragment_query_selector_all_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::NEW_OBJECT) } },
         ],
+        statics: &[],
         constants: &[],
         interceptors: None,
         ops: None,
@@ -971,8 +1078,8 @@ impl<E: Engine> CharacterDataClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "CharacterData",
-        id: ClassId(6),
-        last: ClassId(8),
+        id: ClassId(7),
+        last: ClassId(9),
         parent: Some(&NodeClass::<E>::DEF),
         attributes: &[
             Attribute { name: "data", get: unsafe { Bound::host_fn(character_data_get_data_abi::<E>) }, set: Some(unsafe { Bound::host_fn(character_data_set_data_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
@@ -988,6 +1095,7 @@ impl<E: Engine> CharacterDataClass<E> {
             Operation { name: "replaceData", length: 3, call: unsafe { Bound::host_fn(character_data_replace_data_abi::<E>) }, sig: Signature { args: &[IdlType::Number, IdlType::Number, IdlType::String], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
             Operation { name: "remove", length: 0, call: unsafe { Bound::host_fn(character_data_remove_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::WRITES) } },
         ],
+        statics: &[],
         constants: &[],
         interceptors: None,
         ops: None,
@@ -1129,8 +1237,8 @@ impl<E: Engine> TextClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Text",
-        id: ClassId(7),
-        last: ClassId(7),
+        id: ClassId(8),
+        last: ClassId(8),
         parent: Some(&CharacterDataClass::<E>::DEF),
         attributes: &[
             Attribute { name: "wholeText", get: unsafe { Bound::host_fn(text_get_whole_text_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
@@ -1138,6 +1246,7 @@ impl<E: Engine> TextClass<E> {
         operations: &[
             Operation { name: "splitText", length: 1, call: unsafe { Bound::host_fn(text_split_text_abi::<E>) }, sig: Signature { args: &[IdlType::Number], result: IdlType::Object, effects: Effects::THROWS.with(Effects::NEW_OBJECT) } },
         ],
+        statics: &[],
         constants: &[],
         interceptors: None,
         ops: None,
@@ -1185,11 +1294,12 @@ impl<E: Engine> CommentClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Comment",
-        id: ClassId(8),
-        last: ClassId(8),
+        id: ClassId(9),
+        last: ClassId(9),
         parent: Some(&CharacterDataClass::<E>::DEF),
         attributes: &[],
         operations: &[],
+        statics: &[],
         constants: &[],
         interceptors: None,
         ops: None,
@@ -1215,8 +1325,8 @@ impl<E: Engine> DOMExceptionClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "DOMException",
-        id: ClassId(9),
-        last: ClassId(9),
+        id: ClassId(10),
+        last: ClassId(10),
         parent: None,
         attributes: &[
             Attribute { name: "name", get: unsafe { Bound::host_fn(dom_exception_get_name_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
@@ -1224,6 +1334,7 @@ impl<E: Engine> DOMExceptionClass<E> {
             Attribute { name: "code", get: unsafe { Bound::host_fn(dom_exception_get_code_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
         ],
         operations: &[],
+        statics: &[],
         constants: &[
             Constant { name: "INDEX_SIZE_ERR", value: 1.0 },
             Constant { name: "DOMSTRING_SIZE_ERR", value: 2.0 },
@@ -1306,8 +1417,8 @@ impl<E: Engine> EventClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Event",
-        id: ClassId(10),
-        last: ClassId(11),
+        id: ClassId(11),
+        last: ClassId(12),
         parent: None,
         attributes: &[
             Attribute { name: "type", get: unsafe { Bound::host_fn(event_get_type_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
@@ -1331,6 +1442,7 @@ impl<E: Engine> EventClass<E> {
             Operation { name: "preventDefault", length: 0, call: unsafe { Bound::host_fn(event_prevent_default_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Undefined, effects: Effects::NONE } },
             Operation { name: "initEvent", length: 1, call: unsafe { Bound::host_fn(event_init_event_abi::<E>) }, sig: Signature { args: &[IdlType::String, IdlType::Boolean, IdlType::Boolean], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
         ],
+        statics: &[],
         constants: &[
             Constant { name: "NONE", value: 0.0 },
             Constant { name: "CAPTURING_PHASE", value: 1.0 },
@@ -1569,8 +1681,8 @@ impl<E: Engine> CustomEventClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "CustomEvent",
-        id: ClassId(11),
-        last: ClassId(11),
+        id: ClassId(12),
+        last: ClassId(12),
         parent: Some(&EventClass::<E>::DEF),
         attributes: &[
             Attribute { name: "detail", get: unsafe { Bound::host_fn(custom_event_get_detail_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Any, get: Effects::NONE, set: Effects::NONE } },
@@ -1578,6 +1690,7 @@ impl<E: Engine> CustomEventClass<E> {
         operations: &[
             Operation { name: "initCustomEvent", length: 1, call: unsafe { Bound::host_fn(custom_event_init_custom_event_abi::<E>) }, sig: Signature { args: &[IdlType::String, IdlType::Boolean, IdlType::Boolean, IdlType::Any], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
         ],
+        statics: &[],
         constants: &[],
         interceptors: None,
         ops: Some(&SideOps::<E>::OPS),
@@ -1624,14 +1737,69 @@ fn custom_event_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn custom_event_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, custom_event_constructor::<E>) } }
 
+pub struct AbortControllerClass<E>(PhantomData<E>);
+
+impl<E: Engine> AbortControllerClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "AbortController",
+        id: ClassId(13),
+        last: ClassId(13),
+        parent: None,
+        attributes: &[
+            Attribute { name: "signal", get: unsafe { Bound::host_fn(abort_controller_get_signal_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Object, get: Effects::NONE, set: Effects::NONE } },
+        ],
+        operations: &[
+            Operation { name: "abort", length: 0, call: unsafe { Bound::host_fn(abort_controller_abort_abi::<E>) }, sig: Signature { args: &[IdlType::Any], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+        ],
+        statics: &[],
+        constants: &[],
+        interceptors: None,
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: Some(unsafe { Bound::host_fn(abort_controller_constructor_abi::<E>) }),
+        length: 0,
+        error_prototype: false,
+    };
+}
+
+fn abort_controller_get_signal<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &AbortControllerClass::<E>::DEF)?;
+        impls::abort_controller::signal(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn abort_controller_get_signal_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, abort_controller_get_signal::<E>) } }
+
+fn abort_controller_abort<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &AbortControllerClass::<E>::DEF)?;
+        let a0 = cv::arg::<E>(args, 0);
+        impls::abort_controller::abort(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn abort_controller_abort_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, abort_controller_abort::<E>) } }
+
+fn abort_controller_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        impls::abort_controller::constructor(e, h)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn abort_controller_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, abort_controller_constructor::<E>) } }
+
 pub struct NodeListClass<E>(PhantomData<E>);
 
 impl<E: Engine> NodeListClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "NodeList",
-        id: ClassId(12),
-        last: ClassId(12),
+        id: ClassId(14),
+        last: ClassId(14),
         parent: None,
         attributes: &[
             Attribute { name: "length", get: unsafe { Bound::host_fn(node_list_get_length_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
@@ -1639,6 +1807,7 @@ impl<E: Engine> NodeListClass<E> {
         operations: &[
             Operation { name: "item", length: 1, call: unsafe { Bound::host_fn(node_list_item_abi::<E>) }, sig: Signature { args: &[IdlType::Number], result: IdlType::NullableObject, effects: Effects::THROWS } },
         ],
+        statics: &[],
         constants: &[],
         interceptors: Some(&Self::INTERCEPTORS),
         ops: Some(&SideOps::<E>::OPS),
@@ -1701,8 +1870,8 @@ impl<E: Engine> HTMLCollectionClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "HTMLCollection",
-        id: ClassId(13),
-        last: ClassId(13),
+        id: ClassId(15),
+        last: ClassId(15),
         parent: None,
         attributes: &[
             Attribute { name: "length", get: unsafe { Bound::host_fn(html_collection_get_length_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
@@ -1711,6 +1880,7 @@ impl<E: Engine> HTMLCollectionClass<E> {
             Operation { name: "item", length: 1, call: unsafe { Bound::host_fn(html_collection_item_abi::<E>) }, sig: Signature { args: &[IdlType::Number], result: IdlType::NullableObject, effects: Effects::THROWS } },
             Operation { name: "namedItem", length: 1, call: unsafe { Bound::host_fn(html_collection_named_item_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::NullableObject, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
         ],
+        statics: &[],
         constants: &[],
         interceptors: Some(&Self::INTERCEPTORS),
         ops: Some(&SideOps::<E>::OPS),

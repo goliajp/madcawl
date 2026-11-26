@@ -16,15 +16,15 @@ converts the result. The table holds a C-ABI shell per member
 glue (`shell.rs`).
 
 The parser reads the subset of Web IDL the files use: interfaces with
-a parent, a constructor, constants, attributes, operations with
-optional arguments and defaults (boolean, string literals, and
-null for `any`),
+a parent, a constructor, constants, attributes, operations (static
+ones too) with optional arguments and defaults (boolean, string
+literals, and null for `any`),
 nullable types, an indexed `getter` operation with an `iterable<T>`
 declaration, and extended attribute
 lists (only `[HostOps]`, `[Side]` (its objects are not nodes),
 `[Targets]` (nodes, and side objects of its own) and `[ErrorPrototype]`
-(its prototype object inherits from Error.prototype) on an interface, `[Atom]` on an argument, and `[CEReactions]` and
-`[NewObject]` on a member are acted on; `[SameObject]` documents the
+(its prototype object inherits from Error.prototype) on an interface, `[Atom]` and `[EnforceRange]` on an argument, and `[CEReactions]`,
+`[NewObject]`, `[RunsScript]` and `[Throws]` on a member are acted on; `[SameObject]` documents the
 implementation's caching).
 An interface with a `getter` operation of one `unsigned long` argument
 gets interceptors: its index getter calls the operation's
@@ -40,10 +40,11 @@ Each table entry carries the member's signature (`Signature`,
 `AttributeSig`): the IDL types of its arguments and result, and its
 effects. An argument converted by ToString may run script; a member
 with arguments may throw (too few, wrong type), as may a setter and a
-`[NewObject]` operation (the node limit); `[CEReactions]` marks a member
-that changes the tree and may run custom element reactions. Getters
-take no arguments and do not throw once the receiver passed its brand
-check.
+`[NewObject]` operation (the node limit) and a `[Throws]` one;
+`[CEReactions]` marks a member that changes the tree and may run custom
+element reactions, and `[RunsScript]` an operation that calls script
+itself (event listeners), which may change anything. Getters take no
+arguments and do not throw once the receiver passed its brand check.
 """
 import re
 import sys
@@ -61,6 +62,8 @@ TYPES = {
     '[LegacyNullToEmptyString] DOMString': 'cv::dom_string_null_empty(e, h, {v})?',
     'unsigned long': 'cv::to_uint32(e, h, {v})?',
     'EventListener?': 'cv::callback_or_null(e, {v})?',
+    'EventHandler': 'cv::event_handler::<E>(e, {v})',
+    '[EnforceRange] unsigned long long': 'cv::enforce_u64(e, h, {v})?',
     'boolean': 'e.to_boolean({v})',
     'any': '{v}',
 }
@@ -79,7 +82,7 @@ def parse(text):
                  'side': bool(ext and re.search(r'\bSide\b', ext)),
                  'targets': bool(ext and re.search(r'\bTargets\b', ext)),
                  'error_proto': bool(ext and re.search(r'\bErrorPrototype\b', ext)), 'consts': [], 'attrs': [], 'ops': [],
-                 'ctor': None, 'getter': None, 'named': None, 'iterable': False}
+                 'statics': [], 'ctor': None, 'getter': None, 'named': None, 'iterable': False}
         for member in body.split(';'):
             ext = re.match(r'^\s*\[([^\]]*)\]', member)
             flags = set(re.findall(r'\w+', ext.group(1))) if ext else set()
@@ -89,8 +92,8 @@ def parse(text):
             if re.fullmatch(r'iterable\s*<\s*\w+\s*>', member):
                 iface['iterable'] = True
                 continue
-            getter = member.startswith('getter ')
-            member = member[len('getter '):] if getter else member
+            getter, static = member.startswith('getter '), member.startswith('static ')
+            member = member.split(' ', 1)[1] if getter or static else member
             if member.startswith('const '):
                 c = re.fullmatch(r'const\s+(.+?)\s+(\w+)\s*=\s*(\S+)', member)
                 iface['consts'].append((c.group(2), c.group(3)))
@@ -103,8 +106,8 @@ def parse(text):
                 o = re.fullmatch(r'(.+?)\s+(\w+)\s*\((.*)\)', 'undefined ' * ctor + member, re.S)
                 args = []
                 for arg in filter(None, (x.strip() for x in o.group(3).split(','))):
-                    a = re.fullmatch(r'(\[\s*Atom\s*\]\s*)?(optional\s+)?(.+?)\s+(\w+)(?:\s*=\s*(\S+))?', arg)
-                    args.append({'type': ('[Atom] ' if a.group(1) else '') + a.group(3), 'name': a.group(4),
+                    a = re.fullmatch(r'(?:\[\s*(Atom|EnforceRange)\s*\]\s*)?(optional\s+)?(.+?)\s+(\w+)(?:\s*=\s*(\S+))?', arg)
+                    args.append({'type': (f'[{a.group(1)}] ' if a.group(1) else '') + a.group(3), 'name': a.group(4),
                                  'optional': bool(a.group(2)), 'default': a.group(5)})
                 op = {'name': o.group(2), 'ret': o.group(1), 'args': args, 'flags': flags}
                 if getter:
@@ -114,6 +117,8 @@ def parse(text):
                     iface[kind] = op
                 if ctor:
                     iface['ctor'] = op
+                elif static:
+                    iface['statics'].append(op)
                 else:
                     iface['ops'].append(op)
         out.append(iface)
@@ -178,12 +183,12 @@ def emit(ifaces, sources):
             set = 'Effects::NONE' if a['readonly'] else setter_effects(a)
             sig = f"AttributeSig {{ ty: IdlType::{idl_type(a['type'], names)}, get: Effects::NONE, set: {set} }}"
             attrs.append(f"Attribute {{ name: \"{a['name']}\", get: unsafe {{ Bound::host_fn({m}_get_{snake(a['name'])}_abi::<E>) }}, set: {s}, sig: {sig} }},")
-        ops = []
-        for o in i['ops']:
+        ops = {'operations': [], 'statics': []}
+        for field, o in [('operations', o) for o in i['ops']] + [('statics', o) for o in i['statics']]:
             length = sum(1 for a in o['args'] if not a['optional'])
-            ops.append(f"Operation {{ name: \"{o['name']}\", length: {length}, call: unsafe {{ Bound::host_fn({m}_{snake(o['name'])}_abi::<E>) }}, sig: {op_sig(o, names)} }},")
+            ops[field].append(f"Operation {{ name: \"{o['name']}\", length: {length}, call: unsafe {{ Bound::host_fn({m}_{snake(o['name'])}_abi::<E>) }}, sig: {op_sig(o, names)} }},")
         consts = [f'Constant {{ name: "{c}", value: {float(int(v, 0))!r} }},' for c, v in i['consts']]
-        for field, items in (('attributes', attrs), ('operations', ops), ('constants', consts)):
+        for field, items in (('attributes', attrs), ('operations', ops['operations']), ('statics', ops['statics']), ('constants', consts)):
             if items:
                 out += [f'        {field}: &['] + ['            ' + x for x in items] + ['        ],']
             else:
@@ -211,7 +216,7 @@ def emit(ifaces, sources):
                 out += glue(f"{m}_set_{snake(a['name'])}", i,
                             [f"let value = {convert(a['type'], 'value', names, sides)};",
                              f"impls::{m}::set_{snake(a['name'])}(e, h, this, value)"], 'set')
-        members = [(o, 'op') for o in i['ops']] + ([(i['ctor'], 'ctor')] if i['ctor'] else [])
+        members = [(o, 'op') for o in i['ops']] + [(o, 'ctor') for o in i['statics']] + ([(i['ctor'], 'ctor')] if i['ctor'] else [])
         for o, kind in members:
             body = []
             required = sum(1 for a in o['args'] if not a['optional'])

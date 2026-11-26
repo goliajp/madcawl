@@ -1,6 +1,8 @@
 //! The members of the bound interfaces, called by the generated glue
 //! with converted arguments.
 
+pub(crate) mod abort_controller;
+pub(crate) mod abort_signal;
 pub(crate) mod attributes;
 pub(crate) mod character_data;
 pub(crate) mod collections;

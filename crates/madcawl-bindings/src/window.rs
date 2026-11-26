@@ -10,8 +10,8 @@ use madcawl_str::{Atom, DomString};
 
 use crate::convert::{Thrown, arg, run, throw};
 use crate::generated::{
-    CharacterDataClass, CommentClass, CustomEventClass, DOMExceptionClass, DocumentClass, DocumentFragmentClass, ElementClass,
-    EventClass, EventTargetClass, HTMLCollectionClass, NodeClass, NodeListClass, TextClass,
+    AbortControllerClass, AbortSignalClass, CharacterDataClass, CommentClass, CustomEventClass, DOMExceptionClass, DocumentClass,
+    DocumentFragmentClass, ElementClass, EventClass, EventTargetClass, HTMLCollectionClass, NodeClass, NodeListClass, TextClass,
 };
 use crate::event::Target;
 use crate::host::DomHost;
@@ -37,7 +37,9 @@ impl<E: Engine> DomHost<E> {
         let d = self.wrap(e, doc);
         put(e, self, global.get(), "document", d.get());
         e.release(d);
-        let classes: [&'static ClassDef<E, DomHost<E>>; 13] = [
+        let classes: [&'static ClassDef<E, DomHost<E>>; 15] = [
+            &AbortControllerClass::<E>::DEF,
+            &AbortSignalClass::<E>::DEF,
             &CharacterDataClass::<E>::DEF,
             &TextClass::<E>::DEF,
             &CommentClass::<E>::DEF,
@@ -128,7 +130,7 @@ fn listener<E: Engine>(e: &mut E, h: &mut DomHost<E>, args: &[Value<E>], add: bo
     let o = crate::listeners::options(e, h, arg::<E>(args, 2), add)?;
     let Some(cb) = cb else { return Ok(()) };
     if add {
-        h.add_listener(e, Target::Window, ty, cb, &o);
+        crate::listeners::add(e, h, Target::Window, ty, cb, &o);
     } else {
         h.remove_listener(e, Target::Window, ty, o.capture, cb);
     }

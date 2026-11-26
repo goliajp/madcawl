@@ -256,6 +256,8 @@ pub struct ClassDef<E: Engine, H: 'static> {
     pub parent: Option<&'static ClassDef<E, H>>,
     pub attributes: &'static [Attribute<E, H>],
     pub operations: &'static [Operation<E, H>],
+    /// The static operations, members of the interface object.
+    pub statics: &'static [Operation<E, H>],
     pub constants: &'static [Constant],
     pub interceptors: Option<&'static Interceptors<E, H>>,
     /// The host object callbacks; a class without them uses its
