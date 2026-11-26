@@ -48,7 +48,9 @@ check.
 import re
 import sys
 
-from bindings_glue import glue, ident, idl_type, interceptor_glue, op_sig, setter_effects, snake
+# the glue module is imported from tools/, which leaves no cache there
+sys.dont_write_bytecode = True
+from bindings_glue import glue, ident, idl_type, interceptor_glue, op_sig, setter_effects, snake  # noqa: E402
 
 # the conversion of an argument of each IDL type; interface types are
 # converted by `convert`
