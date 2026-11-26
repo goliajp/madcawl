@@ -33,8 +33,8 @@ fn traverse<E: Engine>(h: &DomHost<E>, obj: HostRef, t: &mut E::Tracer) {
         Held::Side(r) => t.host(r.host_ref()),
         Held::Window => {}
     });
-    if let Some(d) = h.details.get(&r) {
-        d.trace(t);
+    for m in h.details.get(&r).into_iter().chain(h.target_edges.get(&r)) {
+        m.trace(t);
     }
     for l in h.side_listeners.get(&r).into_iter().flatten() {
         l.callback.trace(t);
@@ -46,8 +46,8 @@ fn traverse<E: Engine>(h: &DomHost<E>, obj: HostRef, t: &mut E::Tracer) {
 
 fn unlink<E: Engine>(h: &mut DomHost<E>, obj: HostRef, u: &mut E::Unlinker) {
     let r = side_of(h, obj);
-    if let Some(mut d) = h.details.remove(&r) {
-        d.unlink(u);
+    for mut m in h.details.remove(&r).into_iter().chain(h.target_edges.remove(&r)) {
+        m.unlink(u);
     }
     for mut l in h.side_listeners.remove(&r).unwrap_or_default() {
         l.callback.unlink(u);

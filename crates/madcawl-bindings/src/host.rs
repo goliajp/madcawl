@@ -36,15 +36,17 @@ pub struct DomHost<E: Engine> {
     /// Nodes moved between trees, being placed, and those the engine
     /// could not place yet (`trees.rs`).
     pub(crate) moved: Vec<NodeId>,
-    /// The roots of the detached trees placed as held (`trees.rs`).
-    pub(crate) pinned: Vec<NodeId>,
+    /// The roots of the detached trees placed as held by a dispatch in
+    /// progress (`trees.rs`).
+    pub(crate) pinned: std::collections::HashSet<NodeId>,
+    /// The events being dispatched, innermost last.
+    pub(crate) dispatching: Vec<crate::side::SideRef>,
+    /// A dispatch began or ended since the trees were last placed.
+    pub(crate) pins_changed: bool,
     /// The realm is detached: nothing is placed any more.
     pub(crate) closed: bool,
     /// Side objects whose wrapper is to be placed (again).
     pub(crate) unplaced_sides: Vec<crate::side::SideRef>,
-    /// How many event holds each side object has, on an engine that
-    /// places wrappers.
-    pub(crate) side_holds: HashMap<crate::side::SideRef, u32>,
     /// Suspects went to the engine since its last collection finished.
     pub(crate) collect_due: bool,
     /// The host objects that are not nodes (`side.rs`).
@@ -53,6 +55,9 @@ pub struct DomHost<E: Engine> {
     pub(crate) side_listeners: HashMap<crate::side::SideRef, Vec<Listener<E>>>,
     /// The detail of each CustomEvent that has one, a member of the event.
     pub(crate) details: HashMap<crate::side::SideRef, Member<E>>,
+    /// The wrapper of each event's target, a member of the event, on an
+    /// engine that places wrappers (`event.rs`).
+    pub(crate) target_edges: HashMap<crate::side::SideRef, Member<E>>,
 }
 
 impl<E: Engine> DomHost<E> {
@@ -77,13 +82,15 @@ impl<E: Engine> DomHost<E> {
             window_listeners: Vec::new(),
             next_listener: 0,
             moved: Vec::new(),
-            pinned: Vec::new(),
+            pinned: Default::default(),
+            dispatching: Vec::new(),
+            pins_changed: false,
             unplaced_sides: Vec::new(),
-            side_holds: HashMap::new(),
             closed: false,
             collect_due: false,
             sides: Default::default(),
             details: HashMap::new(),
+            target_edges: HashMap::new(),
             side_listeners: HashMap::new(),
         };
         if E::PLACES_WRAPPERS {

@@ -253,10 +253,14 @@ pub trait Engine: Control + Sized + 'static {
     /// stopped): nothing was placed or refused, and the host asks again
     /// before script next runs.
     ///
-    /// A host that holds a node of a detached tree across calls (an
-    /// event's target, a range's boundary) places that whole tree as
-    /// `Anchored` while it does, so that its wrappers, with what script
-    /// put on them, live as long as the hold.
+    /// A host that holds a node of a detached tree across calls keeps
+    /// that tree's wrappers, with what script put on them, as long as
+    /// the hold matters to script: while a host operation holds it (a
+    /// dispatch in progress), by placing the whole tree as `Anchored`;
+    /// when a host object holds it (an event's target, a range's
+    /// boundary), by keeping the node's wrapper as a member of the
+    /// holder's wrapper ([`Engine::member`]). Anchoring for the second
+    /// would make a root of a cycle that runs back through script.
     fn place_wrappers(&mut self, tree: Tree<Self::Value>, words: &[u64], refused: &mut Vec<usize>) -> bool {
         let _ = (tree, words, refused);
         true

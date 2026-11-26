@@ -18,17 +18,6 @@ impl Dom {
         out.extend(m.drain(..).filter(|&i| self.arena.is_live(i)).map(NodeId::at));
     }
 
-    /// Whether a node came to be held by a [`crate::HeldNode`], or
-    /// stopped being held, since the last call.
-    pub fn take_holds_changed(&mut self) -> bool {
-        std::mem::take(&mut self.holds_changed)
-    }
-
-    /// The nodes [`crate::HeldNode`]s hold, in no order.
-    pub fn held_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.held.keys().map(|&i| NodeId::at(i))
-    }
-
     /// Whether `n` names a live node.
     pub fn is_live(&self, n: NodeId) -> bool {
         self.arena.is_live(n.index())

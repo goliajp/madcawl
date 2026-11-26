@@ -124,20 +124,21 @@ impl<E: Engine> DomHost<E> {
         let word = E::wrapper_word(v.get());
         self.sides.get_mut(r).wrapper = word;
         self.sides.inc(r);
-        if E::PLACES_WRAPPERS && !self.place_side(e, r) {
-            self.unplaced_sides.push(r);
+        if E::PLACES_WRAPPERS {
+            if !self.place_side(e, r) {
+                self.unplaced_sides.push(r);
+            }
+            self.keep_target(e, r, v.get());
         }
         v
     }
 
     /// Place the wrapper of `r` in no tree: it lives while script holds
-    /// it, or anchored while an event holds `r` (as a held node's tree
-    /// is). `false` when the engine could not place it now.
+    /// it. `false` when the engine could not place it now.
     fn place_side(&mut self, e: &mut E, r: SideRef) -> bool {
         let word = self.sides.get(r).wrapper & !1;
-        let tree = if self.side_holds.contains_key(&r) { Tree::Anchored } else { Tree::New };
         let mut refused = Vec::new();
-        if !e.place_wrappers(tree, &[word], &mut refused) {
+        if !e.place_wrappers(Tree::New, &[word], &mut refused) {
             return false;
         }
         if !refused.is_empty() {
@@ -146,30 +147,7 @@ impl<E: Engine> DomHost<E> {
         true
     }
 
-    /// An event came to hold `r`: its wrapper is placed again before
-    /// script runs.
-    pub(crate) fn hold_side(&mut self, r: SideRef) {
-        if E::PLACES_WRAPPERS {
-            let k = self.side_holds.entry(r).or_insert(0);
-            *k += 1;
-            if *k == 1 {
-                self.unplaced_sides.push(r);
-            }
-        }
-    }
-
-    pub(crate) fn let_go_side(&mut self, r: SideRef) {
-        if let Some(k) = self.side_holds.get_mut(&r) {
-            *k -= 1;
-            if *k == 0 {
-                self.side_holds.remove(&r);
-                self.unplaced_sides.push(r);
-            }
-        }
-    }
-
-    /// Place the side wrappers the engine could not place before, and
-    /// those whose holds changed.
+    /// Place the side wrappers the engine could not place before.
     pub(crate) fn place_sides(&mut self, e: &mut E) {
         for r in std::mem::take(&mut self.unplaced_sides) {
             let live = self.sides.map.get(&r.0).is_some_and(|s| s.wrapper != 0);
@@ -226,8 +204,8 @@ impl<E: Engine> DomHost<E> {
         if !E::PLACES_WRAPPERS {
             return;
         }
-        if let Some(mut d) = self.details.remove(&r) {
-            d.forget();
+        for mut m in self.details.remove(&r).into_iter().chain(self.target_edges.remove(&r)) {
+            m.forget();
         }
         for mut l in self.side_listeners.remove(&r).unwrap_or_default() {
             l.callback.forget();
@@ -237,8 +215,8 @@ impl<E: Engine> DomHost<E> {
     /// Give back every side object's preserved wrapper edge, its members
     /// and the nodes it holds: the host is closing.
     pub(crate) fn close_sides(&mut self, e: &mut E) {
-        for (_, mut d) in std::mem::take(&mut self.details) {
-            d.close(e);
+        for mut m in std::mem::take(&mut self.details).into_values().chain(std::mem::take(&mut self.target_edges).into_values()) {
+            m.close(e);
         }
         for mut l in std::mem::take(&mut self.side_listeners).into_values().flatten() {
             l.callback.close(e);

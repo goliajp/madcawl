@@ -139,37 +139,6 @@ impl<E: Engine> DomHost<E> {
         }
     }
 
-    fn hold_target(&mut self, t: Target) -> Held {
-        match t {
-            Target::Node(n) => Held::Node(self.dom.hold(n)),
-            Target::Side(r) => {
-                self.sides.inc(r);
-                self.hold_side(r);
-                Held::Side(r)
-            }
-            Target::Window => Held::Window,
-        }
-    }
-
-    /// Give back what `held` holds.
-    pub(crate) fn let_go_held(&mut self, held: Held) {
-        match held {
-            Held::Node(n) => self.dom.let_go(n),
-            Held::Side(r) => {
-                self.let_go_side(r);
-                self.sides.dec(r);
-            }
-            Held::Window => {}
-        }
-    }
-
-    pub(crate) fn set_held(&mut self, r: SideRef, which: fn(&mut EventState) -> &mut Option<Held>, t: Option<Target>) {
-        let new = t.map(|t| self.hold_target(t));
-        if let Some(old) = std::mem::replace(which(self.event_mut(r)), new) {
-            self.let_go_held(old);
-        }
-    }
-
     /// Dispatch event `r` at node `target`; whether no listener canceled
     /// it. Listeners' exceptions are reported, not thrown.
     pub(crate) fn dispatch(&mut self, e: &mut E, r: SideRef, target: Target) -> Result<bool, Thrown> {
@@ -178,7 +147,9 @@ impl<E: Engine> DomHost<E> {
             return Err(throw_dom(e, self, "InvalidStateError", "the event is being dispatched or was not initialized"));
         }
         self.event_mut(r).dispatching = true;
-        self.set_held(r, |ev| &mut ev.target, Some(target));
+        let event = self.wrap_side(e, r);
+        self.set_target(e, r, Some(target));
+        self.keep_target(e, r, event.get());
         let path = match target {
             Target::Node(n) => {
                 let mut path: Vec<Target> = std::iter::successors(Some(n), |&n| self.dom.parent(n)).map(Target::Node).collect();
@@ -191,10 +162,11 @@ impl<E: Engine> DomHost<E> {
         };
         let held: Vec<Held> = path.iter().map(|&t| self.hold_target(t)).collect();
         self.event_mut(r).path = held;
-        // a detached target's tree is held now: its wrappers stay while
-        // listeners run
+        // the path's detached trees are anchored now: their wrappers stay
+        // while listeners run, also those a listener moves to another tree
+        self.dispatching.push(r);
+        self.pins_changed = true;
         self.regroup(e);
-        let event = self.wrap_side(e, r);
         for (i, &t) in path.iter().enumerate().rev() {
             let phase = if i == 0 { AT_TARGET } else { CAPTURING_PHASE };
             self.invoke(e, r, event.get(), t, phase, true);
@@ -205,7 +177,6 @@ impl<E: Engine> DomHost<E> {
                 self.invoke(e, r, event.get(), t, phase, false);
             }
         }
-        e.release(event);
         let ev = self.event_mut(r);
         (ev.phase, ev.dispatching, ev.stop, ev.stop_now) = (NONE, false, false, false);
         let gone: Vec<Held> = std::mem::take(&mut ev.path).into_iter().chain(ev.current.take()).collect();
@@ -213,6 +184,10 @@ impl<E: Engine> DomHost<E> {
         for h in gone {
             self.let_go_held(h);
         }
+        let i = self.dispatching.iter().rposition(|&d| d == r).expect("an event being dispatched");
+        self.dispatching.remove(i);
+        self.pins_changed = true;
+        e.release(event);
         Ok(!canceled)
     }
 

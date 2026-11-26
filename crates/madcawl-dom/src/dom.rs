@@ -91,9 +91,6 @@ pub struct Dom {
     /// The nodes inserted or removed, once the bindings track them
     /// (`moves.rs`).
     pub(crate) moves: Option<Vec<u32>>,
-    /// A node came to be held or stopped being held since the bindings
-    /// last asked (`moves.rs`).
-    pub(crate) holds_changed: bool,
 }
 
 /// An attribute as stored.
@@ -141,7 +138,6 @@ impl Dom {
             by_count: false,
             observer: None,
             moves: None,
-            holds_changed: false,
         };
         dom.doc = dom.new_document(false).expect("room for the document");
         dom

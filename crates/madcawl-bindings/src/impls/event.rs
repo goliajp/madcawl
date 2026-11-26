@@ -158,7 +158,7 @@ pub(crate) fn time_stamp<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: SideRef
 }
 
 /// The legacy initializer: does nothing while the event is dispatched.
-pub(crate) fn init_event<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: SideRef, ty: DomString, bubbles: bool, cancelable: bool) -> Result<(), Thrown> {
+pub(crate) fn init_event<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: SideRef, ty: DomString, bubbles: bool, cancelable: bool) -> Result<(), Thrown> {
     if h.event(this).dispatching {
         return Ok(());
     }
@@ -166,6 +166,6 @@ pub(crate) fn init_event<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: SideRef
     let ev = h.event_mut(this);
     (ev.ty, ev.bubbles, ev.cancelable, ev.initialized) = (ty, bubbles, cancelable, true);
     (ev.stop, ev.stop_now, ev.canceled, ev.trusted) = (false, false, false, false);
-    h.set_held(this, |ev| &mut ev.target, None);
+    h.set_target(e, this, None);
     Ok(())
 }

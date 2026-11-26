@@ -14,6 +14,7 @@ mod convert;
 mod event;
 mod event_loop;
 mod gc;
+mod holds;
 mod host;
 mod impls;
 mod listeners;
