@@ -32,9 +32,9 @@ pub(crate) struct ListState {
     pub filter: Option<Filter>,
     /// A fixed collection's nodes.
     pub items: Vec<Held>,
-    /// A live collection's nodes when the DOM was at `version`.
+    /// A live collection's nodes when the DOM was at `stamp`.
     nodes: Vec<NodeId>,
-    version: u64,
+    stamp: Option<(u64, u64)>,
 }
 
 impl ListState {
@@ -51,13 +51,22 @@ impl ListState {
         matches!(self.filter, None | Some(Filter::Children))
     }
 
-    fn refresh(&mut self, dom: &Dom) {
-        let (Some(root), Some(filter)) = (&self.root, &self.filter) else { return };
-        if self.version == dom.version() {
-            return;
+    /// What the nodes found last depend on, now: insertions and
+    /// removals, and for a collection by class the `class` attributes.
+    fn stamp(filter: &Filter, dom: &Dom) -> (u64, u64) {
+        let class = if matches!(filter, Filter::Classes(_)) { dom.class_version() } else { 0 };
+        (dom.tree_version(), class)
+    }
+
+    /// Find a live collection's nodes again if what they depend on
+    /// changed; whether it did.
+    fn refresh(&mut self, dom: &Dom) -> bool {
+        let (Some(root), Some(filter)) = (&self.root, &self.filter) else { return false };
+        let stamp = Self::stamp(filter, dom);
+        if self.stamp == Some(stamp) {
+            return false;
         }
-        let root = root.target();
-        let Target::Node(root) = root else { unreachable!("a collection's root is a node") };
+        let Target::Node(root) = root.target() else { unreachable!("a collection's root is a node") };
         self.nodes.clear();
         let element = |&n: &NodeId| dom.kind(n) == NodeKind::Element;
         match filter {
@@ -83,7 +92,8 @@ impl ListState {
                 }
             }
         }
-        self.version = dom.version();
+        self.stamp = Some(stamp);
+        true
     }
 
     fn get(&self, i: usize) -> Option<NodeId> {
@@ -132,7 +142,7 @@ impl<E: Engine> DomHost<E> {
     /// A live collection of the nodes below `root` that `filter` picks.
     pub(crate) fn live_list(&mut self, root: NodeId, filter: Filter) -> SideRef {
         let root = Some(self.hold_target(Target::Node(root)));
-        let l = ListState { root, filter: Some(filter), items: Vec::new(), nodes: Vec::new(), version: u64::MAX };
+        let l = ListState { root, filter: Some(filter), items: Vec::new(), nodes: Vec::new(), stamp: None };
         self.sides.add(SideData::List(l))
     }
 
@@ -150,7 +160,7 @@ impl<E: Engine> DomHost<E> {
     /// A fixed `NodeList` of `nodes`.
     pub(crate) fn fixed_list(&mut self, nodes: Vec<NodeId>) -> SideRef {
         let items = nodes.into_iter().map(|n| self.hold_target(Target::Node(n))).collect();
-        let l = ListState { root: None, filter: None, items, nodes: Vec::new(), version: 0 };
+        let l = ListState { root: None, filter: None, items, nodes: Vec::new(), stamp: None };
         self.sides.add(SideData::List(l))
     }
 
@@ -158,8 +168,14 @@ impl<E: Engine> DomHost<E> {
     fn fresh_list(&mut self, r: SideRef) -> &ListState {
         let dom = &self.dom;
         let SideData::List(l) = &mut self.sides.get_mut(r).data else { unreachable!("a collection's side object") };
-        l.refresh(dom);
+        self.list_rebuilds += u64::from(l.refresh(dom));
         l
+    }
+
+    /// How many times live collections found their nodes again since
+    /// the host was made.
+    pub fn list_rebuilds(&self) -> u64 {
+        self.list_rebuilds
     }
 
     pub(crate) fn list_item(&mut self, r: SideRef, i: u32) -> Option<NodeId> {

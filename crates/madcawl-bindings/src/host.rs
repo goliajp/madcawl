@@ -54,6 +54,8 @@ pub struct DomHost<E: Engine> {
     /// The live `childNodes` (false) and `children` (true) of a node, by
     /// node index, while alive (`lists.rs`).
     pub(crate) same_lists: HashMap<(u32, bool), crate::side::SideRef>,
+    /// How many times live collections found their nodes again.
+    pub(crate) list_rebuilds: u64,
 }
 
 impl<E: Engine> DomHost<E> {
@@ -86,6 +88,7 @@ impl<E: Engine> DomHost<E> {
             target_edges: HashMap::new(),
             side_listeners: HashMap::new(),
             same_lists: HashMap::new(),
+            list_rebuilds: 0,
         };
         if E::PLACES_WRAPPERS {
             h.dom.track_moves();

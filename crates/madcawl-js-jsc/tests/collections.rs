@@ -72,6 +72,33 @@ return [before, [xs.length, xy.length, bs.length, all.length, q.length, kids.len
 }
 
 #[test]
+fn changing_attributes_or_text_through_a_collection_does_not_make_it_look_again() {
+    let (mut e, mut h) = page("<ul id=u></ul>");
+    let src = "var u = document.getElementById('u');
+for (let i = 0; i < 2000; i++) u.appendChild(document.createElement('li')).appendChild(document.createTextNode('t'));
+window.lis = document.getElementsByTagName('li'); window.kids = u.children; window.nodes = u.childNodes;
+window.xs = u.getElementsByClassName('x');
+return [lis.length, kids.length, nodes.length, xs.length].join();";
+    assert_eq!(eval(&mut e, &mut h, src), "2000,2000,2000,0");
+    let before = h.list_rebuilds();
+    let src = "for (let i = 0; i < lis.length; i++) { lis[i].className = 'c' + i; kids[i].setAttribute('title', 't');
+  kids[i].id = 'i' + i; nodes[i].firstChild.data = 'u'; kids[i].removeAttribute('title'); }
+return [lis.length, kids.length, nodes.length].join();";
+    assert_eq!(eval(&mut e, &mut h, src), "2000,2000,2000");
+    assert_eq!(h.list_rebuilds(), before, "no collection looked again for attributes or text");
+    // a class change makes a collection by class look again, once
+    let src = "lis[7].className = 'x'; var a = xs.length; lis[8].id = 'q'; var b = xs.length; return [a, b, xs[0] === lis[7]].join();";
+    assert_eq!(eval(&mut e, &mut h, src), "1,1,true");
+    assert_eq!(h.list_rebuilds(), before + 1);
+    // an insertion makes each one look again, once
+    let src = "kids[0].parentNode.appendChild(document.createElement('li')); for (let i = 0; i < 100; i++) { lis[i].title = 'v'; lis.length; }
+return [lis.length, kids.length, nodes.length, xs.length].join();";
+    assert_eq!(eval(&mut e, &mut h, src), "2001,2001,2001,1");
+    assert_eq!(h.list_rebuilds(), before + 5);
+    h.close(&mut e);
+}
+
+#[test]
 fn a_collection_keeps_its_root_tree_and_a_dropped_one_is_freed() {
     let (mut e, mut h) = page("<p>x</p>");
     let (nodes, sides) = (h.dom.node_count(), h.side_objects());

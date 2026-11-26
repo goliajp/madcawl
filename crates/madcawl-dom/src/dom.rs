@@ -91,8 +91,8 @@ pub struct Dom {
     /// The nodes inserted or removed, once the bindings track them
     /// (`moves.rs`).
     pub(crate) moves: Option<Vec<u32>>,
-    /// Counts the changes to trees and attributes (`tree.rs`).
-    pub(crate) version: u64,
+    /// Counts insertions, removals and `class` changes (`tree.rs`).
+    pub(crate) versions: crate::tree::Versions,
 }
 
 /// An attribute as stored.
@@ -140,7 +140,7 @@ impl Dom {
             by_count: false,
             observer: None,
             moves: None,
-            version: 0,
+            versions: crate::tree::Versions::default(),
         };
         dom.doc = dom.new_document(false).expect("room for the document");
         dom

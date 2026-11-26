@@ -60,6 +60,7 @@ impl Dom {
         if u.ns() == AttrNamespace::None {
             let local = u.local();
             if local == atom!("class") {
+                self.versions.class += 1;
                 let mut was = Vec::new();
                 u.value().write_wtf8(&mut was);
                 self.tables.drop_class(&was);
@@ -160,6 +161,7 @@ impl Dom {
         }
         let kept = joined.as_deref().unwrap_or(kept);
         if plain && local == atom!("class") {
+            self.versions.class += 1;
             if let Some((s, k)) = self.tables.class(kept) {
                 return (s, Some(k), None, whole);
             }

@@ -233,12 +233,14 @@ fn removing_attributes_gives_back_bytes_entries_id_and_classes() {
     for (name, v) in [(atom!("class"), &b"x-only-here y"[..]), (atom!("id"), b"x-only-id"), (atom!("title"), b"t")] {
         assert!(dom.set_attribute(el, name, v));
     }
-    let before = dom.version();
+    let (tree, class) = (dom.tree_version(), dom.class_version());
     dom.remove_attribute(el, 2);
-    assert!(dom.version() > before, "a removal is a change");
+    assert_eq!((dom.tree_version(), dom.class_version()), (tree, class), "an id is neither");
     assert_eq!(dom.element_id(el), None);
     assert_eq!(names(&dom, el), ["lang=en", "class=x-only-here y", "title=t"]);
     dom.remove_attribute(el, 1);
+    assert!(dom.class_version() > class, "a class removal is a class change");
+    assert_eq!(dom.tree_version(), tree);
     assert_eq!(dom.class_list(el).0, 0, "the empty list");
     dom.remove_attribute(el, 1);
     assert_eq!(names(&dom, el), ["lang=en"]);

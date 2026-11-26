@@ -17,6 +17,15 @@ pub(crate) enum Change {
     Freed(u32),
 }
 
+/// The numbers live collections compare before they trust what they found.
+#[derive(Default)]
+pub(crate) struct Versions {
+    /// Counts insertions and removals.
+    pub tree: u64,
+    /// Counts the changes to `class` attributes.
+    pub class: u64,
+}
+
 impl Dom {
     pub(crate) fn inc(&mut self, i: u32) {
         let n = self.m(i);
@@ -45,15 +54,24 @@ impl Dom {
         }
     }
 
-    /// A number that changes whenever a tree, an attribute or a text
-    /// does: what a live collection checks before it trusts the nodes it
-    /// found last.
-    pub fn version(&self) -> u64 {
-        self.version
+    /// A number that changes whenever a node is inserted or removed:
+    /// what a live collection checks before it trusts the nodes it found
+    /// last. Attribute and text changes, and nodes freed, leave it.
+    pub fn tree_version(&self) -> u64 {
+        self.versions.tree
+    }
+
+    /// A number that changes whenever a `class` attribute is set, added
+    /// or removed: what a collection by class checks besides
+    /// `tree_version`.
+    pub fn class_version(&self) -> u64 {
+        self.versions.class
     }
 
     pub(crate) fn notify(&mut self, change: Change) {
-        self.version += 1;
+        if matches!(change, Change::Inserted(_) | Change::Removed { .. }) {
+            self.versions.tree += 1;
+        }
         // one predictable branch while nothing observes
         if self.observer.is_some() {
             self.record(&change);
