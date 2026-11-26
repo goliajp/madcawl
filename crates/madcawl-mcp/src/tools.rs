@@ -4,7 +4,6 @@
 
 use std::path::Path;
 
-use crate::client::Client;
 use crate::frame::{Frame, kind, tag};
 use crate::json::{Value, obj, s};
 
@@ -143,11 +142,13 @@ pub fn list() -> Value {
         ],
         &["page", "since"],
     ));
-    Value::Arr(all.into_iter().chain(crate::act::tools(page_prop())).collect())
+    all.extend(crate::act::tools(page_prop()));
+    all.push(crate::shot::tool(page_prop()));
+    Value::Arr(all)
 }
 
 /// `p3`, `3` or 3 as a page number.
-fn page_of(args: &Value) -> Result<u64, String> {
+pub(crate) fn page_of(args: &Value) -> Result<u64, String> {
     let bad = || "`page` is required: an id from open, like p1".to_owned();
     match args.get("page") {
         Some(Value::Str(p)) => p.trim().trim_start_matches('p').parse().map_err(|_| bad()),
@@ -237,6 +238,7 @@ pub(crate) fn request(name: &str, args: &Value, cwd: &Path) -> Result<Frame, Str
         "act" => crate::act::act_frame(page_of(args)?, args),
         "wait" => crate::act::wait_frame(page_of(args)?, args),
         "requests" => Ok(crate::act::requests_frame(page_of(args)?, args)),
+        "screenshot" => crate::shot::frame(page_of(args)?, args),
         _ => match VIEWS.iter().find(|v| v.0 == name) {
             Some(&(n, view, _)) => view_frame(n, view, args),
             None => Err(format!("unknown tool {name:?}")),
@@ -245,7 +247,7 @@ pub(crate) fn request(name: &str, args: &Value, cwd: &Path) -> Result<Frame, Str
 }
 
 /// The text a reply shows the agent, and whether it is an error.
-fn render(page: Option<u64>, f: &Frame) -> (String, bool) {
+pub(crate) fn render(page: Option<u64>, f: &Frame) -> (String, bool) {
     let text = f.get_str(tag::TEXT).unwrap_or("");
     let mut head = match (f.kind, page) {
         (kind::ERROR, _) => return (format!("error: {text}"), true),
@@ -273,19 +275,4 @@ fn render(page: Option<u64>, f: &Frame) -> (String, bool) {
         return (text.to_owned(), false);
     }
     (format!("{head}\n{text}"), false)
-}
-
-/// Carries out one tool call.
-pub fn call(client: &mut Client, name: &str, args: &Value, cwd: &Path) -> (String, bool) {
-    let f = match request(name, args, cwd) {
-        Ok(f) => f,
-        Err(e) => return (format!("error: {e}"), true),
-    };
-    let page = page_of(args).ok().filter(|_| name != "open");
-    match client.call(&f) {
-        // the extraction's own first line says where more records start
-        Ok(reply) if name == "extract" => render(page, &crate::extract::without_folded(reply)),
-        Ok(reply) => render(page, &reply),
-        Err(e) => (format!("error: {e}"), true),
-    }
 }

@@ -13,4 +13,5 @@ pub mod frame;
 pub mod json;
 mod json_number;
 pub mod server;
+pub mod shot;
 pub mod tools;

@@ -2,7 +2,7 @@
 //! stdout, calls carried out in order.
 
 use std::io::{BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::client::Client;
 use crate::json::{self, Value, obj, s};
@@ -62,11 +62,15 @@ impl Server {
             "tools/call" => {
                 let name = params.str_at("name").unwrap_or("");
                 let args = params.get("arguments").cloned().unwrap_or(obj([]));
-                let (text, is_error) = tools::call(&mut self.client, name, &args, &self.cwd);
-                let content = obj([("type", s("text")), ("text", Value::Str(text))]);
+                let out = call(&mut self.client, name, &args, &self.cwd);
+                let mut content = vec![obj([("type", s("text")), ("text", Value::Str(out.text))])];
+                if let Some(png) = out.image {
+                    let data = Value::Str(crate::shot::base64(&png));
+                    content.push(obj([("type", s("image")), ("data", data), ("mimeType", s("image/png"))]));
+                }
                 obj([
-                    ("content", Value::Arr(vec![content])),
-                    ("isError", Value::Bool(is_error)),
+                    ("content", Value::Arr(content)),
+                    ("isError", Value::Bool(out.is_error)),
                 ])
             }
             m => return Some(error(id, -32601, &format!("method not found: {m}"))),
@@ -99,6 +103,36 @@ impl Server {
             }
         }
     }
+}
+
+/// What a tool call gives back: its text, whether it is an error, and a
+/// PNG to hand over as image content.
+struct Output {
+    text: String,
+    is_error: bool,
+    image: Option<Vec<u8>>,
+}
+
+/// Carries out one tool call.
+fn call(client: &mut Client, name: &str, args: &Value, cwd: &Path) -> Output {
+    let fail = |text: String| Output { text, is_error: true, image: None };
+    let f = match tools::request(name, args, cwd) {
+        Ok(f) => f,
+        Err(e) => return fail(format!("error: {e}")),
+    };
+    let page = tools::page_of(args).ok().filter(|_| name != "open");
+    let reply = match client.call(&f) {
+        Ok(r) => r,
+        Err(e) => return fail(format!("error: {e}")),
+    };
+    // the extraction's own first line says where more records start
+    let reply = if name == "extract" { crate::extract::without_folded(reply) } else { reply };
+    let (text, is_error) = tools::render(page, &reply);
+    let image = match is_error {
+        false => crate::shot::picture(&reply),
+        true => None,
+    };
+    Output { text, is_error, image }
 }
 
 fn skip_line(input: &mut impl BufRead) -> std::io::Result<()> {
@@ -156,7 +190,7 @@ mod tests {
             names,
             [
                 "open", "close", "pages", "outline", "snapshot", "read", "find", "extract", "diff", "act",
-                "wait", "requests"
+                "wait", "requests", "screenshot"
             ]
         );
         let call = lines[2].get("result").unwrap();
@@ -182,6 +216,7 @@ mod tests {
         assert!(c(r#"{"page":"p1"}"#, "find").contains("needs `text`"));
         assert!(c(r#"{"page":"p1"}"#, "diff").contains("`since` is required"));
         assert!(c("{}", "open").contains("`path` is required"));
-        assert!(c("{}", "screenshot").contains("unknown tool"));
+        assert!(c("{}", "screenshot").contains("`page` is required"));
+        assert!(c("{}", "paint").contains("unknown tool"));
     }
 }

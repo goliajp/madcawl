@@ -16,6 +16,7 @@ use super::{Shared, code, error_frame};
 
 mod act;
 mod open;
+mod shot;
 
 const VIEWS: [&str; 5] = ["outline", "snapshot", "markdown", "find", "extract"];
 
@@ -167,6 +168,7 @@ impl<'a> Conn<'a> {
             kind::READ | kind::DIFF => self.page_request(f),
             kind::ACT | kind::WAIT => self.act(f),
             kind::REQUESTS => self.requests(f),
+            kind::SCREENSHOT => self.screenshot(f),
             kind::STATS if self.shared.config.stats => self.stats(),
             _ => {
                 let r = error_frame(code::UNKNOWN, "unknown request kind");

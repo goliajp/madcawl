@@ -22,6 +22,7 @@ pub mod kind {
     pub const CLOSE: u16 = 32;
     pub const PAGES: u16 = 33;
     pub const REQUESTS: u16 = 34;
+    pub const SCREENSHOT: u16 = 36;
 }
 
 pub mod tag {
@@ -59,6 +60,10 @@ pub mod tag {
     pub const WAIT_US: u8 = 33;
     pub const DIFF_US: u8 = 34;
     pub const LAYOUT_US: u8 = 35;
+    pub const SCALE: u8 = 36;
+    pub const MARKS: u8 = 37;
+    pub const DATA: u8 = 38;
+    pub const FILE: u8 = 39;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,9 +111,12 @@ impl Frame {
         self
     }
 
+    pub fn field(&self, tag: u8) -> Option<&[u8]> {
+        self.fields.iter().find(|(t, _)| *t == tag).map(|(_, v)| v.as_slice())
+    }
+
     pub fn get_str(&self, tag: u8) -> Option<&str> {
-        let (_, v) = self.fields.iter().find(|(t, _)| *t == tag)?;
-        std::str::from_utf8(v).ok()
+        std::str::from_utf8(self.field(tag)?).ok()
     }
 
     pub fn get_num(&self, tag: u8) -> Option<u64> {

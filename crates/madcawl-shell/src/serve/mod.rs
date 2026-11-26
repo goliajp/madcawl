@@ -3,10 +3,10 @@
 //! every agent session that connects (one connection is one session):
 //! it opens windowless pages from local files, and with `--net` from
 //! the network through its own network service; it answers the agent
-//! protocol's view, diff, action, wait and request-log requests on them,
-//! only on the session's own pages; it puts every reply that carries
-//! page content in a fresh envelope, and writes a line to the audit log
-//! for every request. Sessions, pages per session, frame sizes, each
+//! protocol's view, diff, action, wait, request-log and screenshot
+//! requests on them, only on the session's own pages; it puts every
+//! reply that carries page content in a fresh envelope, and writes a
+//! line to the audit log for every request. Sessions, pages per session, frame sizes, each
 //! page's change ring and request log are bounded; a page nobody asked
 //! anything of for the idle time is closed, and a session's pages close
 //! with it.
@@ -23,6 +23,7 @@ mod log;
 mod net;
 mod page;
 mod reqlog;
+mod shot;
 mod socket;
 mod submit;
 mod target;
