@@ -1,8 +1,11 @@
 //! `madcawl-content --serve <socket> [serve options]`: the windowless
 //! host of `madcawl-shell --serve`, with the scripts of the documents it
-//! loads over the network run on this executable's engine. With
-//! `--isolate` its content and network processes are this executable
-//! too (`--content`, `--netd`).
+//! loads over the network run on this executable's engine. It always
+//! runs as with `--isolate`: each session's pages live in a content
+//! process (`--content`) and the network service in one of its own
+//! (`--netd`), both this executable, so a script that never returns or
+//! an engine that crashes ends one content process, which the host
+//! ends and replaces, and never the host or another session.
 
 use std::process::ExitCode;
 
@@ -14,7 +17,7 @@ fn main() -> ExitCode {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
         ["--serve", rest @ ..] => match serve::parse_args(rest) {
-            Some(c) => match serve::Server::bind(c).and_then(serve::Server::run) {
+            Some(c) => match isolated(c).and_then(serve::Server::bind).and_then(serve::Server::run) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("madcawl-content: {e}");
@@ -29,7 +32,15 @@ fn main() -> ExitCode {
     }
 }
 
+/// `c` with its pages in content processes of this executable.
+fn isolated(mut c: serve::Config) -> std::io::Result<serve::Config> {
+    if c.isolate.is_none() {
+        c.isolate = Some(std::env::current_exe()?);
+    }
+    Ok(c)
+}
+
 fn usage() -> ExitCode {
-    eprintln!("usage: madcawl-content --serve <socket> [options]\n{}", serve::USAGE);
+    eprintln!("usage: madcawl-content --serve <socket> [options] (always with --isolate)\n{}", serve::USAGE);
     ExitCode::from(2)
 }

@@ -58,6 +58,7 @@ fn handle(mut s: TcpStream) {
         "/" => respond(&mut s, "200 OK", "Content-Type: text/html; charset=utf-8\r\nSet-Cookie: sid=k1; Path=/\r\n", PAGE.as_bytes()),
         "/blocking.js" if cookie.contains("sid=k1") => respond(&mut s, "200 OK", JS, b"log('blocking:' + document.currentScript.getAttribute('src'))"),
         "/blocking.js" => respond(&mut s, "200 OK", JS, b"log('blocking-without-the-cookie')"),
+        "/spin" => respond(&mut s, "200 OK", "Content-Type: text/html\r\n", b"<p>spin</p><script>while (true) {}</script>"),
         "/endless" => respond(&mut s, "200 OK", "Content-Type: text/html\r\n", ENDLESS.as_bytes()),
         "/defer.js" => respond(&mut s, "200 OK", JS, b"log('defer')"),
         "/slow.js" => {
@@ -100,14 +101,29 @@ impl Host {
         Host { dir, mcp }
     }
 
-    fn call(&mut self, tool: &str, args: &str) -> String {
+    /// The reply's text, and whether it is an error.
+    fn call_any(&mut self, tool: &str, args: &str) -> (String, bool) {
         let line = format!(r#"{{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{{"name":"{tool}","arguments":{args}}}}}"#);
         let v = self.mcp.handle(&line).unwrap();
         let r = v.get("result").unwrap();
         let Some(Value::Arr(c)) = r.get("content") else { panic!("{}", v.to_json()) };
-        let text = c[0].str_at("text").unwrap().to_owned();
-        assert!(!r.bool_at("isError").unwrap(), "{tool} {args}: {text}");
+        (c[0].str_at("text").unwrap().to_owned(), r.bool_at("isError").unwrap())
+    }
+
+    fn call(&mut self, tool: &str, args: &str) -> String {
+        let (text, error) = self.call_any(tool, args);
+        assert!(!error, "{tool} {args}: {text}");
         text
+    }
+}
+
+/// A host process, ended when the test ends, a failed one too.
+struct Child(std::process::Child);
+
+impl Drop for Child {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
     }
 }
 
@@ -147,28 +163,59 @@ fn a_page_whose_scripts_never_let_it_load_still_returns_each_call_in_time() {
     assert!(t0.elapsed() < Duration::from_secs(10), "two calls of 1.5 s and 0.5 s took {:?}", t0.elapsed());
 }
 
-/// The executable with `--isolate`: the page lives in a content process
-/// (this executable again), which fetches its scripts the same way.
-#[test]
-fn the_executable_runs_a_page_s_scripts_in_its_content_process() {
-    let origin = site();
-    let dir = std::env::temp_dir().canonicalize().unwrap().join(format!("mcc-exe-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+/// The executable, listening on a socket in `dir`, and an agent session
+/// on it.
+fn executable(dir: &std::path::Path, extra: &[&str]) -> (Child, Host) {
+    std::fs::create_dir_all(dir).unwrap();
     let sock = dir.join("s");
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_madcawl-content"))
-        .args(["--serve", sock.to_str().unwrap(), "--net", "--isolate", "--exit-idle", "30"])
-        .spawn()
-        .unwrap();
-    let t0 = std::time::Instant::now();
+    let child = Child(
+        std::process::Command::new(env!("CARGO_BIN_EXE_madcawl-content"))
+            .args(["--serve", sock.to_str().unwrap(), "--net", "--exit-idle", "30"])
+            .args(extra)
+            .spawn()
+            .unwrap(),
+    );
+    let t0 = Instant::now();
     while !sock.exists() {
         assert!(t0.elapsed() < Duration::from_secs(10), "the host never listened");
         std::thread::sleep(Duration::from_millis(20));
     }
-    let mut h = Host { dir: dir.clone(), mcp: madcawl_mcp::server::Server::new(sock, dir) };
-    let opened = h.call("open", &format!("{{\"path\":{}}}", json::s(&format!("{origin}/")).to_json()));
+    (child, Host { dir: dir.to_owned(), mcp: madcawl_mcp::server::Server::new(sock, dir.to_owned()) })
+}
+
+fn open_at(h: &mut Host, url: &str) -> (String, bool) {
+    h.call_any("open", &format!("{{\"path\":{}}}", json::s(url).to_json()))
+}
+
+/// The executable, which isolates without being asked: the page lives in
+/// a content process (this executable again), which fetches its scripts
+/// the same way.
+#[test]
+fn the_executable_runs_a_page_s_scripts_in_its_content_process() {
+    let origin = site();
+    let dir = std::env::temp_dir().canonicalize().unwrap().join(format!("mcc-exe-{}", std::process::id()));
+    let (_child, mut h) = executable(&dir, &[]);
+    let (opened, _) = open_at(&mut h, &format!("{origin}/"));
     let page = opened.split_whitespace().nth(1).unwrap().to_owned();
     let text = h.call("read", &format!(r#"{{"page":"{page}"}}"#));
-    let _ = child.kill();
-    let _ = child.wait();
     assert!(text.contains("log:|blocking:/blocking.js|error:/missing.js|inline:script|defer|dcl|async|load"), "{text}");
+}
+
+/// A script that never returns takes its session's content process, which
+/// the host kills; another session on the same host is answered meanwhile.
+#[test]
+fn a_script_that_never_returns_ends_its_content_process_and_not_the_host() {
+    let origin = site();
+    let dir = std::env::temp_dir().canonicalize().unwrap().join(format!("mcc-spin-{}", std::process::id()));
+    let (_child, mut spun) = executable(&dir, &["--hang-secs", "2"]);
+    let mut other = Host { dir: dir.join("other"), mcp: madcawl_mcp::server::Server::new(dir.join("s"), dir.clone()) };
+    let t0 = Instant::now();
+    let (text, error) = open_at(&mut spun, &format!("{origin}/spin"));
+    assert!(error && text.contains("did not answer within 2 s"), "{text}");
+    let (opened, error) = open_at(&mut other, &format!("{origin}/"));
+    assert!(!error, "{opened}");
+    let page = opened.split_whitespace().nth(1).unwrap().to_owned();
+    let text = other.call("read", &format!(r#"{{"page":"{page}"}}"#));
+    assert!(text.contains("|load"), "{text}");
+    assert!(t0.elapsed() < Duration::from_secs(20), "{:?}", t0.elapsed());
 }
