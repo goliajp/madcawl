@@ -228,3 +228,6 @@ fn what_is_not_shown_by_geometry_is_skipped_by_tab_and_waits() {
     assert!(replies[1].contains("the focus is on checkbox \"Box\""), "{}", replies[1]);
     assert_eq!(plain(&replies[0]), plain(&replies[1]));
 }
+
+#[path = "lazy_tree_tests.rs"]
+mod tree;
