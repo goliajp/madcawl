@@ -19,7 +19,7 @@ unsafe extern "C" {
 }
 
 /// A test's directory, removed with it.
-struct Dir(PathBuf);
+pub(super) struct Dir(pub PathBuf);
 
 impl Drop for Dir {
     fn drop(&mut self) {
@@ -28,7 +28,7 @@ impl Drop for Dir {
 }
 
 /// A host's shared state, with a network service on a thread when `net`.
-fn shared(name: &str, net: bool, with: impl FnOnce(&mut Config)) -> (Shared, Dir) {
+pub(super) fn shared(name: &str, net: bool, with: impl FnOnce(&mut Config)) -> (Shared, Dir) {
     let d = std::env::temp_dir().join(format!("mc-proxy-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     let mut c = Config::new(d.join("s"));
@@ -146,4 +146,62 @@ fn a_process_that_answers_but_hangs_on_its_page_list_is_killed_and_replaced() {
     // SAFETY: signal 0 only checks that the process exists
     assert_ne!(unsafe { kill(pid, 0) }, 0, "the hung process was killed");
     assert!(t.join().unwrap(), "the late answer reached no one");
+}
+
+#[test]
+fn a_process_that_hangs_reopening_a_page_is_killed_and_the_page_dropped() {
+    let (s, dir) = shared("restore-hang", false, |c| c.hang = Duration::from_millis(300));
+    // a content process that never answers, and says which process it is
+    let script = dir.0.join("hang.sh");
+    std::fs::write(&script, format!("#!/bin/sh\necho $$ >> {}\nexec /bin/sleep 30\n", dir.0.join("pids").display())).unwrap();
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let mut s = s;
+    s.config.isolate = Some(script);
+    let mut p = Proxy::new(1, &s);
+    let mine = p.new_page().get_num(tag::PAGE).unwrap() as u32;
+    p.adopt(vec![page(mine)]);
+    let note = p.recover("a test");
+    assert!(note.contains(&format!("p{mine} could not be opened again")), "{note}");
+    assert_eq!(p.restarts, 2, "the hung process was replaced");
+    assert!(p.pages.is_empty() && p.lost.contains(&mine));
+    assert_eq!(s.pages.load(Ordering::SeqCst), 0, "the dropped page was given back");
+    // the second process may not have written its number yet
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let pids = loop {
+        let text = std::fs::read_to_string(dir.0.join("pids")).unwrap_or_default();
+        let pids: Vec<i32> = text.lines().map(|l| l.parse().unwrap()).collect();
+        if pids.len() >= 2 || Instant::now() > deadline {
+            break pids;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(pids.len(), 2, "{pids:?}");
+    // SAFETY: signal 0 only checks that the process exists
+    assert_ne!(unsafe { kill(pids[0], 0) }, 0, "the process that hung was killed");
+    assert_eq!(p.child.as_ref().map(Content::pid), Some(pids[1]));
+}
+
+#[test]
+fn a_session_past_its_share_of_registrations_leaves_room_for_the_others() {
+    let (s, _dir) = shared("share", true, |c| c.max_sessions = 16);
+    let net = s.net.clone().unwrap();
+    let share = net.slot_limit() / 16;
+    let (mut one, mut two) = (Proxy::new(1, &s), Proxy::new(2, &s));
+    let reg = Frame::new(internal::NET_REGISTER);
+    for _ in 0..share {
+        assert_eq!(one.answer(&reg).unwrap().kind, kind::RESULT);
+    }
+    assert_eq!(code_of(&one.answer(&reg).unwrap()), Some(code::TOO_MANY_PAGES), "past its share");
+    assert_eq!(two.answer(&reg).unwrap().kind, kind::RESULT, "another session still registers");
+    // with one session allowed, its share is the whole limit, which the host holds to
+    let (s, _dir) = shared("host-cap", true, |c| c.max_sessions = 1);
+    let (mut one, mut two) = (Proxy::new(1, &s), Proxy::new(2, &s));
+    let limit = s.net.as_ref().unwrap().slot_limit();
+    for _ in 0..limit {
+        assert_eq!(one.answer(&reg).unwrap().kind, kind::RESULT);
+    }
+    assert_eq!(code_of(&two.answer(&reg).unwrap()), Some(code::TOO_MANY_PAGES), "the host is full");
+    let t = one.tokens.keys().next().unwrap().clone();
+    assert_eq!(one.answer(&Frame::new(internal::NET_RELEASE).bytes(tag::DATA, &t)).unwrap().kind, kind::RESULT);
+    assert_eq!(two.answer(&reg).unwrap().kind, kind::RESULT, "a released registration is room again");
 }

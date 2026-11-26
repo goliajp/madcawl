@@ -5,6 +5,13 @@
 //! session's partition or the profile's, drop a partition, or read the
 //! service's counts. A new network process starts with every jar empty;
 //! the session's next reply says so.
+//!
+//! The service holds a limited number of registrations across the host
+//! (`Net::slot_limit`), so a session gets a fair share of them: the limit
+//! divided among the sessions the host may have, or one more than the
+//! pages it has open when that is more, since its requests come one at a
+//! time and so at most one navigation's registration is made before the
+//! last is released.
 
 use madcawl_agent::{Frame, kind, tag};
 
@@ -23,9 +30,13 @@ impl Proxy<'_> {
         let Some(net) = self.shared.net.clone() else { return error_frame(code::REFUSED, "this host has no network") };
         let generation = net.generation();
         self.tokens.retain(|_, g| *g == generation);
-        if self.tokens.len() >= self.shared.config.max_pages * TOKENS_PER_PAGE {
+        if self.tokens.len() >= self.token_share(net.slot_limit()) {
             self.log("net-register", "error 13");
             return error_frame(code::TOO_MANY_PAGES, "the session holds as many network registrations as it may");
+        }
+        if !net.take_slot() {
+            self.log("net-register", "error 13 host");
+            return error_frame(code::TOO_MANY_PAGES, "the host holds as many network registrations as the network service takes");
         }
         match net.register(self.id) {
             Ok((token, g)) => {
@@ -34,18 +45,31 @@ impl Proxy<'_> {
                 self.tokens.insert(token, g);
                 r
             }
-            Err(e) => error_frame(code::IO, &format!("the network service: {e}")),
+            Err(e) => {
+                net.give_slots(1, generation);
+                error_frame(code::IO, &format!("the network service: {e}"))
+            }
         }
+    }
+
+    /// How many registrations the session may hold of the `limit` the
+    /// host may.
+    fn token_share(&self, limit: usize) -> usize {
+        let c = &self.shared.config;
+        let fair = limit / c.max_sessions.max(1);
+        let open = self.pages.len() + self.reserved.len();
+        fair.max(open + 1).min(c.max_pages * TOKENS_PER_PAGE)
     }
 
     pub(super) fn net_release(&mut self, q: &Frame) -> Frame {
         let (Some(net), Some(t)) = (self.shared.net.clone(), q.field(tag::DATA)) else {
             return error_frame(code::BAD_REQUEST, "no registration named");
         };
-        if self.tokens.remove(t).is_none() {
+        let Some(g) = self.tokens.remove(t) else {
             self.log("net-release", "error 11");
             return error_frame(code::REFUSED, "not a registration the host made for this session");
-        }
+        };
+        net.give_slots(1, g);
         match net.unregister(t) {
             Ok(_) => Frame::new(kind::RESULT),
             Err(e) => error_frame(code::IO, &format!("the network service: {e}")),
@@ -56,8 +80,18 @@ impl Proxy<'_> {
     /// ended; a network process that has ended took them with it.
     pub(super) fn drop_registrations(&mut self) {
         let Some(net) = self.shared.net.clone() else { return };
-        for (t, _) in self.tokens.drain() {
+        for (t, g) in self.tokens.drain() {
+            net.give_slots(1, g);
             let _ = net.unregister(&t);
+        }
+    }
+
+    /// Forgets the session's registrations once the service dropped them
+    /// with its partition.
+    pub(super) fn forget_registrations(&mut self) {
+        let Some(net) = self.shared.net.clone() else { return };
+        for (_, g) in self.tokens.drain() {
+            net.give_slots(1, g);
         }
     }
 
@@ -91,17 +125,5 @@ impl Proxy<'_> {
             None => reply = reply.str(tag::TEXT, JAR_LOST),
         }
         reply
-    }
-
-    /// An audit line from the content process, written under the
-    /// session's number whatever it says.
-    pub(super) fn audit(&self, q: &Frame) {
-        let f: Vec<&str> = q.fields.iter().filter(|(t, _)| *t == tag::FIELD).map(|(_, v)| std::str::from_utf8(v).unwrap_or("?")).collect();
-        let [origin, action, role, name, result] = f[..] else {
-            self.log("audit", "a malformed line from the content process");
-            return;
-        };
-        let line = crate::serve::log::Line { session: self.id, origin, action, role, name, result };
-        self.shared.log.write(&line);
     }
 }

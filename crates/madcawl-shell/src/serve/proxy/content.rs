@@ -20,6 +20,10 @@ use crate::serve::memory;
 /// pages before it is killed.
 const FINISH_WAIT: Duration = Duration::from_secs(30);
 
+/// The most frames read while idle before the host looks at the agent's
+/// side again; a process that keeps talking is read on the next turn.
+const IDLE_FRAMES: usize = 64;
+
 pub(super) struct Content {
     child: Child,
     s: UnixStream,
@@ -96,7 +100,7 @@ impl Content {
     /// lines, to `answer`): how it ended, when it has.
     pub fn idle_read(&mut self, answer: Answer) -> Option<String> {
         let mut deadline = Instant::now() + Duration::from_millis(50);
-        loop {
+        for _ in 0..IDLE_FRAMES {
             match read_until(&mut self.s, &mut self.buf, deadline) {
                 Ok(Some(q)) => {
                     // only notices come while idle: questions wait for a request
@@ -109,6 +113,7 @@ impl Content {
                 Err(_) => return Some(self.reap()),
             }
         }
+        None
     }
 
     /// Whether the process ended with success, which is how a content

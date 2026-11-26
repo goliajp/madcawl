@@ -14,7 +14,33 @@ const MAX_LOST: usize = 256;
 impl Proxy<'_> {
     /// The content process ended (`how`): another is started and the
     /// pages opened in it again, unless the brake holds; what came of it.
+    /// A page whose restore the new process does not answer, or ends on,
+    /// is dropped and that process is recovered in turn, so every round
+    /// has a page fewer to open and the rounds count toward the brake.
     pub(super) fn recover(&mut self, how: &str) -> String {
+        let mut how = how.to_owned();
+        let mut failed = Vec::new();
+        loop {
+            if let Some(why) = self.restart(&how) {
+                return self.drop_pages(&why);
+            }
+            match self.restore(&mut failed) {
+                Ok(opened) => {
+                    self.log("recovered", &format!("{} pages", self.pages.len()));
+                    let done: Vec<String> = opened.into_iter().chain(failed).collect();
+                    return match done.is_empty() {
+                        true => "a new content process was started".into(),
+                        false => format!("a new content process was started and the pages opened again: {}", done.join(", ")),
+                    };
+                }
+                Err(next) => how = next,
+            }
+        }
+    }
+
+    /// Ends what is left of the content process and starts another,
+    /// unless the brake holds; why not, when it was not started.
+    fn restart(&mut self, how: &str) -> Option<String> {
         if let Some(mut c) = self.child.take() {
             c.reap();
         }
@@ -29,31 +55,43 @@ impl Proxy<'_> {
             self.crashes.pop_front();
         }
         if self.crashes.len() >= BRAKE_CRASHES {
-            let why = format!("it ended {BRAKE_CRASHES} times within {} s", BRAKE_WINDOW.as_secs());
-            return self.drop_pages(&why);
+            return Some(format!("it ended {BRAKE_CRASHES} times within {} s", BRAKE_WINDOW.as_secs()));
         }
         if let Err(e) = self.start() {
-            return self.drop_pages(&format!("a new one could not start: {e}"));
+            return Some(format!("a new one could not start: {e}"));
         }
         self.restarts += 1;
-        let mut done = Vec::new();
-        for p in std::mem::take(&mut self.pages) {
+        None
+    }
+
+    /// Opens the pages again in the new process: where each is, or, in
+    /// `failed`, that it could not be. When the process does not answer
+    /// or ends, the page it was opening is dropped and the error says how
+    /// the process ended (killed first when it hung); the pages not yet
+    /// opened are kept for the next process.
+    fn restore(&mut self, failed: &mut Vec<String>) -> Result<Vec<String>, String> {
+        let mut opened = Vec::new();
+        let mut pending = std::mem::take(&mut self.pages).into_iter();
+        while let Some(p) = pending.next() {
             match self.ask(&p.restore_frame(), self.shared.config.hang) {
                 Ok(r) if r.kind == kind::RESULT => {
-                    done.push(format!("p{} at y={}", p.id, p.y));
+                    opened.push(format!("p{} at y={}", p.id, p.y));
                     self.pages.push(p);
                 }
-                _ => {
-                    done.push(format!("p{} could not be opened again", p.id));
+                Ok(_) => {
+                    failed.push(format!("p{} could not be opened again", p.id));
                     self.lose(p.id);
+                }
+                Err(fault) => {
+                    let how = self.ended(fault);
+                    failed.push(format!("p{} could not be opened again ({how})", p.id));
+                    self.lose(p.id);
+                    self.pages.extend(pending);
+                    return Err(format!("{how}, opening p{} again", p.id));
                 }
             }
         }
-        self.log("recovered", &format!("{} pages", self.pages.len()));
-        match done.is_empty() {
-            true => "a new content process was started".into(),
-            false => format!("a new content process was started and the pages opened again: {}", done.join(", ")),
-        }
+        Ok(opened)
     }
 
     /// Drops every page after the brake held or a restart failed.

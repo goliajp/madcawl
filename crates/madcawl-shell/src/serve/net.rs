@@ -14,6 +14,7 @@ use std::io;
 use std::os::unix::fs::FileTypeExt as _;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -36,6 +37,9 @@ pub struct Net {
     pub downloads: Option<PathBuf>,
     /// The network process, when the service runs in one of its own
     pub process: Option<Process>,
+    /// Registrations content processes hold through the host, counted
+    /// against the service's limit
+    slots: AtomicUsize,
 }
 
 /// The control channel is the host's own; a content process has none and
@@ -82,13 +86,15 @@ impl Net {
     }
 
     fn new(socket: &Path, control: Control, downloads: Option<PathBuf>, process: Option<Process>) -> Net {
-        Net { socket: socket.to_path_buf(), control: Channel::Own(Mutex::new(control)), replaced: Condvar::new(), downloads, process }
+        let control = Channel::Own(Mutex::new(control));
+        Net { socket: socket.to_path_buf(), control, replaced: Condvar::new(), downloads, process, slots: AtomicUsize::new(0) }
     }
 
     /// The network of a content process, whose host holds the control
     /// channel and answers its frames through `link`.
     pub fn through(link: Arc<Link>, socket: &Path, downloads: Option<PathBuf>) -> Net {
-        Net { socket: socket.to_path_buf(), control: Channel::Host(link), replaced: Condvar::new(), downloads, process: None }
+        let control = Channel::Host(link);
+        Net { socket: socket.to_path_buf(), control, replaced: Condvar::new(), downloads, process: None, slots: AtomicUsize::new(0) }
     }
 
     fn own(&self) -> &Mutex<Control> {
@@ -105,7 +111,7 @@ impl Net {
         let dir = downloads.map(|d| d.0.to_path_buf());
         netproc::start(spec, |host, pid| {
             let process = Process::default();
-            process.pid.store(pid, std::sync::atomic::Ordering::SeqCst);
+            process.pid.store(pid, Ordering::SeqCst);
             Ok(Arc::new(Net::new(socket, Control::new(host, CONTROL_WAIT)?, dir, Some(process))))
         })
     }
@@ -122,9 +128,11 @@ impl Net {
             Err(e) => eprintln!("madcawl-shell: the new network process's channel: {e}"),
         }
         if let Some(p) = &self.process {
-            p.pid.store(pid, std::sync::atomic::Ordering::SeqCst);
-            p.restarts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            p.pid.store(pid, Ordering::SeqCst);
+            p.restarts.fetch_add(1, Ordering::SeqCst);
         }
+        // the new process holds no registrations
+        self.slots.store(0, Ordering::SeqCst);
         drop(c);
         self.replaced.notify_all();
     }
@@ -156,7 +164,30 @@ impl Net {
     /// Which network process the control channel is to, counting from 0;
     /// a new one starts with every session's cookie jar empty.
     pub fn generation(&self) -> u64 {
-        self.process.as_ref().map_or(0, |p| u64::from(p.restarts.load(std::sync::atomic::Ordering::SeqCst)))
+        self.process.as_ref().map_or(0, |p| u64::from(p.restarts.load(Ordering::SeqCst)))
+    }
+
+    /// How many registrations the host may hold for content processes:
+    /// the limit the service itself is started with, which its
+    /// connections share, so that a session the host refuses no more is
+    /// not left to the service to refuse.
+    pub fn slot_limit(&self) -> usize {
+        ServerLimits::default().clients
+    }
+
+    /// Counts one more registration against `slot_limit`; whether there
+    /// was room.
+    pub fn take_slot(&self) -> bool {
+        let limit = self.slot_limit();
+        self.slots.try_update(Ordering::SeqCst, Ordering::SeqCst, |n| (n < limit).then_some(n + 1)).is_ok()
+    }
+
+    /// Gives back `n` registrations made in network process `generation`;
+    /// those of a process since replaced went with it.
+    pub fn give_slots(&self, n: usize, generation: u64) {
+        if n > 0 && generation == self.generation() {
+            let _ = self.slots.try_update(Ordering::SeqCst, Ordering::SeqCst, |c| Some(c.saturating_sub(n)));
+        }
     }
 
     /// Registers a connection of the host's own for agent session

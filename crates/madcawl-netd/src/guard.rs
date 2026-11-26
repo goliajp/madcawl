@@ -26,9 +26,12 @@
 //! field may only lower credentials (the lowest of its values holds).
 //! Navigations are fetched by the host itself, on a connection whose
 //! token it registered with `NAVIGATION` set instead of a URL; frames on
-//! such a connection go through as sent, and the token never leaves the
-//! host. Same-site frames of another origin share the document's
-//! registration until frames are registered on their own.
+//! such a connection go through as sent, held only to the registration's
+//! cookie partition. A host may hand such a token to a process of its own
+//! that loads whole pages, navigations included, in one partition; that
+//! process's frames are then not checked against any document. Same-site
+//! frames of another origin share the document's registration until
+//! frames are registered on their own.
 //!
 //! Each registration is in a cookie partition the host names, the
 //! profile's own jar when it names none (`partition`). Dropping a

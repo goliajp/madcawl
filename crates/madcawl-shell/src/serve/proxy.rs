@@ -20,6 +20,7 @@
 //! hears from it only through registrations the host makes in the
 //! session's own cookie partition (`netreg`).
 
+mod audit;
 mod content;
 mod netreg;
 mod pages;
@@ -69,12 +70,13 @@ struct Proxy<'a> {
     /// The session's cookies went with a network process that ended, and
     /// its next reply has not said so yet
     jar_lost: bool,
+    audit: audit::Budget,
 }
 
 impl<'a> Proxy<'a> {
     fn new(id: u32, shared: &'a Shared) -> Proxy<'a> {
         let (pages, reserved, tokens) = (Vec::new(), Vec::new(), HashMap::new());
-        Proxy { id, shared, child: None, pages, reserved, lost: VecDeque::new(), crashes: VecDeque::new(), restarts: 0, tokens, jar: None, jar_lost: false }
+        Proxy { id, shared, child: None, pages, reserved, lost: VecDeque::new(), crashes: VecDeque::new(), restarts: 0, tokens, jar: None, jar_lost: false, audit: audit::Budget::new() }
     }
 
     fn log(&self, action: &str, result: &str) {
@@ -258,12 +260,13 @@ impl<'a> Proxy<'a> {
         if let Some(c) = self.child.take() {
             c.finish(&mut |q| self.answer(q));
         }
+        self.audit_dropped();
         let ids: Vec<u32> = self.pages.drain(..).map(|p| p.id).chain(self.reserved.drain(..)).collect();
         for id in ids {
             self.release(id);
         }
         // dropping the partition drops its registrations with it
-        self.tokens.clear();
+        self.forget_registrations();
         if let Some(net) = &self.shared.net
             && let Err(e) = net.end_session(self.id)
         {

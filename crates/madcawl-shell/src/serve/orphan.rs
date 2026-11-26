@@ -25,7 +25,18 @@ unsafe extern "C" {
     fn getppid() -> i32;
     fn getpid() -> i32;
     fn close(fd: i32) -> i32;
+    fn getrlimit(resource: i32, rlp: *mut Rlimit) -> i32;
 }
+
+#[repr(C)]
+struct Rlimit {
+    cur: u64,
+    max: u64,
+}
+
+const RLIMIT_NOFILE: i32 = 8;
+/// The most descriptors tried when they cannot be listed.
+const MAX_SWEEP: u64 = 65536;
 
 /// Blocks until process `pid` exits; an error when it cannot be watched
 /// (it is gone already, for one).
@@ -52,17 +63,25 @@ fn wait_exit(pid: i32) -> io::Result<()> {
 
 /// Closes every descriptor above standard error, which a child of the
 /// host inherited without asking for it (a listening socket handed to
-/// the host, say); called first thing, before any thread starts.
+/// the host, say); called first thing, before any thread starts. When
+/// the open ones cannot be listed, every number up to the descriptor
+/// limit is closed instead.
 pub(crate) fn close_inherited_fds() {
     // SAFETY: getpid has no preconditions
-    let fds = match crate::rusage::fds(unsafe { getpid() }) {
-        Ok(f) => f,
-        Err(e) => return eprintln!("madcawl-shell: cannot list the inherited descriptors: {e}"),
-    };
+    let fds = crate::rusage::fds(unsafe { getpid() }).unwrap_or_else(|_| (3..sweep_end()).collect());
     for fd in fds.into_iter().filter(|&fd| fd > 2) {
         // SAFETY: nothing in this process holds these yet
         unsafe { close(fd) };
     }
+}
+
+/// One past the highest descriptor number this process may have, at
+/// most `MAX_SWEEP`.
+fn sweep_end() -> i32 {
+    let mut r = Rlimit { cur: 0, max: 0 };
+    // SAFETY: r is a writable rlimit for the call
+    let limit = if unsafe { getrlimit(RLIMIT_NOFILE, &mut r) } == 0 { r.cur } else { MAX_SWEEP };
+    limit.min(MAX_SWEEP) as i32
 }
 
 /// Exits this process when its parent does.
@@ -85,6 +104,13 @@ pub(crate) fn exit_with_parent() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sweep_reaches_every_descriptor_this_process_may_open() {
+        let end = sweep_end();
+        let f = std::fs::File::open("/dev/null").unwrap();
+        assert!(std::os::fd::AsRawFd::as_raw_fd(&f) < end && end as u64 <= MAX_SWEEP, "{end}");
+    }
 
     #[test]
     fn a_child_exit_is_seen() {
