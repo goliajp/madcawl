@@ -68,6 +68,11 @@ impl<E: Engine> DomHost<E> {
     /// realm: the engine hands every wrapper notice and cycle candidate
     /// of the isolate to the host that settles, which must be the one
     /// whose nodes they are. A host of a closed realm is no obstacle.
+    ///
+    /// The host is ended by [`DomHost::close`], never just dropped: the
+    /// nodes, collections and events script still holds keep counts and
+    /// handles only `close` gives back, and a debug build panics when a
+    /// host is dropped while it still holds nodes.
     pub fn new(e: &mut E, dom: Dom) -> Self {
         let () = E::VALUE_IS_ONE_WORD;
         assert_eq!(e.live_realms(), 0, "one live host per isolate");
