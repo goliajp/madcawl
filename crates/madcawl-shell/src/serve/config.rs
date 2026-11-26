@@ -47,6 +47,9 @@ pub struct Config {
     /// Time each request of a session and log one that runs longer than
     /// this, naming the stage it is in (see `watch`)
     pub watch: Option<Duration>,
+    /// The memory cap of the process the session's pages are in (see
+    /// `memory`); over it the process exits
+    pub memory_cap: Option<u64>,
 }
 
 impl Config {
@@ -76,11 +79,12 @@ impl Config {
             approve: Vec::new(),
             stats: false,
             watch: None,
+            memory_cap: None,
         }
     }
 }
 
-pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds>] [--listen-fd N] [--exit-idle <seconds>] [--net] [--downloads <dir>] [--upload-allow <dir>]... [--approve <origin>]... [--stats] [--watch-ms N]
+pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds>] [--listen-fd N] [--exit-idle <seconds>] [--net] [--downloads <dir>] [--upload-allow <dir>]... [--approve <origin>]... [--stats] [--watch-ms N] [--memory-cap-mib N]
          pages and their stylesheets open only from below the --allow directories;
          without --allow, only from below the current directory;
          --net lets pages come from http and https URLs, each session's in a cookie jar of its own that starts empty and ends with it;
@@ -89,6 +93,8 @@ pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--au
          --approve lets a form with a password field be submitted to <origin> (scheme://host[:port]);
          --watch-ms logs a request still running after N ms, and once more when it runs ten times as
          long (at least 10 s), naming the stage it is in, and a slow request's time by stage when it ends;
+         --memory-cap-mib drops the stylesheet cache past three quarters of N MiB of footprint and exits
+         past N (a host without --isolate holds every session's pages and exits with them);
          --stats answers the host's own counters (shared stylesheet cache, pages open) to any session;
          --listen-fd accepts on an inherited listening socket instead of binding <socket>;
          --exit-idle exits once no session has been open for that long (checked once a period
@@ -128,6 +134,7 @@ pub fn parse_args(args: &[&str]) -> Option<Config> {
             "--exit-idle" => c.exit_idle = Some(Duration::from_secs(n()? as u64)),
             "--downloads" => c.downloads = Some(PathBuf::from(v)),
             "--upload-allow" => c.uploads.push(PathBuf::from(v).canonicalize().ok()?),
+            "--memory-cap-mib" => c.memory_cap = Some(n()? as u64 * (1 << 20)),
             "--watch-ms" => c.watch = Some(Duration::from_millis(n()? as u64)),
             "--approve" => c.approve.push(v.trim_end_matches('/').to_ascii_lowercase()),
             _ => return None,

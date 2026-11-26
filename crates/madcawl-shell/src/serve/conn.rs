@@ -11,6 +11,7 @@ use madcawl_agent::{Envelope, Frame, kind, tag};
 use super::limit::Bucket;
 use super::log::Line;
 use super::page::Page;
+use super::memory::{self, Cap};
 use super::watch::Watch;
 use super::wire::kind_name;
 use super::wire::{Got, read_frame};
@@ -46,7 +47,7 @@ impl<'a> Conn<'a> {
             shared,
             pages: Vec::new(),
             bucket: Bucket::new(shared.config.rate, shared.config.burst),
-            watch: shared.config.watch.and_then(|slow| Watch::for_session(id, slow)),
+            watch: shared.config.watch.and_then(|slow| Watch::for_session(id, slow, shared.config.memory_cap.map(Cap::new))),
         }
     }
 
@@ -84,6 +85,9 @@ impl<'a> Conn<'a> {
                     let reply = self.admit(&f);
                     if let Some(w) = &self.watch {
                         w.end();
+                    }
+                    if let Some(cap) = self.shared.config.memory_cap {
+                        memory::check(Cap::new(cap), self.id);
                     }
                     (reply, false)
                 }

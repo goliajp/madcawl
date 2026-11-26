@@ -194,6 +194,18 @@ impl SheetCache {
         }
     }
 
+    /// Drops every sheet, as when the process is short of memory; what it
+    /// weighed.
+    pub fn clear(&self) -> usize {
+        let mut i = self.lock();
+        let hashes: Vec<u64> = i.by_hash.keys().copied().collect();
+        let weight = i.weight;
+        for h in hashes {
+            i.remove(h);
+        }
+        weight
+    }
+
     pub fn stats(&self) -> SheetCacheStats {
         let i = self.lock();
         SheetCacheStats {
@@ -339,6 +351,17 @@ mod tests {
         c.get(HERE, "a {}".into()).unwrap();
         c.get(other, "a {}".into()).unwrap();
         assert_eq!((c.stats().parses, c.stats().hits), (3, 1));
+    }
+
+    #[test]
+    fn clear_drops_every_partition() {
+        let c = SheetCache::new(1 << 20);
+        c.get(HERE, "a {}".into()).unwrap();
+        c.get(Scope { partition: 2, ..HERE }, "b {}".into()).unwrap();
+        assert_eq!(c.clear(), weight("a {}") + weight("b {}"));
+        let s = c.stats();
+        assert_eq!((s.entries, s.weight, s.names), (0, 0, 0));
+        assert_eq!(c.clear(), 0);
     }
 
     #[test]

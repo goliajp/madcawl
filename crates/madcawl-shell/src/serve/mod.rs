@@ -20,6 +20,7 @@ mod doc;
 mod limit;
 mod loader;
 mod log;
+pub mod memory;
 mod net;
 mod page;
 mod reqlog;

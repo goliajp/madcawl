@@ -55,6 +55,12 @@ pub(crate) fn site(url: &str) -> String {
     }
 }
 
+/// Drops every stylesheet the cache holds; what they weighed by its
+/// estimate.
+pub(crate) fn drop_sheets() -> usize {
+    SHEETS.clear()
+}
+
 /// Drops the stylesheets of agent session `session`, which has ended.
 pub(crate) fn forget_session(session: u32) {
     SHEETS.forget(partition_of(session));

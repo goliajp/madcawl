@@ -16,6 +16,8 @@ use std::cell::RefCell;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use super::memory::{self, Cap};
+
 /// The most stages a request is split into; later ones are counted in
 /// the last.
 const MAX_STAGES: usize = 12;
@@ -93,10 +95,12 @@ impl Watch {
     }
 
     /// The watchdog of session `id`'s request loop, which runs on the
-    /// calling thread; none when its thread cannot start.
-    pub(crate) fn for_session(id: u32, slow: Duration) -> Option<Watch> {
+    /// calling thread, checking the memory cap while a request runs when
+    /// there is one; none when its thread cannot start.
+    pub(crate) fn for_session(id: u32, slow: Duration, cap: Option<Cap>) -> Option<Watch> {
         let sink: Sink = Box::new(move |line| eprintln!("madcawl-shell: session {id}: watchdog: {line}"));
-        match Watch::start(Limits::new(slow), sink, None) {
+        let every = cap.map(|cap| Box::new(move || memory::check(cap, id)) as Box<dyn Fn() + Send + Sync>);
+        match Watch::start(Limits::new(slow), sink, every) {
             Ok(w) => {
                 w.install();
                 Some(w)
