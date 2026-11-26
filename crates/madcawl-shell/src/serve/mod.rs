@@ -30,6 +30,7 @@ mod orphan;
 mod page;
 mod proxy;
 mod reqlog;
+pub mod scripts;
 mod shot;
 mod socket;
 mod submit;

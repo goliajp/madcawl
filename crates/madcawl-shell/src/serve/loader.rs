@@ -106,6 +106,15 @@ impl Pending {
         }
     }
 
+    pub fn is_done(&self) -> bool {
+        self.done
+    }
+
+    /// The body of a response that came and is not an error.
+    pub fn ok_body(&self) -> Option<&[u8]> {
+        (self.failed.is_none() && self.status.is_some_and(|s| s < 400)).then_some(&self.body[..])
+    }
+
     /// As a reply shows a request still in flight.
     pub fn line(&self) -> String {
         let ms = self.started.elapsed().as_millis();
@@ -128,6 +137,8 @@ pub(crate) enum Stage {
     #[default]
     Idle,
     Document(u64),
+    /// The document's scripts run (`scripts.rs`)
+    Scripts(Box<super::scripts::Scripting>),
     Sheets(Box<Parsed>),
 }
 
@@ -194,7 +205,7 @@ impl Loader {
     }
 
     /// The next stage once what the current one waits on is in.
-    fn advance(&mut self, conn: &mut NetConn) -> std::io::Result<Option<Loaded>> {
+    pub(crate) fn advance(&mut self, conn: &mut NetConn) -> std::io::Result<Option<Loaded>> {
         match &self.stage {
             Stage::Idle => Ok(None),
             Stage::Document(id) if self.done(*id) => {
@@ -208,14 +219,19 @@ impl Loader {
                 if let Some((file, bytes)) = p.download {
                     return Ok(Some(Loaded::Downloaded { file, bytes }));
                 }
-                let (dom, encoding) = doc::parse(&p.body, &p.content_type, charset_of(&p.content_type));
                 let url = p.final_url.map_or(p.url, |u| super::submit::masked(&u, &p.mask));
-                let masked = super::submit::is_masked(&url);
-                let parsed = Parsed { dom, encoding, url, masked, status: p.status.unwrap_or(0) };
+                let (masked, status) = (super::submit::is_masked(&url), p.status.unwrap_or(0));
+                if let Some(s) = super::scripts::open(&p.body, &p.content_type, charset_of(&p.content_type), (url.clone(), masked, status)) {
+                    self.stage = Stage::Scripts(Box::new(s));
+                    return self.advance(conn);
+                }
+                let (dom, encoding) = doc::parse(&p.body, &p.content_type, charset_of(&p.content_type));
+                let parsed = Parsed { dom, encoding, url, masked, status };
                 self.request_sheets(conn, &parsed)?;
                 self.stage = Stage::Sheets(Box::new(parsed));
                 self.advance(conn)
             }
+            Stage::Scripts(_) => self.scripts_step(conn),
             Stage::Sheets(_) if self.sheets.values().all(|id| self.done(*id)) => {
                 let Stage::Sheets(parsed) = std::mem::take(&mut self.stage) else { unreachable!() };
                 let mut got = HashMap::new();
@@ -235,7 +251,7 @@ impl Loader {
 
     /// Asks for the document's linked stylesheets over the network, as
     /// requests of the document's URL without its query or fragment.
-    fn request_sheets(&mut self, conn: &mut NetConn, parsed: &Parsed) -> std::io::Result<()> {
+    pub(crate) fn request_sheets(&mut self, conn: &mut NetConn, parsed: &Parsed) -> std::io::Result<()> {
         let Ok(base) = Url::parse(&parsed.url) else { return Ok(()) };
         for s in sheet_sources(&parsed.dom) {
             let SheetSource::Link { href, .. } = s else { continue };
@@ -246,7 +262,7 @@ impl Loader {
             if !matches!(u.scheme(), "http" | "https") {
                 continue;
             }
-            let f = Frame::new(kind::FETCH).str(tag::URL, u.as_str()).str(tag::INITIATOR, &initiator(&base));
+            let f = Frame::new(kind::FETCH).str(tag::URL, u.as_str()).str(tag::INITIATOR, &initiator(base.as_str()));
             let id = conn.fetch(f)?;
             self.inflight.push((id, Pending::new("stylesheet", "GET", u.as_str().to_owned())));
             self.sheets.insert(href, id);
@@ -257,9 +273,8 @@ impl Loader {
 
 /// The document's URL as its subresource requests name it: no query or
 /// fragment, which may hold what a form sent.
-fn initiator(doc: &Url) -> String {
-    let s = doc.as_str();
-    s[..s.find(['?', '#']).unwrap_or(s.len())].to_owned()
+pub(crate) fn initiator(doc: &str) -> String {
+    doc[..doc.find(['?', '#']).unwrap_or(doc.len())].to_owned()
 }
 
 #[cfg(test)]
@@ -269,6 +284,6 @@ mod tests {
     #[test]
     fn a_subresource_initiator_has_no_query() {
         let u = Url::parse("http://127.0.0.1:8/gate?user=al&pin=s3cret#top").unwrap();
-        assert_eq!(initiator(&u), "http://127.0.0.1:8/gate");
+        assert_eq!(initiator(u.as_str()), "http://127.0.0.1:8/gate");
     }
 }
