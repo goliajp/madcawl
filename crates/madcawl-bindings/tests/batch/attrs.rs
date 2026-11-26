@@ -111,3 +111,26 @@ fn read_and_drop_the_attr<E: Driver>(js: &mut Js<E>, keep: E::Value) {
     js.set(keep, "attr", E::undefined());
     js.drop_all([el, attr]);
 }
+
+/// `setAttribute` by a qualified name changes the parser's namespaced
+/// attribute of that name, not a second one beside it.
+pub fn set_attribute_by_qualified_name_finds_a_namespaced_attribute<E: Driver>() {
+    let mut js = Js::<E>::parsed("<svg><a xlink:href=u></a></svg>");
+    let doc = js.doc();
+    let sel = js.str("a");
+    let a = js.call(doc.get(), "querySelector", &[sel.get()]);
+    let (name, v) = (js.str("xlink:href"), js.str("v"));
+    let attr = js.call(a.get(), "getAttributeNode", &[name.get()]);
+    js.run(a.get(), "setAttribute", &[name.get(), v.get()]);
+    let names = js.call(a.get(), "getAttributeNames", &[]);
+    assert_eq!(js.read(names.get(), "length"), "1", "one attribute");
+    assert_eq!((js.read(attr.get(), "value"), js.read(attr.get(), "namespaceURI")), ("v".into(), "http://www.w3.org/1999/xlink".into()));
+    let upper = js.str("XLINK:HREF");
+    js.run(a.get(), "setAttribute", &[upper.get(), v.get()]);
+    let names2 = js.call(a.get(), "getAttributeNames", &[]);
+    assert_eq!(js.read(names2.get(), "length"), "2", "names are not lowercased outside HTML");
+    js.audit();
+    js.drop_all([names2, upper, names, attr, v, name, a, sel, doc]);
+    let Js { mut e, h } = js;
+    h.close(&mut e);
+}

@@ -140,3 +140,8 @@ fn an_attr_is_the_same_object_and_follows_its_element() {
 fn an_attr_holds_its_element_until_it_is_dropped() {
     batch::an_attr_holds_its_element_until_it_is_dropped::<E>();
 }
+
+#[test]
+fn set_attribute_by_qualified_name_finds_a_namespaced_attribute() {
+    batch::set_attribute_by_qualified_name_finds_a_namespaced_attribute::<E>();
+}

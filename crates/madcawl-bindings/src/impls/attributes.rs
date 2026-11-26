@@ -1,7 +1,8 @@
 //! Element's attribute members, and what `NamedNodeMap` shares with
 //! them. Attributes are found by qualified name, lowercased first on an
-//! HTML element; setting one with a prefix is not told apart yet: the
-//! name is the local name. Taking an attribute off goes through
+//! HTML element: setting one changes the first attribute of that name,
+//! in a namespace or not, and adds one in no namespace, the whole name
+//! its local name, when there is none. Taking an attribute off goes through
 //! [`take_off`], so that its `Attr` keeps its value.
 
 use madcawl_dom::NodeId;
@@ -101,8 +102,14 @@ fn set<E: Engine>(e: &mut E, h: &mut DomHost<E>, el: NodeId, local: Atom, value:
 
 pub(crate) fn set_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, name: DomString, value: DomString) -> Result<(), Thrown> {
     let n = checked_name(e, h, this, &name)?;
-    let local = h.names.hold(&n);
-    set(e, h, this, local, &value)
+    let Some(k) = find(h, this, &name) else {
+        let local = h.names.hold(&n);
+        return set(e, h, this, local, &value);
+    };
+    let prefix = h.dom.attributes(this).nth(k).expect("the attribute found").prefix;
+    let mut v = Vec::new();
+    value.write_wtf8(&mut v);
+    if h.dom.set_attribute_at(this, k, prefix, &v) { Ok(()) } else { Err(full(e, h)) }
 }
 
 pub(crate) fn remove_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, name: DomString) -> Result<(), Thrown> {
