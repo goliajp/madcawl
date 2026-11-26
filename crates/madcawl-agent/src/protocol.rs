@@ -35,6 +35,10 @@ pub mod kind {
     /// the host's own counters, process-wide; answered only by a host
     /// started to answer them
     pub const STATS: u16 = 35;
+    /// A picture of a page painted offscreen: its viewport, the whole
+    /// page or one element, optionally with the interactive elements
+    /// marked by their references; answered by the host
+    pub const SCREENSHOT: u16 = 36;
 }
 
 pub mod tag {
@@ -98,6 +102,15 @@ pub mod tag {
     /// document out: the first question of geometry on a document lays it
     /// out
     pub const LAYOUT_US: u8 = 35;
+    /// Device pixels per CSS px, in hundredths: 100 for 1, 50 for half
+    pub const SCALE: u8 = 36;
+    /// 1 to mark each interactive element with its reference
+    pub const MARKS: u8 = 37;
+    /// A picture's PNG bytes
+    pub const DATA: u8 = 38;
+    /// A file name to save a picture under in the session's downloads
+    /// directory, instead of sending it back
+    pub const FILE: u8 = 39;
 }
 
 /// The views by number on the wire; `extract` is a view of records.

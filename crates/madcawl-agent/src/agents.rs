@@ -121,7 +121,7 @@ impl Agents {
     /// A tree built for the outline made whole when `whole` asks more
     /// than the page outline, or read again whole under a new page
     /// generation when what it was built from changed (`partial.rs`).
-    fn settle(&mut self, dom: &mut Dom, inputs: Inputs, whole: bool) {
+    pub(crate) fn settle(&mut self, dom: &mut Dom, inputs: Inputs, whole: bool) {
         if self
             .tree
             .as_mut()

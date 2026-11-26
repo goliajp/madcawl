@@ -34,6 +34,7 @@ mod geom;
 mod html_role;
 mod html_table;
 mod index;
+mod marks;
 mod name;
 mod native;
 mod partial;
@@ -55,6 +56,7 @@ pub use agents::{AgentError, Agents, MAX_SESSIONS, RING_CAP, SessionId, ViewKind
 pub use envelope::Envelope;
 pub use frame::{Frame, FrameError, MAX_FIELDS, MAX_FRAME};
 pub use geom::{Geometry, Place, Rect};
+pub use marks::Marked;
 pub use name::Source;
 pub use protocol::{kind, read_request, tag};
 pub use record::Record;
