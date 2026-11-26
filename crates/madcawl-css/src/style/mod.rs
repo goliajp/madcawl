@@ -86,6 +86,7 @@ mod resolve_grid;
 mod restyle;
 mod roots;
 mod rules;
+mod seeded;
 mod shared;
 mod shorthand;
 mod sources;

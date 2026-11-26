@@ -25,6 +25,7 @@ use super::compute::Run;
 use super::features::name_key;
 use super::hints::hints;
 use super::matching::text;
+use super::seeded::Map;
 
 /// The parent key of the root element.
 pub(crate) const ROOT: u32 = u32::MAX;
@@ -42,7 +43,7 @@ pub(crate) struct PathKeys {
     texts: HashMap<Box<[u8]>, u64>,
     /// The bytes the keys of `sigs` and `texts` hold
     held: usize,
-    keys: HashMap<(u32, u32), u32>,
+    keys: Map<(u32, u32), u32>,
     /// By key, once an element with the key has been styled in full:
     /// the style's place in the table, the custom property set, and what
     /// it leaves about its pseudo-elements

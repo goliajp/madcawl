@@ -133,7 +133,7 @@ fn start(h: u64, mask: usize) -> usize {
 }
 
 // a seed per process, so that values colliding under the mix cannot be worked out ahead of time
-fn seed() -> u64 {
+pub(crate) fn seed() -> u64 {
     static SEED: OnceLock<u64> = OnceLock::new();
     *SEED.get_or_init(|| RandomState::new().hash_one(0u8))
 }

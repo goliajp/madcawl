@@ -4,8 +4,6 @@
 //! classes, its name, `:root` if it is the root, and the names of its
 //! attributes, and the rules in none.
 
-use std::collections::HashMap;
-
 use madcawl_dom::{Dom, NodeId, NodeKind};
 use madcawl_str::atom;
 
@@ -17,6 +15,7 @@ use super::decls::What;
 use super::keys::{Key, Namer};
 use super::props::Prop;
 use super::rules::{Rules, Sel};
+use super::seeded::Map;
 
 /// Ids and classes are keyed by their atom, or in quirks mode, where
 /// they match ASCII case-insensitively, by `caseless_hash` of their
@@ -24,14 +23,14 @@ use super::rules::{Rules, Sel};
 #[derive(Default)]
 pub(crate) struct Buckets {
     quirks: bool,
-    id: HashMap<u64, Vec<u32>>,
-    class: HashMap<u64, Vec<u32>>,
-    local: HashMap<u32, Vec<u32>>,
+    id: Map<u64, Vec<u32>>,
+    class: Map<u64, Vec<u32>>,
+    local: Map<u32, Vec<u32>>,
     /// Rules with `:root` and no id, class or name: they match the root element only
     root: Vec<u32>,
     /// Rules with an attribute selector and no id, class, name or `:root`, by the attribute's name as
     /// written and lowercase: an element they match has an attribute of one of the two names
-    attr: HashMap<u32, Vec<u32>>,
+    attr: Map<u32, Vec<u32>>,
     any: Vec<u32>,
     /// By rule, for the pseudo-element buckets, 1 for a `::before` rule and 2 for an `::after` one
     pub kinds: Vec<u8>,
@@ -144,7 +143,7 @@ impl Buckets {
     /// most of them on a large stylesheet, and an unbucketed rule is in no bucket.
     pub fn candidates(&self, dom: &Dom, el: NodeId, out: &mut Vec<u32>) {
         out.clear();
-        let mut add = |map: &HashMap<u64, Vec<u32>>, k: u64| {
+        let mut add = |map: &Map<u64, Vec<u32>>, k: u64| {
             if let Some(v) = map.get(&k) {
                 out.extend_from_slice(v);
             }
