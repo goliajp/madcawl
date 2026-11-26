@@ -5,7 +5,8 @@
 //! <file|-> -o <out.png>` lays it out in a 1280x800 viewport and paints
 //! the first screen (`--full`: the whole page) offscreen at device scale
 //! 2 (`--scale 1` for 1); `madcawl-shell --serve <socket>` serves
-//! windowless pages to agents over a Unix socket; `madcawl-shell fetch
+//! windowless pages to agents over a Unix socket; `madcawl-shell
+//! reftest` runs reference tests read from stdin; `madcawl-shell fetch
 //! <url> -o <file>` saves a page fetched over the network.
 
 use std::io::{Read as _, Write as _};
@@ -16,11 +17,12 @@ use std::time::{Duration, Instant};
 use madcawl_dom::{Dom, NodeKind};
 use madcawl_html::Encoding;
 use madcawl_shell::load::{self, Sheets};
-use madcawl_shell::{Read, Shown, audit, read, rusage, serve, shot};
+use madcawl_shell::{Read, Shown, audit, read, reftest, rusage, serve, shot};
 
 const USAGE: &str = "usage: madcawl-shell read <file|-> [--charset <label>] [--stats <file>]
        madcawl-shell audit <file|-> [--charset <label>]
        madcawl-shell shot <file|-> -o <out.png> [--charset <label>] [--scale 1|2] [--full]
+       madcawl-shell reftest [--root <dir>] [--font <file>]... < cases
        madcawl-shell fetch <url> -o <file>
        ";
 
@@ -238,12 +240,14 @@ fn cmd_shot(a: &Args) -> std::io::Result<()> {
     std::io::stderr().write_all(e.as_bytes())
 }
 
-fn cmd_serve(args: &[&str]) -> ExitCode {
-    let Some(c) = serve::parse_args(args) else {
-        eprintln!("{USAGE}{}", serve::USAGE);
-        return ExitCode::from(2);
-    };
-    match serve::Server::bind(c).and_then(serve::Server::run) {
+fn usage() -> ExitCode {
+    eprintln!("{USAGE}{}", serve::USAGE);
+    ExitCode::from(2)
+}
+
+/// The exit code of a command that ran: a failure with its error printed.
+fn finished<E: std::fmt::Display>(r: Result<(), E>) -> ExitCode {
+    match r {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("madcawl-shell: {e}");
@@ -255,21 +259,24 @@ fn cmd_serve(args: &[&str]) -> ExitCode {
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    if let ["--serve", rest @ ..] = args.as_slice() {
-        return cmd_serve(rest);
-    }
-    if let ["fetch", url, "-o", out] = args.as_slice() {
-        return match madcawl_shell::fetch::command(url, out) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("madcawl-shell: {e}");
-                ExitCode::FAILURE
-            }
-        };
+    match args.as_slice() {
+        ["--serve", rest @ ..] => {
+            return match serve::parse_args(rest) {
+                Some(c) => finished(serve::Server::bind(c).and_then(serve::Server::run)),
+                None => usage(),
+            };
+        }
+        ["reftest", rest @ ..] => {
+            return match reftest::command(rest) {
+                Err(None) => usage(),
+                r => finished(r.map_err(Option::unwrap_or_default)),
+            };
+        }
+        ["fetch", url, "-o", out] => return finished(madcawl_shell::fetch::command(url, out)),
+        _ => {}
     }
     let Some(a) = parse_args(&args) else {
-        eprintln!("{USAGE}{}", serve::USAGE);
-        return ExitCode::from(2);
+        return usage();
     };
     let done = match a.cmd {
         "read" => cmd_read(&a).map(|_| true),
