@@ -135,13 +135,13 @@ fn timer<E: Engine>(e: &mut E, h: &mut DomHost<E>, args: &[Value<E>], repeat: bo
     };
     let ms = match args.get(1) {
         Some(&v) => match e.to_number(h, v) {
-            Some(n) => n,
+            Some(n) => crate::convert::to_int32(n),
             None => {
                 e.release(handler);
                 return Err(Thrown);
             }
         },
-        None => 0.0,
+        None => 0,
     };
     let rest = args.iter().skip(2).map(|&v| Root::new(e.retain(v))).collect();
     Ok(h.event_loop.add_timer(Root::new(handler), rest, ms, repeat))
@@ -157,10 +157,8 @@ fn set_interval<E: Engine>(e: &mut E, h: &mut DomHost<E>, _: Value<E>, args: &[V
 
 fn clear_timer<E: Engine>(e: &mut E, h: &mut DomHost<E>, _: Value<E>, args: &[Value<E>]) -> Owned<Value<E>> {
     run(e, h, |e, h| {
-        let n = e.to_number(h, arg::<E>(args, 0)).ok_or(Thrown)?;
-        if n.is_finite()
-            && n >= 1.0
-            && n <= f64::from(u32::MAX)
+        let n = crate::convert::to_int32(e.to_number(h, arg::<E>(args, 0)).ok_or(Thrown)?);
+        if n >= 1
             && let Some(t) = h.event_loop.remove_timer(n as u32)
         {
             t.handler.release(e);

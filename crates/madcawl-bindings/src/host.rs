@@ -181,8 +181,9 @@ impl<E: Engine> DomHost<E> {
     }
 
     /// Give back everything this host holds in the engine: listeners,
-    /// preserved wrappers, the realm. What script still holds is the
-    /// engine's to free.
+    /// preserved wrappers (of nodes in the document and out of it), the
+    /// realm. What script still holds is the engine's to free; the
+    /// engine tells no host about this realm's wrappers again.
     pub fn close(mut self, e: &mut E) {
         self.close_loop(e);
         self.close_window(e);
@@ -191,9 +192,9 @@ impl<E: Engine> DomHost<E> {
                 l.callback.clear(e);
             }
         }
-        let doc = self.dom.document();
-        let nodes: Vec<NodeId> = std::iter::once(doc).chain(self.dom.descendants(doc)).collect();
-        for n in nodes {
+        // wrappers made since the last settle are preserved by it
+        self.settle(e);
+        for n in self.dom.wrapped() {
             let w = self.dom.wrapper(n);
             if w & 1 != 0 {
                 self.dom.set_wrapper_preserved(n, false);

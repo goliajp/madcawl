@@ -16,15 +16,16 @@ use crate::host::DomHost;
 
 /// Nested timers past this depth wait at least `MIN_NESTED_MS`.
 const NESTING_CLAMP: u32 = 5;
-const MIN_NESTED_MS: f64 = 4.0;
-const NS_PER_MS: f64 = 1e6;
+const MIN_NESTED_MS: u32 = 4;
+const NS_PER_MS: u64 = 1_000_000;
 
 pub(crate) struct Timer<E: Engine> {
     pub id: u32,
     /// A function, or a string compiled when the timer fires.
     pub handler: Root<E>,
     pub args: Vec<Root<E>>,
-    pub repeat: Option<u64>,
+    /// The interval asked for, in milliseconds.
+    pub repeat: Option<u32>,
     pub nesting: u32,
 }
 
@@ -36,6 +37,8 @@ pub enum Clock {
 
 pub struct EventLoop<E: Engine> {
     timers: BTreeMap<(u64, u64), Timer<E>>,
+    /// Each live timer's key; a running timer keeps its entry, which
+    /// clearing it removes.
     by_id: HashMap<u32, (u64, u64)>,
     next_id: u32,
     seq: u64,
@@ -65,25 +68,26 @@ impl<E: Engine> EventLoop<E> {
         }
     }
 
-    pub(crate) fn add_timer(&mut self, handler: Root<E>, args: Vec<Root<E>>, ms: f64, repeat: bool) -> u32 {
-        let nesting = self.nesting + 1;
-        let ms = if ms.is_nan() || ms < 0.0 { 0.0 } else { ms };
-        let ms = if nesting > NESTING_CLAMP { ms.max(MIN_NESTED_MS) } else { ms };
-        let delay = (ms * NS_PER_MS) as u64;
+    /// A timer of `ms` milliseconds, already a Web IDL `long`.
+    pub(crate) fn add_timer(&mut self, handler: Root<E>, args: Vec<Root<E>>, ms: i32, repeat: bool) -> u32 {
+        let ms = ms.max(0) as u32;
         let id = self.next_id;
-        self.next_id = self.next_id.wrapping_add(1).max(1);
-        let t = Timer { id, handler, args, repeat: repeat.then_some(delay), nesting };
-        self.schedule(t, delay);
+        self.next_id = if self.next_id == i32::MAX as u32 { 1 } else { self.next_id + 1 };
+        let t = Timer { id, handler, args, repeat: repeat.then_some(ms), nesting: self.nesting + 1 };
+        self.schedule(t, ms);
         id
     }
 
-    fn schedule(&mut self, t: Timer<E>, delay: u64) {
-        let key = (self.now_ns() + delay, self.seq);
+    fn schedule(&mut self, t: Timer<E>, ms: u32) {
+        let ms = if t.nesting > NESTING_CLAMP { ms.max(MIN_NESTED_MS) } else { ms };
+        let key = (self.now_ns().saturating_add(u64::from(ms) * NS_PER_MS), self.seq);
         self.seq += 1;
         self.by_id.insert(t.id, key);
         self.timers.insert(key, t);
     }
 
+    /// Take timer `id` off the list; `None` when there is none, or when
+    /// it is the one running, which then is not run again.
     pub(crate) fn remove_timer(&mut self, id: u32) -> Option<Timer<E>> {
         let key = self.by_id.remove(&id)?;
         self.timers.remove(&key)
@@ -98,9 +102,7 @@ impl<E: Engine> EventLoop<E> {
             Clock::Virtual(t) => *t = (*t).max(key.0),
             Clock::Real(_) => {}
         }
-        let t = self.timers.remove(&key).expect("the first timer");
-        self.by_id.remove(&t.id);
-        Some(t)
+        Some(self.timers.remove(&key).expect("the first timer"))
     }
 
     pub fn pending(&self) -> usize {
@@ -164,8 +166,15 @@ impl<E: Engine> DomHost<E> {
         };
         self.event_loop.nesting = saved;
         self.finish_task(e, r);
+        // cleared by its own callback when its entry is gone
+        let live = self.event_loop.by_id.remove(&t.id).is_some();
         match t.repeat {
-            Some(delay) if e.halt() == Halt::Running => self.event_loop.schedule(t, delay),
+            Some(ms) if live && e.halt() == Halt::Running => {
+                // each run nests one deeper, so a fast interval is clamped
+                // after the first few as nested timeouts are
+                let t = Timer { nesting: t.nesting + 1, ..t };
+                self.event_loop.schedule(t, ms);
+            }
             _ => {
                 t.handler.release(e);
                 for a in t.args {

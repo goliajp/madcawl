@@ -140,6 +140,14 @@ pub(crate) fn need<E: Engine>(e: &mut E, args: &[E::Value], n: usize) -> Result<
     Ok(())
 }
 
+/// A number as a Web IDL `long`: ECMAScript ToInt32, which wraps.
+pub(crate) fn to_int32(n: f64) -> i32 {
+    if !n.is_finite() {
+        return 0;
+    }
+    n.trunc().rem_euclid(4_294_967_296.0) as u32 as i32
+}
+
 pub(crate) fn arg<E: Engine>(args: &[E::Value], i: usize) -> E::Value {
     args.get(i).copied().unwrap_or_else(E::undefined)
 }

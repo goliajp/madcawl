@@ -19,11 +19,20 @@ use crate::host::DomHost;
 /// none to be had.
 pub type Loader = Box<dyn FnMut(&str) -> Option<Vec<u8>>>;
 
+/// `document.write` calls nested in one another past this depth (a
+/// script that writes a script that writes, ...) are ignored, as WebKit
+/// ignores them, until the outermost returns.
+const MAX_WRITE_DEPTH: u32 = 21;
+
 pub(crate) struct Parser {
     tok: Tokenizer,
     b: TreeBuilder<Dom>,
     /// `defer` and `async` scripts, run in order once parsing is done.
     later: Vec<(DomString, DomString)>,
+    /// `document.write` calls in progress, nested.
+    writes: u32,
+    /// The depth limit was hit: writes are ignored until `writes` is 0.
+    writes_capped: bool,
 }
 
 /// What a script element asks for.
@@ -49,7 +58,7 @@ impl<E: Engine> DomHost<E> {
         let mut tok = Tokenizer::new();
         tok.feed(html);
         tok.end();
-        self.parser = Some(Box::new(Parser { tok, b, later: Vec::new() }));
+        self.parser = Some(Box::new(Parser { tok, b, later: Vec::new(), writes: 0, writes_capped: false }));
         self.pump(e, false);
         let p = self.parser.take().expect("the parser");
         self.dom = p.b.into_sink();
@@ -143,15 +152,23 @@ impl<E: Engine> DomHost<E> {
     /// `document.write(text)`: see the module's description.
     pub(crate) fn document_write(&mut self, e: &mut E, text: &DomString) {
         let Some(p) = self.parser.as_mut() else { return };
-        if !p.tok.has_insertion_point() {
+        if !p.tok.has_insertion_point() || p.writes_capped {
             return;
         }
+        if p.writes == MAX_WRITE_DEPTH {
+            p.writes_capped = true;
+            return;
+        }
+        p.writes += 1;
         let mut b = Vec::new();
         text.write_wtf8(&mut b);
         p.tok.insert(&b);
         self.swap_dom();
         self.pump(e, true);
         self.swap_dom();
+        let p = self.parser.as_mut().expect("the parser");
+        p.writes -= 1;
+        p.writes_capped &= p.writes != 0;
     }
 }
 
