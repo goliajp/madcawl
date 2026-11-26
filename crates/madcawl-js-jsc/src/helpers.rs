@@ -20,6 +20,11 @@ pub(crate) enum Helper {
     Group = 14,
     Ungroup = 15,
     DerefAll = 16,
+    Constructor = 17,
+}
+
+impl Helper {
+    pub(crate) const LAST: Helper = Helper::Constructor;
 }
 
 // Page script runs in the realm and may replace any global or
@@ -55,7 +60,8 @@ pub(crate) const HELPERS: &str = r#"(function () {
   const wmDelete = WM.prototype.delete;
   const P = Proxy;
   const R = { __proto__: null, get: Reflect.get, set: Reflect.set, ownKeys: Reflect.ownKeys,
-    gopd: Reflect.getOwnPropertyDescriptor, define: Reflect.defineProperty, proto: Reflect.getPrototypeOf };
+    gopd: Reflect.getOwnPropertyDescriptor, define: Reflect.defineProperty, proto: Reflect.getPrototypeOf,
+    setProto: Reflect.setPrototypeOf };
   // each placed wrapper to its tree's group, which holds every wrapper
   // of the tree: one held keeps all, and none held lets all go
   const groupOf = new WM();
@@ -88,7 +94,7 @@ pub(crate) const HELPERS: &str = r#"(function () {
     },
     (o, n, v) => { dp(o, n, ({ __proto__: null, value: v, enumerable: true })); },
     (i, p, n) => {
-      dp(i, 'prototype', ({ __proto__: null, value: p }));
+      dp(i, 'prototype', ({ __proto__: null, value: p, writable: false }));
       dp(p, 'constructor', ({ __proto__: null, value: i, writable: true, configurable: true }));
       named(i, n, 0);
       dp(p, Symbol.toStringTag, ({ __proto__: null, value: n, configurable: true }));
@@ -158,6 +164,17 @@ pub(crate) const HELPERS: &str = r#"(function () {
       const out = create(null);
       for (let i = 0; i < rs.length; i++) put(out, i, apply(deref, rs[i], []));
       return out;
+    },
+    // the interface object of a class with a constructor: `new` calls
+    // the host's constructor and gives the object the prototype that
+    // `new.target` names, so a subclass gets its own (Web IDL takes
+    // the interface's when that is not an object); a call throws
+    (native) => function (...args) {
+      if (new.target === undefined) throw new errors[0]('Illegal constructor');
+      const o = apply(native, undefined, args);
+      const p = new.target.prototype;
+      if (p !== null && (typeof p === 'object' || typeof p === 'function') && R.proto(o) !== p) R.setProto(o, p);
+      return o;
     },
   ];
 })()"#;

@@ -107,6 +107,27 @@ return out.map(String).join();";
     h.close(&mut e);
 }
 
+#[test]
+fn subclasses_of_the_constructible_interfaces_get_their_own_prototype() {
+    let (mut e, mut h) = page("<p>x</p>");
+    let src = "class A extends EventTarget { foo() { return 'a'; } }
+class B extends Event { constructor(t) { super(t, { bubbles: true }); this.own = 1; } bar() { return 'b'; } }
+class C extends CustomEvent {} class T extends Text {}
+var a = new A(), b = new B('y'), c = new C('x', { detail: 3 }), t = new T('z'), seen = [];
+a.addEventListener('y', function (ev) { seen.push(ev.bar(), this.foo(), ev.target === a); });
+a.dispatchEvent(b);
+var R = Reflect.construct(Event, ['r'], Object);
+var calls = []; for (const f of [EventTarget, Event, Text]) { try { f('q'); calls.push('none'); } catch (x) { calls.push(x.name); } }
+return [a.foo(), a instanceof A, a instanceof EventTarget, Object.getPrototypeOf(b) === B.prototype, b.bubbles, b.own,
+  seen.join(), Object.getPrototypeOf(c) === C.prototype, c.detail, c instanceof CustomEvent,
+  Object.getPrototypeOf(t) === T.prototype, t.data, t instanceof Text, t.nodeType,
+  Object.getPrototypeOf(R) === Object.prototype, new Event('p') instanceof B, calls.join(' '),
+  Object.getOwnPropertyDescriptor(Event, 'prototype').writable].join();";
+    let want = "a,true,true,true,true,1,b,a,true,true,3,true,true,z,true,3,true,false,TypeError TypeError TypeError,false";
+    assert_eq!(eval(&mut e, &mut h, src), want);
+    h.close(&mut e);
+}
+
 #[inline(never)]
 fn scrub() {
     let pad = [0u8; 512 * 1024];

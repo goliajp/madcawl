@@ -169,8 +169,10 @@ pub trait Engine: Control + Sized + 'static {
     /// per class and realm, the same object every time; the prototype
     /// objects of a realm chain as the classes do, so that `instanceof`
     /// and a member taken from a prototype work as the web expects.
-    /// Calling or constructing it throws a TypeError while the class has
-    /// no constructor. The host puts the ones it exposes on the global.
+    /// Calling it throws a TypeError, and so does constructing it while
+    /// the class has no constructor; constructing one that has gives the
+    /// new object the prototype `new.target` names, so that a subclass
+    /// script declares gets its own. The host puts the ones it exposes on the global.
     fn interface_object<H: Host<Self>>(
         &mut self,
         realm: Self::Realm,

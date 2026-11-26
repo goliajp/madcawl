@@ -1,11 +1,8 @@
-//! The callbacks of interface objects (`Node`, `Event`): calling one
-//! throws, `new` runs its class's constructor when it has one, and
+//! The callbacks of the interface objects of classes without a
+//! constructor (`Node`): calling or constructing one throws, and
 //! `instanceof` walks the prototype chain.
 
 use crate::ffi::{self, JSContextRef, JSObjectRef, JSValueRef};
-use crate::frame;
-use crate::objects::{FnKind, FnRec, halted};
-use crate::value::{THROWN, UNDEFINED, Value};
 
 fn illegal(ctx: JSContextRef, exception: *mut JSValueRef) {
     let src = c"new TypeError('Illegal constructor')";
@@ -66,41 +63,15 @@ pub(crate) unsafe extern "C" fn has_instance(ctx: JSContextRef, iface: JSObjectR
     }
 }
 
-/// `new` on an interface object: its class's constructor, a host
-/// function called with undefined as `this`, whose record is the
-/// interface object's private data.
+/// `new` on an interface object of a class without a constructor
+/// (one with a constructor is a script function, `protos.rs`).
 pub(crate) unsafe extern "C" fn construct(
     ctx: JSContextRef,
-    iface: JSObjectRef,
-    argc: usize,
-    argv: *const JSValueRef,
+    _: JSObjectRef,
+    _: usize,
+    _: *const JSValueRef,
     exception: *mut JSValueRef,
 ) -> JSObjectRef {
-    // SAFETY: an interface object's private data is its record, or null
-    let Some(rec) = (unsafe { ffi::JSObjectGetPrivate(iface).cast::<FnRec>().as_ref() }) else {
-        illegal(ctx, exception);
-        return std::ptr::null_mut();
-    };
-    let f = frame::current();
-    // SAFETY: the frame's engine, suspended in the framework
-    let e = unsafe { &mut *f.engine };
-    let FnKind::Host { f: hf, data, thunk } = rec.kind else { unreachable!("a constructor is a host function") };
-    if e.halted() {
-        return halted(exception) as JSObjectRef;
-    }
-    assert_eq!(rec.host_type, f.host_type, "one host type per isolate");
-    // SAFETY: the frame's pointers; `JSValueRef` is the value word
-    let r = Value(unsafe { thunk(f.engine, f.host, hf, data, UNDEFINED.0, argv.cast(), argc) });
-    // SAFETY: as above
-    let e = unsafe { &mut *f.engine };
-    if r == THROWN {
-        let Some(x) = e.exception.take() else { return halted(exception) as JSObjectRef };
-        // SAFETY: the framework's exception slot
-        unsafe { *exception = x.raw() };
-        e.unprotect(x);
-        return std::ptr::null_mut();
-    }
-    e.unprotect(r);
-    r.0 as JSObjectRef
+    illegal(ctx, exception);
+    std::ptr::null_mut()
 }
-

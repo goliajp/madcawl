@@ -34,7 +34,7 @@ impl Jsc {
         // SAFETY: the helper script on a live context
         let arr = unsafe { ffi::JSEvaluateScript(ctx, src.s, std::ptr::null_mut(), std::ptr::null_mut(), 1, &mut exc) };
         assert!(exc.is_null(), "the realm helpers compile");
-        let helpers: Vec<Value> = (0..=Helper::DerefAll as u32)
+        let helpers: Vec<Value> = (0..=Helper::LAST as u32)
             .map(|i| {
                 // SAFETY: the array the script returned
                 let v = Value::from_ref(unsafe {
@@ -96,20 +96,17 @@ impl Jsc {
             Some(p) => self.class_objects(realm, p),
             None => (self.helper(realm, Helper::FunctionProto), self.helper(realm, Helper::ObjectProto)),
         };
-        let ctor = class.constructor.map_or(std::ptr::null_mut(), |c| {
-            let kind = FnKind::Host { f: c.get(), data: 0, thunk: thunk::<H> };
-            Box::into_raw(Box::new(FnRec { kind, host_type: std::any::TypeId::of::<H>() })).cast()
-        });
-        // SAFETY: plain objects of a live realm; the record is freed by the
-        // interface class's finalizer
-        let (iface, proto) = unsafe {
-            let i = Value(ffi::JSObjectMake(ctx, self.classes.iface, ctor) as u64);
+        let made = class.constructor.and_then(|c| self.constructor_object::<H>(realm, ctx, c.get()));
+        // SAFETY: a plain object of a live realm, with no record
+        let iface = made.unwrap_or_else(|| Value(unsafe { ffi::JSObjectMake(ctx, self.classes.iface, std::ptr::null_mut()) } as u64));
+        self.protect(iface);
+        // SAFETY: a plain object of a live realm; both live objects of it
+        let proto = unsafe {
             let p = Value(ffi::JSObjectMake(ctx, std::ptr::null_mut(), std::ptr::null_mut()) as u64);
-            self.protect(i);
             self.protect(p);
-            ffi::JSObjectSetPrototype(ctx, i.0 as _, parent_iface.raw());
+            ffi::JSObjectSetPrototype(ctx, iface.0 as _, parent_iface.raw());
             ffi::JSObjectSetPrototype(ctx, p.0 as _, parent_proto.raw());
-            (i, p)
+            p
         };
         self.realms[realm as usize].protos.insert(class.id.0, (iface, proto));
         let name = self.string_of(&madcawl_str::DomString::from_wtf8(class.name.as_bytes()));
@@ -117,6 +114,24 @@ impl Jsc {
         self.define_members(realm, ctx, class, iface, proto);
         self.unprotect(name);
         (iface, proto)
+    }
+
+    /// The interface object of a class whose constructor is `f`: a
+    /// script function around a host function calling `f`, uncounted
+    /// (the caller protects it; the native function is held by the
+    /// closure). A host function object gets no `new.target`, which a
+    /// subclass needs. `None` when script was being stopped: the
+    /// interface then throws on `new`, as one without a constructor.
+    fn constructor_object<H: Host<Jsc>>(&mut self, realm: u32, ctx: JSContextRef, f: madcawl_js::HostFn) -> Option<Value> {
+        let fproto = self.helper(realm, Helper::FunctionProto);
+        let kind = FnKind::Host { f, data: 0, thunk: thunk::<H> };
+        let native = make_function(self, ctx, FnRec { kind, host_type: std::any::TypeId::of::<H>() }, fproto);
+        let made = self.call_helper(realm, Helper::Constructor, &[native]);
+        self.unprotect(native);
+        if made.is_err() {
+            self.after_stop();
+        }
+        made.ok()
     }
 
     fn define_members<H: Host<Jsc>>(&mut self, realm: u32, ctx: JSContextRef, class: &'static ClassDef<Jsc, H>, iface: Value, proto: Value) {
