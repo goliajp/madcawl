@@ -1,7 +1,7 @@
 //! The "text", "in template", "after body" and frameset insertion modes.
 
 use super::tag::Tag;
-use super::{Class, Mode, Step, Tok, TreeBuilder, TreeSink};
+use super::{Active, Class, Mode, Step, Tok, TreeBuilder, TreeSink};
 
 impl<S: TreeSink> TreeBuilder<S> {
     pub(crate) fn text_mode(&mut self, tok: Tok<'_>) -> Step {
@@ -164,6 +164,24 @@ impl<S: TreeSink> TreeBuilder<S> {
     /// The script element the parser stopped after, once.
     pub fn take_script(&mut self) -> Option<S::Handle> {
         self.script.take()
+    }
+
+    /// Every node the builder refers to between two runs of the
+    /// tokenizer, the document aside: the open elements, the active
+    /// formatting elements, the head and form element pointers, where
+    /// buffered text goes and the script it stopped after. A node may
+    /// come more than once. A sink that frees nodes while the builder
+    /// waits keeps these.
+    pub fn for_each_node(&self, mut f: impl FnMut(S::Handle)) {
+        self.open.iter().for_each(|o| f(o.node));
+        for a in &self.active {
+            if let Active::Element { node, .. } = a {
+                f(*node);
+            }
+        }
+        let text = self.text_at.into_iter().flat_map(|(parent, before)| [Some(parent), before]);
+        let pointers = [self.head, self.form, self.context.map(|c| c.node), self.script];
+        pointers.into_iter().chain(text).flatten().for_each(f);
     }
 
     /// Stop parsing: every open element is done.

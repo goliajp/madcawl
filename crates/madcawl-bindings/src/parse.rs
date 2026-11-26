@@ -10,10 +10,12 @@
 //! The DOM is the tree builder's sink while the tokenizer runs and the
 //! host's otherwise (the nodes stay where they are: only the arena's
 //! owner changes). Every call into the engine happens while the host
-//! has it. Nothing is freed while the parser lives: it holds nodes no
-//! count records.
+//! has it. While the host has it, each node the tree builder refers to
+//! is held by a count of the parser's, so freeing and the cycle
+//! collector go on while the parser waits; the counts are given back
+//! before the tokenizer runs again and taken anew when it stops.
 
-use madcawl_dom::Dom;
+use madcawl_dom::{Dom, HeldNode};
 use madcawl_html::{Options, Step, Tokenizer, TreeBuilder};
 use madcawl_js::{Engine, ScriptOrigin};
 use madcawl_str::DomString;
@@ -39,6 +41,8 @@ pub(crate) struct Parser {
     writes: u32,
     /// The depth limit was hit: writes are ignored until `writes` is 0.
     writes_capped: bool,
+    /// A count on each node the tree builder refers to, while it waits.
+    held: Vec<HeldNode>,
 }
 
 impl<E: Engine> DomHost<E> {
@@ -54,7 +58,7 @@ impl<E: Engine> DomHost<E> {
         let mut tok = Tokenizer::new();
         tok.feed(html);
         tok.end();
-        self.scripts.parser = Some(Box::new(Parser { tok, b, nesting: 0, writes: 0, writes_capped: false }));
+        self.scripts.parser = Some(Box::new(Parser { tok, b, nesting: 0, writes: 0, writes_capped: false, held: Vec::new() }));
         self.scripts.phase = Phase::Parsing;
         self.resume_parser(e);
     }
@@ -74,18 +78,31 @@ impl<E: Engine> DomHost<E> {
                 break;
             }
         }
-        self.scripts.parser = None;
+        self.drop_parser();
         self.settle(e);
         self.run_defers(e);
+    }
+
+    /// The parser is done, or the window is going: its counts are given
+    /// back.
+    pub(crate) fn drop_parser(&mut self) {
+        if let Some(p) = self.scripts.parser.take() {
+            p.held.into_iter().for_each(|h| self.dom.let_go(h));
+        }
     }
 
     /// Tokenize until the input runs out (or, `inserted`, until the
     /// insertion point), preparing the script the parser stops for.
     fn tokenize(&mut self, e: &mut E, inserted: bool) -> Step {
         let p = self.scripts.parser.as_mut().expect("the parser");
+        // nothing is freed while the builder has the DOM, so the counts
+        // can go first: a node at 0 waits in the list free_dead reads
+        p.held.drain(..).for_each(|h| self.dom.let_go(h));
         std::mem::swap(&mut self.dom, p.b.sink_mut());
         let step = if inserted { p.tok.run_inserted(&mut p.b) } else { p.tok.run(&mut p.b) };
         std::mem::swap(&mut self.dom, p.b.sink_mut());
+        let Parser { b, held, .. } = &mut **p;
+        b.for_each_node(|n| held.push(self.dom.hold(n)));
         if step == Step::Paused
             && let Some(s) = p.b.take_script()
         {

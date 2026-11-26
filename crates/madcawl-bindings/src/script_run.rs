@@ -145,12 +145,10 @@ impl<E: Engine> DomHost<E> {
         }
     }
 
-    /// Free the nodes no one counts, unless the parser lives: it holds
-    /// nodes no count records.
-    pub(crate) fn free_dead_unless_parsing(&mut self) {
-        if self.scripts.parser.is_none() {
-            self.dom.free_dead(&mut self.freed);
-        }
+    /// Free the nodes no one counts; those the parser refers to it
+    /// counts (`parse.rs`).
+    pub(crate) fn free_dead(&mut self) {
+        self.dom.free_dead(&mut self.freed);
     }
 
     /// Close the host and keep its DOM, as it is once script is done
@@ -176,7 +174,7 @@ impl<E: Engine> DomHost<E> {
 
     /// Give back what the scripts still awaited hold, and the parser.
     pub(crate) fn close_scripts(&mut self, e: &mut E) {
-        self.scripts.parser = None;
+        self.drop_parser();
         self.scripts.blocking = None;
         self.scripts.defer.clear();
         self.scripts.in_order.clear();

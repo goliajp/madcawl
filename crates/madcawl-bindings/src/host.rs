@@ -147,7 +147,7 @@ impl<E: Engine> DomHost<E> {
             // a side object freed last round may have let go of a held node
             self.regroup(e);
             let delivered = e.drain_host(self);
-            self.free_dead_unless_parsing();
+            self.free_dead();
             let freed = std::mem::take(&mut self.freed);
             for &n in &freed {
                 self.forget_script(n);
@@ -172,12 +172,8 @@ impl<E: Engine> DomHost<E> {
     }
 
     /// Run the cycle collector until `deadline`.
-    /// Nothing is collected while the parser lives (`Done`, still due).
     pub fn collect(&mut self, e: &mut E, deadline: Deadline) -> Step {
         self.settle(e);
-        if self.scripts.parser.is_some() {
-            return Step::Done;
-        }
         let step = e.collect_cycles(self, deadline);
         self.collect_due = step == Step::More;
         self.settle(e);

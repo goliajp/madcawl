@@ -250,7 +250,7 @@ impl<E: Engine> DomHost<E> {
         }
         self.settle(e);
         // the trees whose last wrapper died since are freed here
-        if self.collect_due && self.scripts.parser.is_none() {
+        if self.collect_due {
             let deadline = Deadline::At(self.now().saturating_add(COLLECT_SLICE_NS));
             self.collect(e, deadline);
         }

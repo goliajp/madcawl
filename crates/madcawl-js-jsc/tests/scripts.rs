@@ -235,6 +235,48 @@ fn a_tree_removed_while_the_parser_waits_is_freed_once_parsing_is_done() {
 }
 
 #[test]
+fn garbage_is_freed_while_the_parser_waits_and_the_nodes_it_still_uses_are_kept() {
+    let html = "<script>for (let i = 0; i < 300; i++) document.createElement('div');
+setTimeout(() => document.getElementById('p').remove(), 0)</script>\
+<p id=p><b>x<script src=w.js></script>y</b>z</p><i id=after>a</i>";
+    let mut p = Page::new(html);
+    p.run();
+    let before = p.h.dom.node_count();
+    for _ in 0..3 {
+        p.e.collect_now();
+        while p.h.collect(&mut p.e, Deadline::Work(u32::MAX)) != Step::Done {}
+    }
+    assert!(p.h.dom.node_count() + 300 <= before, "the divs go before w.js arrives: {} then {}", before, p.h.dom.node_count());
+    assert_eq!(p.eval("String(document.getElementById('p'))"), "null");
+    p.arrive("w.js", Some("log.push('w:' + document.currentScript.parentNode.localName + document.currentScript.parentNode.parentNode.id)"));
+    assert_eq!(p.log(), "w:bp", "the removed p and b, held by the parser, take what follows");
+    assert_eq!(p.eval("document.getElementById('after').parentNode.localName"), "body");
+    p.close();
+}
+
+#[test]
+fn a_formatting_element_only_the_parser_refers_to_is_kept_while_it_waits() {
+    let html = "<body><script>setTimeout(() => { document.querySelector('body').textContent = '' }, 0)</script>\
+<div id=d><b id=f>x</div><script src=w.js></script>y";
+    let mut p = Page::new(html);
+    let before = p.h.dom.node_count();
+    p.run();
+    for _ in 0..3 {
+        p.e.collect_now();
+        while p.h.collect(&mut p.e, Deadline::Work(u32::MAX)) != Step::Done {}
+    }
+    assert_eq!(p.eval("String(document.getElementById('d'))"), "null", "the timer ran while the parser waited");
+    assert_eq!(p.h.dom.node_count() + 2, before, "the first script and its text go; the div, its b and its text are held through the b");
+    p.arrive("w.js", Some("0"));
+    assert_eq!(p.eval("var b = document.querySelector('b'); b.id + ':' + b.textContent + ':' + b.parentNode.localName"), "f:y:body");
+    let parsed = p.h.dom.node_count();
+    p.e.collect_now();
+    while p.h.collect(&mut p.e, Deadline::Work(u32::MAX)) != Step::Done {}
+    assert!(p.h.dom.node_count() + 3 <= parsed, "the div, its b and its text go once parsing is done");
+    p.close();
+}
+
+#[test]
 fn the_dom_kept_after_closing_has_what_script_built_and_no_wrapper_counts() {
     let html = "<p id=a>x</p><script>var kept = []; for (let i = 0; i < 50; i++) kept.push(document.createElement('div'));
 var b = document.createElement('b'); b.textContent = 'built'; document.getElementById('a').appendChild(b);</script>";
