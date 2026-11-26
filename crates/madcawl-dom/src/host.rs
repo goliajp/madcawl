@@ -43,6 +43,12 @@ impl Dom {
         self.new_data(NodeKind::Comment, data)
     }
 
+    /// A document fragment of the document, in no tree; `None` past the
+    /// node limit.
+    pub fn new_fragment(&mut self) -> Option<NodeId> {
+        self.new_node(NodeKind::Fragment, self.doc).map(NodeId::at)
+    }
+
     fn new_data(&mut self, kind: NodeKind, data: DomString) -> Option<NodeId> {
         if !self.take(data.len()) {
             return None;

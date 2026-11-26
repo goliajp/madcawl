@@ -142,7 +142,7 @@ interface Element : Node {
   boolean hasAttribute(DOMString qualifiedName);
   [CEReactions] undefined setAttribute(DOMString qualifiedName, DOMString value);
 
-  // the ChildNode mixin, on Element only until text nodes are bound
+  // the ChildNode mixin
   [CEReactions] undefined remove();
 
   // the ParentNode mixin; [StaticList] (not in the standard) marks a
@@ -157,10 +157,10 @@ interface Element : Node {
 interface Document : Node {
   readonly attribute Element? documentElement;
 
-  // the text and comment nodes are bound as Node until their interfaces are
   [NewObject] Element createElement(DOMString localName);
-  [NewObject] Node createTextNode(DOMString data);
-  [NewObject] Node createComment(DOMString data);
+  [NewObject] DocumentFragment createDocumentFragment();
+  [NewObject] Text createTextNode(DOMString data);
+  [NewObject] Comment createComment(DOMString data);
 
   Element? getElementById(DOMString elementId);
 
@@ -175,4 +175,41 @@ interface Document : Node {
   // one string, not the standard's variadic list, until variadic
   // arguments are bound
   [CEReactions] undefined write(DOMString text);
+};
+
+[Exposed=Window]
+interface DocumentFragment : Node {
+  constructor();
+
+  // the NonElementParentNode and ParentNode mixins, in part
+  Element? getElementById(DOMString elementId);
+  Element? querySelector(DOMString selectors);
+  [StaticList] NodeList querySelectorAll(DOMString selectors);
+};
+
+[Exposed=Window]
+interface CharacterData : Node {
+  attribute [LegacyNullToEmptyString] DOMString data;
+  readonly attribute unsigned long length;
+  DOMString substringData(unsigned long offset, unsigned long count);
+  undefined appendData(DOMString data);
+  undefined insertData(unsigned long offset, DOMString data);
+  undefined deleteData(unsigned long offset, unsigned long count);
+  undefined replaceData(unsigned long offset, unsigned long count, DOMString data);
+
+  // the ChildNode mixin
+  [CEReactions] undefined remove();
+};
+
+[Exposed=Window]
+interface Text : CharacterData {
+  constructor(optional DOMString data = "");
+
+  [NewObject] Text splitText(unsigned long offset);
+  readonly attribute DOMString wholeText;
+};
+
+[Exposed=Window]
+interface Comment : CharacterData {
+  constructor(optional DOMString data = "");
 };

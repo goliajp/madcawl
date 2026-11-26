@@ -46,6 +46,8 @@ TYPES = {
     'DOMString': 'cv::dom_string(e, h, {v})?',
     'DOMString?': 'cv::dom_string_or_null(e, h, {v})?',
     '[Atom] DOMString': 'cv::atom(e, h, {v})?',
+    '[LegacyNullToEmptyString] DOMString': 'cv::dom_string_null_empty(e, h, {v})?',
+    'unsigned long': 'cv::to_uint32(e, h, {v})?',
     'EventListener?': 'cv::callback_or_null(e, {v})?',
     'boolean': 'e.to_boolean({v})',
     'any': '{v}',
@@ -140,7 +142,7 @@ def convert(t, v, names, sides=()):
     sys.exit(f'unsupported IDL type: {t}')
 
 
-STRINGS = ('DOMString', 'DOMString?', '[Atom] DOMString')
+STRINGS = ('DOMString', 'DOMString?', '[Atom] DOMString', '[LegacyNullToEmptyString] DOMString')
 # list types a [StaticList] operation returns: the implementation gives a
 # `cv::StaticList`, made an array of wrappers
 LISTS = ('NodeList', 'HTMLCollection', 'sequence<EventTarget>')

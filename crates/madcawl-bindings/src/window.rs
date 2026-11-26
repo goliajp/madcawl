@@ -9,7 +9,7 @@ use madcawl_js::{Bound, ClassDef, Ctx, Engine, ErrorKind, Halt, HostFn, Key, Own
 use madcawl_str::{Atom, DomString};
 
 use crate::convert::{Thrown, arg, run, throw};
-use crate::generated::{CustomEventClass, DOMExceptionClass, DocumentClass, ElementClass, EventClass, EventTargetClass, NodeClass};
+use crate::generated::{CharacterDataClass, CommentClass, CustomEventClass, DocumentFragmentClass, TextClass, DOMExceptionClass, DocumentClass, ElementClass, EventClass, EventTargetClass, NodeClass};
 use crate::event::Target;
 use crate::host::DomHost;
 use crate::shell;
@@ -34,7 +34,11 @@ impl<E: Engine> DomHost<E> {
         let d = self.wrap(e, doc);
         put(e, self, global.get(), "document", d.get());
         e.release(d);
-        let classes: [&'static ClassDef<E, DomHost<E>>; 7] = [
+        let classes: [&'static ClassDef<E, DomHost<E>>; 11] = [
+            &CharacterDataClass::<E>::DEF,
+            &TextClass::<E>::DEF,
+            &CommentClass::<E>::DEF,
+            &DocumentFragmentClass::<E>::DEF,
             &CustomEventClass::<E>::DEF,
             &DOMExceptionClass::<E>::DEF,
             &EventTargetClass::<E>::DEF,

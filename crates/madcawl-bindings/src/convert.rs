@@ -61,6 +61,12 @@ impl<E: Engine> IntoJs<E> for u16 {
     }
 }
 
+impl<E: Engine> IntoJs<E> for u32 {
+    fn into_js(self, _: &mut E, _: &mut DomHost<E>) -> Owned<E::Value> {
+        plain::<E>(E::number(f64::from(self)))
+    }
+}
+
 impl<E: Engine> IntoJs<E> for f64 {
     fn into_js(self, _: &mut E, _: &mut DomHost<E>) -> Owned<E::Value> {
         plain::<E>(E::number(self))
@@ -254,6 +260,20 @@ pub(crate) fn dom_string_or_null<E: Engine>(
         return Ok(None);
     }
     dom_string(e, h, v).map(Some)
+}
+
+/// A Web IDL `unsigned long`: ECMAScript ToNumber, then modulo 2^32.
+pub(crate) fn to_uint32<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Value) -> Result<u32, Thrown> {
+    let n = e.to_number(h, v).ok_or(Thrown)?;
+    Ok(to_int32(n) as u32)
+}
+
+/// A `[LegacyNullToEmptyString] DOMString`: null is the empty string.
+pub(crate) fn dom_string_null_empty<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Value) -> Result<DomString, Thrown> {
+    if e.kind(v) == ValueKind::Null {
+        return Ok(DomString::empty());
+    }
+    dom_string(e, h, v)
 }
 
 /// An `any` argument whose default is null.

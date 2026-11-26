@@ -100,3 +100,8 @@ fn a_listener_object_holding_its_own_detached_node_is_freed() {
 fn a_custom_event_whose_detail_holds_it_is_freed() {
     batch::a_custom_event_whose_detail_holds_it_is_freed::<E>();
 }
+
+#[test]
+fn character_data_is_edited_by_code_unit() {
+    batch::character_data_is_edited_by_code_unit::<E>();
+}

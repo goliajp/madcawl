@@ -22,8 +22,10 @@ pub trait Driver: Engine {
 }
 
 mod events;
+mod nodes;
 mod trees;
 pub use events::*;
+pub use nodes::*;
 pub use trees::*;
 
 pub struct Js<E: Driver> {

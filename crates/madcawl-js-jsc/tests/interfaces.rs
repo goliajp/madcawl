@@ -86,6 +86,27 @@ for (let i = 0; i < 100; i++) { let u = new EventTarget(); u.addEventListener('x
     h.close(&mut e);
 }
 
+#[test]
+fn text_comment_and_fragment_interfaces() {
+    let (mut e, mut h) = page("<p>x</p>");
+    let src = "var t = document.createTextNode('hello'), out = [];
+out.push(t instanceof Text, t instanceof CharacterData, t instanceof Node, t.length, t.substringData(1, 3));
+t.appendData(' world'); t.insertData(0, '>'); t.deleteData(1, 1); t.replaceData(0, 1, '[');
+out.push(t.data); var bad; try { t.substringData(99, 1); } catch (x) { bad = x.name; } out.push(bad);
+var p = document.querySelector('p'); p.appendChild(t); var rest = t.splitText(5);
+out.push(t.data, rest.data, rest.previousSibling === t, t.wholeText, rest.wholeText === t.wholeText);
+t.data = null; out.push(JSON.stringify(t.data), new Text().data === '', new Text('a').ownerDocument === document);
+var c = new Comment('c'); out.push(c instanceof Comment, c.nodeType, document.createComment('d').data);
+var f = new DocumentFragment(); f.appendChild(document.createElement('b')).id = 'q'; f.appendChild(new Text('z'));
+out.push(f instanceof DocumentFragment, f.getElementById('q').tagName, f.querySelectorAll('b').length);
+p.appendChild(f); out.push(f.firstChild, p.lastChild.data, document.createDocumentFragment().nodeType);
+c.remove(); p.appendChild(c); c.remove(); out.push(c.parentNode);
+return out.map(String).join();";
+    let want = "true,true,true,5,ell,[ello world,IndexSizeError,[ello, world,true,x[ello world,true,\"\",true,true,true,8,d,true,B,1,null,z,11,null";
+    assert_eq!(eval(&mut e, &mut h, src), want);
+    h.close(&mut e);
+}
+
 #[inline(never)]
 fn scrub() {
     let pad = [0u8; 512 * 1024];

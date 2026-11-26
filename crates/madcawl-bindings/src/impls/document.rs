@@ -37,6 +37,10 @@ pub(crate) fn create_text_node<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: 
     }
 }
 
+pub(crate) fn create_document_fragment<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: NodeId) -> Result<NodeId, Thrown> {
+    super::document_fragment::constructor(e, h)
+}
+
 pub(crate) fn create_comment<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: NodeId, data: DomString) -> Result<NodeId, Thrown> {
     match h.dom.new_comment(data) {
         Some(n) => Ok(n),

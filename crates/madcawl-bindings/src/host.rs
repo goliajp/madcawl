@@ -247,7 +247,11 @@ impl<E: Engine> Host<E> for DomHost<E> {
         match self.dom.kind(self.node(obj)) {
             NodeKind::Document => &DocumentClass::<E>::DEF,
             NodeKind::Element => &ElementClass::<E>::DEF,
-            _ => &NodeClass::<E>::DEF,
+            NodeKind::Text => &crate::generated::TextClass::<E>::DEF,
+            NodeKind::Comment => &crate::generated::CommentClass::<E>::DEF,
+            NodeKind::Fragment => &crate::generated::DocumentFragmentClass::<E>::DEF,
+            NodeKind::ProcessingInstruction => &crate::generated::CharacterDataClass::<E>::DEF,
+            NodeKind::Doctype => &NodeClass::<E>::DEF,
         }
     }
 
