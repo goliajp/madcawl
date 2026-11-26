@@ -153,6 +153,26 @@ return [nl.length, nl[0].parentNode.x, nl[1].z, wm.get(nl[1]), nl[2].parentNode.
 }
 
 #[test]
+fn child_node_lists_are_the_same_object_for_as_long_as_their_root_wrapper_lives() {
+    let (mut e, mut h) = page("<div id=r><b></b></div>");
+    let (nodes, sides) = (h.dom.node_count(), h.side_objects());
+    let src = "var r = document.getElementById('r'); r.childNodes.x = 'x'; r.children.y = 'y';
+window.d = document.createElement('div'); d.appendChild(document.createElement('i')); d.childNodes.z = 'z';
+for (let i = 0; i < 50; i++) { const t = document.createElement('div'); t.appendChild(document.createElement('i'));
+  t.childNodes.w = i; t.children.w = i; }
+return 'ok';";
+    assert_eq!(eval(&mut e, &mut h, src), "ok");
+    collect_everything(&mut e, &mut h);
+    let src = "var r = document.getElementById('r'); return [r.childNodes.x, r.children.y, d.childNodes.z].join();";
+    assert_eq!(eval(&mut e, &mut h, src), "x,y,z");
+    // the dropped trees and their collections are freed: d and its child,
+    // and the three collections of r and d
+    let (n, s) = (h.dom.node_count() - nodes, h.side_objects() - sides);
+    assert_eq!((n, s), (2, 3), "nodes and collections left");
+    h.close(&mut e);
+}
+
+#[test]
 fn a_collection_keeps_its_root_tree_and_a_dropped_one_is_freed() {
     let (mut e, mut h) = page("<p>x</p>");
     let (nodes, sides) = (h.dom.node_count(), h.side_objects());

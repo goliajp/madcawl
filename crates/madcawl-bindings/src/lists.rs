@@ -219,17 +219,46 @@ impl<E: Engine> DomHost<E> {
         (0..l.len()).filter_map(|i| l.get(i)).collect()
     }
 
+    /// The key of `same_lists` when side object `r` is a `childNodes` or
+    /// `children` collection.
+    fn child_list_key(&self, r: SideRef) -> Option<(u32, bool)> {
+        let SideData::List(l) = &self.sides.get(r).data else { return None };
+        match (&l.root, &l.filter) {
+            (Some(Held::Node(n)), Some(Filter::Children)) => Some((n.id().index(), false)),
+            (Some(Held::Node(n)), Some(Filter::ElementChildren)) => Some((n.id().index(), true)),
+            _ => None,
+        }
+    }
+
     /// Side object `r` is being freed: it is no longer the collection
     /// `childNodes` or `children` gives.
     pub(crate) fn forget_list(&mut self, r: SideRef) {
-        let SideData::List(l) = &self.sides.get(r).data else { return };
-        let key = match (&l.root, &l.filter) {
-            (Some(Held::Node(n)), Some(Filter::Children)) => (n.id().index(), false),
-            (Some(Held::Node(n)), Some(Filter::ElementChildren)) => (n.id().index(), true),
-            _ => return,
-        };
+        let Some(key) = self.child_list_key(r) else { return };
         if self.same_lists.get(&key) == Some(&r) {
             self.same_lists.remove(&key);
+            // its wrapper died, and the root's with it
+            if let Some(mut m) = self.list_edges.remove(&key) {
+                m.forget();
+            }
+        }
+    }
+
+    /// `childNodes` and `children` give the same object: on an engine
+    /// that places wrappers, the wrapper `list` just made for `r`, when
+    /// it is one of those, is a member of its root's wrapper, so that
+    /// what script put on it lives as long as the root's wrapper does.
+    /// The list's wrapper keeps the root's (`keep_target`), so the two
+    /// die together.
+    pub(crate) fn keep_child_list(&mut self, e: &mut E, r: SideRef, list: E::Value) {
+        if !E::PLACES_WRAPPERS {
+            return;
+        }
+        let Some(key) = self.child_list_key(r).filter(|k| self.same_lists.get(k) == Some(&r)) else { return };
+        let root = self.wrap(e, NodeId::from_index(key.0).expect("a live root"));
+        let m = madcawl_js::Member::of(e, root.get(), list);
+        e.release(root);
+        if let Some(mut old) = self.list_edges.insert(key, m) {
+            old.forget();
         }
     }
 }

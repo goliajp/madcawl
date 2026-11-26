@@ -135,6 +135,7 @@ impl<E: Engine> DomHost<E> {
                 self.unplaced_sides.push(r);
             }
             self.keep_target(e, r, v.get());
+            self.keep_child_list(e, r, v.get());
         }
         v
     }
@@ -240,7 +241,8 @@ impl<E: Engine> DomHost<E> {
     /// and the nodes it holds: the host is closing.
     pub(crate) fn close_sides(&mut self, e: &mut E) {
         self.close_fixed(e);
-        for mut m in std::mem::take(&mut self.details).into_values().chain(std::mem::take(&mut self.target_edges).into_values()) {
+        let edges = std::mem::take(&mut self.target_edges).into_values().chain(std::mem::take(&mut self.list_edges).into_values());
+        for mut m in std::mem::take(&mut self.details).into_values().chain(edges) {
             m.close(e);
         }
         for mut l in std::mem::take(&mut self.side_listeners).into_values().flatten() {

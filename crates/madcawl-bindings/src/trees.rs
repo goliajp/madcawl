@@ -122,11 +122,17 @@ impl<E: Engine> DomHost<E> {
     }
 
     /// `n`'s wrapper is gone: on an engine that keeps members beside the
-    /// wrapper, so are its listeners' callbacks.
+    /// wrapper, so are its listeners' callbacks and its collections'
+    /// wrappers.
     pub(crate) fn drop_members(&mut self, n: NodeId) {
         if E::PLACES_WRAPPERS {
             for mut l in self.take_listeners(n) {
                 l.callback.forget();
+            }
+            for elements in [false, true] {
+                if let Some(mut m) = self.list_edges.remove(&(n.index(), elements)) {
+                    m.forget();
+                }
             }
         }
     }

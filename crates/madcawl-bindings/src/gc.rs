@@ -3,7 +3,8 @@
 //!
 //! The counted edges out of a node are the DOM's (parent, children,
 //! node document, template contents, inert document), its listeners
-//! (member handles), and its wrapper when preserved. Each is reported
+//! and the wrappers of its `childNodes` and `children` (member handles),
+//! and its wrapper when preserved. Each is reported
 //! once. A node in a document is never entered; leaving a document
 //! makes it a candidate.
 
@@ -36,6 +37,11 @@ fn traverse<E: Engine>(h: &DomHost<E>, obj: HostRef, t: &mut E::Tracer) {
     for l in h.listeners_of(n) {
         l.callback.trace(t);
     }
+    for elements in [false, true] {
+        if let Some(m) = h.list_edges.get(&(n.index(), elements)) {
+            m.trace(t);
+        }
+    }
     let w = h.dom.wrapper(n);
     if w & 1 != 0 {
         t.value(E::wrapper_value(w & !1));
@@ -46,6 +52,11 @@ fn unlink<E: Engine>(h: &mut DomHost<E>, obj: HostRef, u: &mut E::Unlinker) {
     let n = h.node(obj);
     for mut l in h.take_listeners(n) {
         l.callback.unlink(u);
+    }
+    for elements in [false, true] {
+        if let Some(mut m) = h.list_edges.remove(&(n.index(), elements)) {
+            m.unlink(u);
+        }
     }
     let w = h.dom.wrapper(n);
     if w & 1 != 0 {

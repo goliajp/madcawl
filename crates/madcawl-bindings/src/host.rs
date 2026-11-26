@@ -54,6 +54,9 @@ pub struct DomHost<E: Engine> {
     /// The live `childNodes` (false) and `children` (true) of a node, by
     /// node index, while alive (`lists.rs`).
     pub(crate) same_lists: HashMap<(u32, bool), crate::side::SideRef>,
+    /// The wrapper of each of those collections, a member of its root's
+    /// wrapper, on an engine that places wrappers (`lists.rs`).
+    pub(crate) list_edges: HashMap<(u32, bool), Member<E>>,
     /// How many times live collections found their nodes again.
     pub(crate) list_rebuilds: u64,
     /// What fixed collections keep of nodes that leave the document.
@@ -90,6 +93,7 @@ impl<E: Engine> DomHost<E> {
             target_edges: HashMap::new(),
             side_listeners: HashMap::new(),
             same_lists: HashMap::new(),
+            list_edges: HashMap::new(),
             list_rebuilds: 0,
             fixed: Default::default(),
         };
