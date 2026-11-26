@@ -35,6 +35,18 @@ name = "madcawl-brotli"
 version = "0.0.1"
 
 [[package]]
+name = "madcawl-content"
+version = "0.0.1"
+dependencies = [
+ "madcawl-bindings",
+ "madcawl-dom",
+ "madcawl-js-jsc",
+ "madcawl-mcp",
+ "madcawl-shell",
+ "madcawl-str",
+]
+
+[[package]]
 name = "madcawl-css"
 version = "0.0.1"
 dependencies = [

@@ -1,0 +1,26 @@
+[package]
+name = "madcawl-content"
+description = "The content process's executable: the windowless host with documents' scripts run, on the engine picked here"
+version.workspace = true
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "madcawl-content"
+path = "src/main.rs"
+
+[dependencies]
+madcawl-bindings = { path = "../madcawl-bindings" }
+madcawl-dom = { path = "../madcawl-dom" }
+madcawl-js-jsc = { path = "../madcawl-js-jsc" }
+madcawl-shell = { path = "../madcawl-shell" }
+madcawl-str = { path = "../madcawl-str" }
+
+[dev-dependencies]
+madcawl-mcp = { path = "../madcawl-mcp" }
