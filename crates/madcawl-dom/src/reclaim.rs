@@ -91,4 +91,13 @@ impl Dom {
         }
         freed
     }
+
+    /// Every live node that has a wrapper, in or out of a tree: what a
+    /// host closing its realm lets go of.
+    pub fn wrapped(&self) -> Vec<crate::NodeId> {
+        (1..self.arena.high())
+            .filter(|&i| self.arena.is_live(i) && self.n(i).wrapper != 0)
+            .map(crate::NodeId::at)
+            .collect()
+    }
 }

@@ -117,12 +117,20 @@ impl Dom {
 impl Dom {
     /// Whether the parser may put `child` into `parent`: a document
     /// takes one element child ("insert an element at the adjusted
-    /// insertion location" gives up otherwise). Only script, by moving
-    /// a table under the document, makes the parser try.
+    /// insertion location" gives up otherwise), and no node goes into
+    /// itself or its own subtree. Only script, by moving nodes the
+    /// parser still holds, makes the parser try either.
     fn can_insert(&self, parent: NodeId, child: NodeId) -> bool {
-        self.kind(parent) != NodeKind::Document
-            || self.kind(child) != NodeKind::Element
-            || !self.children(parent).any(|c| c != child && self.kind(c) == NodeKind::Element)
+        !self.contains_cheap(child.index(), parent.index())
+            && (self.kind(parent) != NodeKind::Document
+                || self.kind(child) != NodeKind::Element
+                || !self.children(parent).any(|c| c != child && self.kind(c) == NodeKind::Element))
+    }
+
+    /// `x` is `a` or below it; a node without children answers at once,
+    /// which is every node the parser has just made.
+    pub(crate) fn contains_cheap(&self, a: u32, x: u32) -> bool {
+        a == x || (self.n(a).first() != 0 && self.is_inclusive_ancestor(a, x))
     }
 }
 
@@ -206,12 +214,14 @@ impl TreeSink for Dom {
     fn reparent_children(&mut self, from: NodeId, to: NodeId) {
         let (from, to) = (from.index(), to.index());
         assert!(self.kind_of(from).is_container(), "children of a container");
-        loop {
-            let c = self.n(from).first();
-            if c == 0 {
-                break;
+        // a child script moved `to` into stays where it is
+        let mut c = self.n(from).first();
+        while c != 0 {
+            let next = self.n(c).next;
+            if !self.contains_cheap(c, to) {
+                self.insert(to, c, 0);
             }
-            self.insert(to, c, 0);
+            c = next;
         }
     }
 

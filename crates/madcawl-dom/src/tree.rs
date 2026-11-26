@@ -176,6 +176,7 @@ impl Dom {
     /// from where it was.
     pub(crate) fn insert(&mut self, p: u32, c: u32, before: u32) {
         assert!(self.kind_of(p).is_container(), "insert into a container");
+        assert!(!self.contains_cheap(c, p), "a node goes into itself or below itself");
         self.unlink(c);
         let prev = if before == 0 {
             self.n(p).last()
