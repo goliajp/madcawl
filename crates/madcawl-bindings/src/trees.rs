@@ -3,44 +3,35 @@
 //!
 //! Every wrapper of a detached tree is placed with the wrapper of the
 //! tree's root, which is made when the tree first has a wrapper below
-//! it; a wrapper of a node in the document is anchored, and so is every
-//! wrapper of a detached tree with a node on the path of a dispatch in
-//! progress, until it ends. What holds a node longer (an event's
-//! target) keeps the node's wrapper as a member of its own instead
-//! (`event.rs`), so a cycle through script stays in the engine's heap.
+//! it; a wrapper of a node in the document is anchored. A host object
+//! that holds a node of a detached tree (an event's target) keeps the
+//! node's wrapper as a member of its own (`holds.rs`), and a dispatch
+//! holds the wrappers of its path while it runs (`event.rs`), so no
+//! tree is anchored for being held and a cycle through script stays in
+//! the engine's heap.
 //! The DOM records the nodes each insertion and removal moved, and every
 //! host function and settle places again before script can run, so the
 //! engine's collector never sees a tree split across groups.
 
-use std::collections::HashSet;
-
 use madcawl_dom::NodeId;
 use madcawl_js::{Engine, Owned, Tree};
 
-use crate::event::Held;
 use crate::host::DomHost;
 
 impl<E: Engine> DomHost<E> {
-    /// Place the wrappers of the subtrees moved since the last call, and
-    /// of the trees a dispatch began or stopped holding.
+    /// Place the wrappers of the subtrees moved since the last call.
     pub(crate) fn regroup(&mut self, e: &mut E) {
         if !E::PLACES_WRAPPERS || self.closed {
             return;
         }
         let mut moved = std::mem::take(&mut self.moved);
         self.dom.take_moves(&mut moved);
-        let pins_changed = std::mem::take(&mut self.pins_changed);
-        if moved.is_empty() && !pins_changed && self.unplaced_sides.is_empty() {
+        if moved.is_empty() && self.unplaced_sides.is_empty() {
             self.moved = moved;
             return;
         }
-        let pins = self.pinned_roots();
-        let old = std::mem::replace(&mut self.pinned, pins);
-        // a tree whose pin changed is placed whole: the root stands for it
-        let flipped = old.symmetric_difference(&self.pinned);
-        let flipped: Vec<NodeId> = flipped.copied().filter(|&r| self.dom.is_live(r) && self.dom.tree_root(r) == r).collect();
         let mut again = Vec::new();
-        for r in moved.drain(..).chain(flipped) {
+        for r in moved.drain(..) {
             if self.dom.is_live(r) && !self.place_subtree(e, r) {
                 again.push(r);
             }
@@ -49,24 +40,13 @@ impl<E: Engine> DomHost<E> {
         self.place_sides(e);
     }
 
-    /// The roots of the detached trees with a node on the path of a
-    /// dispatch in progress: as many as the dispatches nested, each
-    /// path as long as the target's ancestors.
-    fn pinned_roots(&self) -> HashSet<NodeId> {
-        let nodes = self.dispatching.iter().flat_map(|&r| &self.event(r).path).filter_map(|h| match h {
-            Held::Node(n) => Some(n.id()),
-            _ => None,
-        });
-        nodes.filter(|&n| !self.dom.in_main_tree(n)).map(|n| self.dom.tree_root(n)).collect()
-    }
-
     /// Place a wrapper just made for `n`.
     pub(crate) fn place_new(&mut self, e: &mut E, n: NodeId, word: u64) {
         if !E::PLACES_WRAPPERS {
             return;
         }
         let root = self.dom.tree_root(n);
-        let placed = if self.dom.in_main_tree(n) || self.pinned.contains(&root) {
+        let placed = if self.dom.in_main_tree(n) {
             self.place(e, Tree::Anchored, &[(n, word)])
         } else if root == n {
             self.place(e, Tree::New, &[(n, word)])
@@ -92,7 +72,7 @@ impl<E: Engine> DomHost<E> {
             return true;
         }
         let root = self.dom.tree_root(r);
-        if self.dom.in_main_tree(r) || self.pinned.contains(&root) {
+        if self.dom.in_main_tree(r) {
             return self.place(e, Tree::Anchored, &words);
         }
         if root == r {

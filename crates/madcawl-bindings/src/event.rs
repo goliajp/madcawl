@@ -162,11 +162,7 @@ impl<E: Engine> DomHost<E> {
         };
         let held: Vec<Held> = path.iter().map(|&t| self.hold_target(t)).collect();
         self.event_mut(r).path = held;
-        // the path's detached trees are anchored now: their wrappers stay
-        // while listeners run, also those a listener moves to another tree
-        self.dispatching.push(r);
-        self.pins_changed = true;
-        self.regroup(e);
+        let kept = self.keep_path(e, &path);
         for (i, &t) in path.iter().enumerate().rev() {
             let phase = if i == 0 { AT_TARGET } else { CAPTURING_PHASE };
             self.invoke(e, r, event.get(), t, phase, true);
@@ -184,11 +180,23 @@ impl<E: Engine> DomHost<E> {
         for h in gone {
             self.let_go_held(h);
         }
-        let i = self.dispatching.iter().rposition(|&d| d == r).expect("an event being dispatched");
-        self.dispatching.remove(i);
-        self.pins_changed = true;
+        for w in kept {
+            e.release(w);
+        }
         e.release(event);
         Ok(!canceled)
+    }
+
+    /// On an engine that places wrappers, the wrappers of the path's
+    /// nodes, made where missing, held while listeners run: each keeps
+    /// the tree its node is in, also when a listener moves the node to
+    /// another tree, so what script put on that tree's wrappers stays
+    /// for the listeners still to come. As many as the path is long.
+    fn keep_path(&mut self, e: &mut E, path: &[Target]) -> Vec<madcawl_js::Owned<E::Value>> {
+        if !E::PLACES_WRAPPERS {
+            return Vec::new();
+        }
+        path.iter().filter(|t| matches!(t, Target::Node(_))).map(|&t| t.into_js(e, self)).collect()
     }
 
     /// Call the listeners of `t` for the event in `phase`: the capture

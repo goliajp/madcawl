@@ -91,4 +91,9 @@ impl Jsc {
     pub fn member_writes(&self) -> u64 {
         self.member_writes
     }
+
+    /// How many wrapper words were given a tree so far.
+    pub fn words_placed(&self) -> u64 {
+        self.words_placed
+    }
 }

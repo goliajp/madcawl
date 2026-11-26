@@ -1,9 +1,8 @@
 //! What an event holds on JavaScriptCore: its target's tree lives while
 //! script reaches the event, a cycle through script is still freed, the
-//! cost of tree changes does not grow with the events kept, and closing
-//! the page leaves the wrappers' member containers alone.
-
-use std::time::{Duration, Instant};
+//! work of tree changes does not grow with the events kept nor that of
+//! a dispatch with its target's tree, and closing the page leaves the
+//! wrappers' member containers alone.
 
 use madcawl_bindings::DomHost;
 use madcawl_dom::Dom;
@@ -82,31 +81,47 @@ d.firstChild.dispatchEvent(evs[0]); })(); t.dispatchEvent(evs[1]); t = null; 'ok
     h.close(&mut e);
 }
 
-/// The time 300 insert and remove pairs take with `kept` events kept,
-/// each dispatched on a detached div of its own; the best of three.
-fn tree_changes_with(kept: usize) -> Duration {
+/// The wrapper words placed by 300 insert and remove pairs with `kept`
+/// events kept, each dispatched on a detached div of its own.
+fn tree_changes_with(kept: usize) -> u64 {
     let (mut e, mut h) = page("<p>x</p>");
     let src = format!("var kept = []; for (let i = 0; i < {kept}; i++) {{ let ev = new Event('x');
 document.createElement('div').dispatchEvent(ev); kept.push(ev); }}
 var b = document.querySelector('body'), c = document.createElement('span'); 'ok'");
     assert_eq!(eval(&mut e, &mut h, &src), "ok");
-    let best = (0..3)
-        .map(|_| {
-            let t = Instant::now();
-            eval(&mut e, &mut h, "for (let i = 0; i < 300; i++) { b.appendChild(c); b.removeChild(c); } 'ok'");
-            t.elapsed()
-        })
-        .min()
-        .expect("three runs");
+    let before = e.words_placed();
+    eval(&mut e, &mut h, "for (let i = 0; i < 300; i++) { b.appendChild(c); b.removeChild(c); } 'ok'");
+    let placed = e.words_placed() - before;
     h.close(&mut e);
-    best
+    placed
 }
 
 #[test]
-fn tree_changes_cost_the_same_however_many_events_are_kept() {
-    let (few, many) = (tree_changes_with(100), tree_changes_with(1600));
-    // linear in the events kept was 16 times; allow noise, not growth
-    assert!(many < few * 4 + Duration::from_millis(20), "100 kept: {few:?}, 1600 kept: {many:?}");
+fn tree_changes_place_the_same_however_many_events_are_kept() {
+    let few = tree_changes_with(100);
+    assert!(few > 0, "each move places the moved wrapper");
+    assert_eq!(tree_changes_with(1600), few);
+}
+
+/// The wrapper words placed by 200 dispatches on a node of a detached
+/// tree of `size` wrapped nodes, with a listener on the target and one
+/// on the root.
+fn dispatches_in_tree_of(size: usize) -> u64 {
+    let (mut e, mut h) = page("<p>x</p>");
+    let src = format!("var root = document.createElement('div'), ws = [root], seen = 0;
+for (let i = 1; i < {size}; i++) {{ let n = document.createElement('i'); n.x = i; root.appendChild(n); ws.push(n); }}
+var t = root.firstChild; t.addEventListener('x', () => seen++); root.addEventListener('x', () => seen++, true); 'ok'");
+    assert_eq!(eval(&mut e, &mut h, &src), "ok");
+    let before = e.words_placed();
+    assert_eq!(eval(&mut e, &mut h, "for (let i = 0; i < 200; i++) t.dispatchEvent(new Event('x')); String(seen)"), "400");
+    let placed = e.words_placed() - before;
+    h.close(&mut e);
+    placed
+}
+
+#[test]
+fn a_dispatch_works_the_same_however_large_its_target_tree() {
+    assert_eq!(dispatches_in_tree_of(5000), dispatches_in_tree_of(10));
 }
 
 #[test]

@@ -33,6 +33,7 @@ impl Jsc {
         if self.realms[realm as usize].detached || (tree == Tree::Anchored && words.iter().all(settled)) {
             return true;
         }
+        self.words_placed += words.len() as u64;
         let Some(live) = self.live_records(realm, words, refused) else { return false };
         let placed = match tree {
             Tree::Anchored => self.anchor(realm, words, &live),
