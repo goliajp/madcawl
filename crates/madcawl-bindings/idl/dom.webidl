@@ -139,11 +139,16 @@ interface Element : Node {
   readonly attribute DOMString tagName;
 
   [CEReactions] attribute DOMString id;
-  readonly attribute DOMString className;
+  [CEReactions] attribute DOMString className;
 
+  boolean hasAttributes();
+  sequence<DOMString> getAttributeNames();
   DOMString? getAttribute(DOMString qualifiedName);
-  boolean hasAttribute(DOMString qualifiedName);
   [CEReactions] undefined setAttribute(DOMString qualifiedName, DOMString value);
+  [CEReactions] undefined removeAttribute(DOMString qualifiedName);
+  // the optional boolean is read as any, to tell a missing one from false
+  [CEReactions] boolean toggleAttribute(DOMString qualifiedName, optional any force);
+  boolean hasAttribute(DOMString qualifiedName);
 
   HTMLCollection getElementsByTagName(DOMString qualifiedName);
   HTMLCollection getElementsByClassName(DOMString classNames);

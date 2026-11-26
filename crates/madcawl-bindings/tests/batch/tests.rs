@@ -110,3 +110,8 @@ fn character_data_is_edited_by_code_unit() {
 fn collections_are_live_and_child_lists_the_same_object() {
     batch::collections_are_live_and_child_lists_the_same_object::<E>();
 }
+
+#[test]
+fn attributes_are_removed_and_toggled_with_their_id_and_classes() {
+    batch::attributes_are_removed_and_toggled_with_their_id_and_classes::<E>();
+}

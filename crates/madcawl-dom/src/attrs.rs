@@ -162,6 +162,17 @@ impl AttrHeap {
         std::mem::replace(&mut self.units[b as usize + 1 + k], u)
     }
 
+    /// Take block `b`'s attribute `k` out, the later ones moving down
+    /// a place; the unit, whose value the caller drops.
+    pub(crate) fn remove(&mut self, b: u32, k: usize) -> Unit {
+        let at = b as usize + 1;
+        let n = self.units[b as usize].a as usize;
+        let u = self.units[at + k];
+        self.units.copy_within(at + k + 1..at + n, at + k);
+        self.units[b as usize].a -= 1;
+        u
+    }
+
     pub(crate) fn clear_id(&mut self, b: u32) {
         let h = &mut self.units[b as usize];
         h.c &= !0xFFFF_FFFF;

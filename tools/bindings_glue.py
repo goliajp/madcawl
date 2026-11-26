@@ -46,8 +46,8 @@ def glue(fn, iface, body, kind, uses_args=True):
 
 STRINGS = ('DOMString', 'DOMString?', '[Atom] DOMString', '[LegacyNullToEmptyString] DOMString')
 # list types: a collection the implementation gives as its side object,
-# and composedPath's sequence, made an array of wrappers
-LISTS = ('NodeList', 'HTMLCollection', 'sequence<EventTarget>')
+# and the sequences, made arrays
+LISTS = ('NodeList', 'HTMLCollection', 'sequence<EventTarget>', 'sequence<DOMString>')
 
 
 def idl_type(t, names):

@@ -340,7 +340,7 @@ impl<E: Engine> ElementClass<E> {
             Attribute { name: "localName", get: unsafe { Bound::host_fn(element_get_local_name_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "tagName", get: unsafe { Bound::host_fn(element_get_tag_name_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "id", get: unsafe { Bound::host_fn(element_get_id_abi::<E>) }, set: Some(unsafe { Bound::host_fn(element_set_id_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
-            Attribute { name: "className", get: unsafe { Bound::host_fn(element_get_class_name_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "className", get: unsafe { Bound::host_fn(element_get_class_name_abi::<E>) }, set: Some(unsafe { Bound::host_fn(element_set_class_name_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
             Attribute { name: "previousElementSibling", get: unsafe { Bound::host_fn(element_get_previous_element_sibling_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "nextElementSibling", get: unsafe { Bound::host_fn(element_get_next_element_sibling_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "children", get: unsafe { Bound::host_fn(element_get_children_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Object, get: Effects::NONE, set: Effects::NONE } },
@@ -349,9 +349,13 @@ impl<E: Engine> ElementClass<E> {
             Attribute { name: "childElementCount", get: unsafe { Bound::host_fn(element_get_child_element_count_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
         ],
         operations: &[
+            Operation { name: "hasAttributes", length: 0, call: unsafe { Bound::host_fn(element_has_attributes_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Boolean, effects: Effects::NONE } },
+            Operation { name: "getAttributeNames", length: 0, call: unsafe { Bound::host_fn(element_get_attribute_names_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Object, effects: Effects::NONE } },
             Operation { name: "getAttribute", length: 1, call: unsafe { Bound::host_fn(element_get_attribute_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::NullableString, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
-            Operation { name: "hasAttribute", length: 1, call: unsafe { Bound::host_fn(element_has_attribute_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Boolean, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
             Operation { name: "setAttribute", length: 2, call: unsafe { Bound::host_fn(element_set_attribute_abi::<E>) }, sig: Signature { args: &[IdlType::String, IdlType::String], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+            Operation { name: "removeAttribute", length: 1, call: unsafe { Bound::host_fn(element_remove_attribute_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+            Operation { name: "toggleAttribute", length: 1, call: unsafe { Bound::host_fn(element_toggle_attribute_abi::<E>) }, sig: Signature { args: &[IdlType::String, IdlType::Any], result: IdlType::Boolean, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+            Operation { name: "hasAttribute", length: 1, call: unsafe { Bound::host_fn(element_has_attribute_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Boolean, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
             Operation { name: "getElementsByTagName", length: 1, call: unsafe { Bound::host_fn(element_get_elements_by_tag_name_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
             Operation { name: "getElementsByClassName", length: 1, call: unsafe { Bound::host_fn(element_get_elements_by_class_name_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
             Operation { name: "remove", length: 0, call: unsafe { Bound::host_fn(element_remove_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::WRITES) } },
@@ -418,6 +422,17 @@ fn element_get_class_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Val
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn element_get_class_name_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, element_get_class_name::<E>) } }
 
+fn element_set_class_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
+        let value = cv::dom_string(e, h, value)?;
+        impls::element::set_class_name(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_set_class_name_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, element_set_class_name::<E>) } }
+
 fn element_get_previous_element_sibling<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
@@ -478,6 +493,26 @@ fn element_get_child_element_count<E: Engine>(e: &mut E, h: &mut DomHost<E>, thi
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn element_get_child_element_count_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, element_get_child_element_count::<E>) } }
 
+fn element_has_attributes<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
+        impls::element::has_attributes(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_has_attributes_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_has_attributes::<E>) } }
+
+fn element_get_attribute_names<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
+        impls::element::get_attribute_names(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_get_attribute_names_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_get_attribute_names::<E>) } }
+
 fn element_get_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
@@ -489,18 +524,6 @@ fn element_get_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Valu
 
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn element_get_attribute_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_get_attribute::<E>) } }
-
-fn element_has_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
-    cv::run(e, h, |e, h| {
-        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
-        cv::need(e, args, 1)?;
-        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
-        impls::element::has_attribute(e, h, this, a0)
-    })
-}
-
-// SAFETY: called as the host function of its table entry
-unsafe extern "C" fn element_has_attribute_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_has_attribute::<E>) } }
 
 fn element_set_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -514,6 +537,43 @@ fn element_set_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Valu
 
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn element_set_attribute_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_set_attribute::<E>) } }
+
+fn element_remove_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        impls::element::remove_attribute(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_remove_attribute_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_remove_attribute::<E>) } }
+
+fn element_toggle_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        let a1 = cv::arg::<E>(args, 1);
+        impls::element::toggle_attribute(e, h, this, a0, a1)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_toggle_attribute_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_toggle_attribute::<E>) } }
+
+fn element_has_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &ElementClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        impls::element::has_attribute(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn element_has_attribute_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_has_attribute::<E>) } }
 
 fn element_get_elements_by_tag_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {

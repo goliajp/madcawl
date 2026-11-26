@@ -1,6 +1,7 @@
 //! The members of the bound interfaces, called by the generated glue
 //! with converted arguments.
 
+pub(crate) mod attributes;
 pub(crate) mod character_data;
 pub(crate) mod collections;
 pub(crate) mod custom_event;

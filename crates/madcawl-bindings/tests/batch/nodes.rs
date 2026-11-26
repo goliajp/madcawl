@@ -67,3 +67,36 @@ fn read_collections<E: Driver>(js: &mut Js<E>) {
     assert!(found.get() == c.get());
     js.drop_all([found, past, second, c, spans, name, kids, nodes, text, t, b, a, div, doc]);
 }
+
+pub fn attributes_are_removed_and_toggled_with_their_id_and_classes<E: Driver>() {
+    let mut js = Js::<E>::new();
+    let doc = js.doc();
+    let html = js.element(doc.get(), "html");
+    js.run(doc.get(), "appendChild", &[html.get()]);
+    let (id, one, hidden, x) = (js.str("id"), js.str("one"), js.str("HIDDEN"), js.str("x"));
+    js.run(html.get(), "setAttribute", &[id.get(), one.get()]);
+    js.set(html.get(), "className", x.get());
+    let xs = js.call(doc.get(), "getElementsByClassName", &[x.get()]);
+    let found = js.call(doc.get(), "getElementById", &[one.get()]);
+    assert!(found.get() == html.get());
+    let on = js.call(html.get(), "toggleAttribute", &[hidden.get()]);
+    assert_eq!((js.e.to_boolean(on.get()), js.read(xs.get(), "length")), (true, "1".into()));
+    let upper = js.str("ID");
+    js.run(html.get(), "removeAttribute", &[upper.get()]);
+    let gone = js.call(doc.get(), "getElementById", &[one.get()]);
+    assert!(gone.get() == E::null(), "the id went with its attribute");
+    let empty = js.str("");
+    js.set(html.get(), "className", empty.get());
+    let kept = js.call(html.get(), "toggleAttribute", &[hidden.get(), E::boolean(true)]);
+    let off = js.call(html.get(), "toggleAttribute", &[hidden.get()]);
+    let any = js.call(html.get(), "hasAttributes", &[]);
+    assert_eq!(
+        (js.e.to_boolean(kept.get()), js.e.to_boolean(off.get()), js.e.to_boolean(any.get()), js.read(xs.get(), "length")),
+        (true, false, true, "0".into()),
+        "class is still there, empty"
+    );
+    js.drop_all([any, off, kept, empty, gone, upper, on, found, xs, x, hidden, one, id, html, doc]);
+    js.audit();
+    let Js { mut e, h } = js;
+    h.close(&mut e);
+}

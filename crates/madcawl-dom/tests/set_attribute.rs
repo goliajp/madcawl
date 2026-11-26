@@ -222,3 +222,28 @@ fn a_pair_of_surrogate_halves_is_one_value_and_gives_its_bytes_back() {
     assert_eq!(dom.bytes(), bytes + 32 + 2 * 16);
     assert_eq!(dom.audit().mismatches(), 0);
 }
+
+#[test]
+fn removing_attributes_gives_back_bytes_entries_id_and_classes() {
+    let mut dom = Dom::new();
+    let el = dom.create_element(Namespace::Html, atom!("div"), Attrs::empty());
+    dom.append(dom.document(), el);
+    assert!(dom.set_attribute(el, atom!("lang"), b"en"));
+    let (bytes, tables) = (dom.bytes(), dom.table_bytes());
+    for (name, v) in [(atom!("class"), &b"x-only-here y"[..]), (atom!("id"), b"x-only-id"), (atom!("title"), b"t")] {
+        assert!(dom.set_attribute(el, name, v));
+    }
+    let before = dom.version();
+    dom.remove_attribute(el, 2);
+    assert!(dom.version() > before, "a removal is a change");
+    assert_eq!(dom.element_id(el), None);
+    assert_eq!(names(&dom, el), ["lang=en", "class=x-only-here y", "title=t"]);
+    dom.remove_attribute(el, 1);
+    assert_eq!(dom.class_list(el).0, 0, "the empty list");
+    dom.remove_attribute(el, 1);
+    assert_eq!(names(&dom, el), ["lang=en"]);
+    assert_eq!((dom.bytes(), dom.table_bytes()), (bytes, tables));
+    assert!(dom.set_attribute(el, atom!("id"), b"x-only-id"));
+    assert_eq!(dom.element_id(el).map(|a| text(&a.to_dom_string())), Some("x-only-id".into()));
+    assert_eq!(dom.audit().mismatches(), 0);
+}

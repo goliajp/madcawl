@@ -185,6 +185,21 @@ return [seen.length >= 7, seen.every(c => c === 'null')].join();";
     h.close(&mut e);
 }
 
+#[test]
+fn attributes_are_named_removed_and_toggled_as_script_expects() {
+    let (mut e, mut h) = page("<p id=a class=x title=t>x</p>");
+    let src = "var p = document.getElementById('a'), xs = document.getElementsByClassName('x'), seen = [];
+seen.push(p.getAttributeNames().join(' '), p.hasAttributes(), xs.length);
+p.removeAttribute('CLASS'); p.removeAttribute('nope'); p.className = 'y z';
+seen.push(p.getAttributeNames().join(' '), xs.length, p.className, document.getElementsByClassName('z y')[0] === p);
+var t; try { p.toggleAttribute('a b'); } catch (x) { t = x.name; }
+seen.push(p.toggleAttribute('hidden', false), p.toggleAttribute('hidden'), p.getAttribute('hidden'), p.toggleAttribute('hidden', true), t);
+p.removeAttribute('id'); seen.push(document.getElementById('a'), p.id === '');
+return seen.join();";
+    assert_eq!(eval(&mut e, &mut h, src), "id class title,true,1,id title class,0,y z,true,false,true,,true,InvalidCharacterError,,true");
+    h.close(&mut e);
+}
+
 #[inline(never)]
 fn scrub() {
     let pad = [0u8; 512 * 1024];

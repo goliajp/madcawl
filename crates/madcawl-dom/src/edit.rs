@@ -6,7 +6,7 @@ use madcawl_str::{Atom, DomString, atom};
 
 use crate::attrs::Unit;
 use crate::dom::{Dom, NodeId};
-use crate::node::{HAS_CLASS, HAS_ID, NodeKind};
+use crate::node::{HAS_CLASS, HAS_ID, HAS_STYLE, NodeKind};
 
 impl Dom {
     /// An HTML element named `name` (already lowercased), owned by the
@@ -46,6 +46,37 @@ impl Dom {
         self.cut = cut;
         self.notify(crate::tree::Change::Attributes(i));
         done
+    }
+
+    /// Remove attribute `k` of element `el`, in the order `attributes`
+    /// gives them; its value gives back its bytes, its slot and its table
+    /// entries, and the element's id or class list goes with it.
+    pub fn remove_attribute(&mut self, el: NodeId, k: usize) {
+        let i = el.index();
+        let b = self.n(i).attrs;
+        let u = self.attrs.remove(b, k);
+        self.refund(u.value());
+        self.bytes -= 16;
+        if u.ns() == AttrNamespace::None {
+            let local = u.local();
+            if local == atom!("class") {
+                let mut was = Vec::new();
+                u.value().write_wtf8(&mut was);
+                self.tables.drop_class(&was);
+                self.attrs.set_classes(b, 0);
+                self.m(i).flags &= !HAS_CLASS;
+            } else if local == atom!("id") {
+                if let Some(id) = self.attrs.id(b) {
+                    self.tables.drop_id(id);
+                }
+                self.attrs.clear_id(b);
+                self.m(i).flags &= !HAS_ID;
+            } else if local == atom!("style") {
+                self.m(i).flags &= !HAS_STYLE;
+            }
+        }
+        u.drop_value();
+        self.notify(crate::tree::Change::Attributes(i));
     }
 
     /// Give the no-namespace attribute `local` of `el` the value `v`,
