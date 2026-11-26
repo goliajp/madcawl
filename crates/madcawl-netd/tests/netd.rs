@@ -289,3 +289,17 @@ fn request_bodies_are_held_within_a_budget() {
     drop(silent);
     let _ = std::fs::remove_file(&path);
 }
+
+// needs the network, so it runs only when asked: `cargo test -p
+// madcawl-netd --test netd -- --ignored`; www.jal.co.jp offers TLS 1.2 and
+// nothing newer
+#[test]
+#[ignore = "network: fetches from www.jal.co.jp"]
+fn a_site_that_offers_only_tls12_is_fetched_through_the_network_process() {
+    let path = netd(ServerLimits::default());
+    let mut s = connect(&path);
+    let (head, body) = fetch(&mut s, 1, "https://www.jal.co.jp/favicon.ico");
+    assert_eq!(head.get_num(tag::STATUS), Some(200), "{head:?}");
+    assert!(!body.is_empty());
+    let _ = std::fs::remove_file(&path);
+}
