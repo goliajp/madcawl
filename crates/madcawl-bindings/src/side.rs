@@ -157,6 +157,7 @@ impl<E: Engine> DomHost<E> {
 
     /// The wrapper of `r` is gone or refused: clear its word and its count.
     fn side_wrapper_gone(&mut self, e: &mut E, r: SideRef) {
+        self.drop_side_members(r);
         let w = std::mem::take(&mut self.sides.get_mut(r).wrapper);
         if w & 1 != 0 {
             // SAFETY: the count the preserved edge held
@@ -175,6 +176,9 @@ impl<E: Engine> DomHost<E> {
             let live = self.sides.map.get(&addr).is_some_and(|s| abi::refcount(s.header) == 0);
             if live && let Some(mut s) = self.sides.map.remove(&addr) {
                 s.data.release(&mut held);
+                if let Some(mut d) = self.details.remove(&SideRef(addr)) {
+                    d.clear(e);
+                }
                 e.forget(HostRef::new(addr).expect("nonzero"));
             }
         }
@@ -189,9 +193,22 @@ impl<E: Engine> DomHost<E> {
         changed
     }
 
-    /// Give back every side object's preserved wrapper edge and the
-    /// nodes it holds: the host is closing.
+    /// `r`'s wrapper is gone: on an engine that keeps members beside the
+    /// wrapper, so are its members.
+    fn drop_side_members(&mut self, r: SideRef) {
+        if E::PLACES_WRAPPERS
+            && let Some(mut d) = self.details.remove(&r)
+        {
+            d.forget();
+        }
+    }
+
+    /// Give back every side object's preserved wrapper edge, its members
+    /// and the nodes it holds: the host is closing.
     pub(crate) fn close_sides(&mut self, e: &mut E) {
+        for (_, mut d) in std::mem::take(&mut self.details) {
+            d.clear(e);
+        }
         let mut held = Vec::new();
         for s in self.sides.map.values_mut() {
             s.data.release(&mut held);
@@ -224,8 +241,12 @@ fn side_of<E: Engine>(h: &DomHost<E>, obj: HostRef) -> SideRef {
 }
 
 fn traverse<E: Engine>(h: &DomHost<E>, obj: HostRef, t: &mut E::Tracer) {
-    let s = h.sides.get(side_of(h, obj));
+    let r = side_of(h, obj);
+    let s = h.sides.get(r);
     s.data.nodes(&mut |n| t.host(h.host_ref(n)));
+    if let Some(d) = h.details.get(&r) {
+        d.trace(t);
+    }
     if s.wrapper & 1 != 0 {
         t.value(E::wrapper_value(s.wrapper & !1));
     }
@@ -233,6 +254,9 @@ fn traverse<E: Engine>(h: &DomHost<E>, obj: HostRef, t: &mut E::Tracer) {
 
 fn unlink<E: Engine>(h: &mut DomHost<E>, obj: HostRef, u: &mut E::Unlinker) {
     let r = side_of(h, obj);
+    if let Some(mut d) = h.details.remove(&r) {
+        d.unlink(u);
+    }
     let mut held = Vec::new();
     let s = h.sides.get_mut(r);
     s.data.release(&mut held);
@@ -253,6 +277,7 @@ fn preserve<E: Engine>(h: &mut DomHost<E>, obj: HostRef) {
 
 fn died<E: Engine>(h: &mut DomHost<E>, obj: HostRef) {
     let r = side_of(h, obj);
+    h.drop_side_members(r);
     let s = h.sides.get_mut(r);
     assert_eq!(s.wrapper & 1, 0, "a preserved wrapper does not die");
     s.wrapper = 0;

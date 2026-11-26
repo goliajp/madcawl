@@ -240,6 +240,20 @@ pub(crate) fn dom_string_or_null<E: Engine>(
     dom_string(e, h, v).map(Some)
 }
 
+/// An `any` argument whose default is null.
+pub(crate) fn any_or_null<E: Engine>(e: &E, v: E::Value) -> E::Value {
+    if e.kind(v) == ValueKind::Undefined { E::null() } else { v }
+}
+
+/// A script value an `any` member returns, with its count.
+pub(crate) struct Any<E: Engine>(pub Owned<E::Value>);
+
+impl<E: Engine> IntoJs<E> for Any<E> {
+    fn into_js(self, _: &mut E, _: &mut DomHost<E>) -> Owned<E::Value> {
+        self.0
+    }
+}
+
 /// A `DOMString` argument with a default: `default` when undefined.
 pub(crate) fn dom_string_or<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Value, default: &[u8]) -> Result<DomString, Thrown> {
     if e.kind(v) == ValueKind::Undefined {

@@ -41,6 +41,8 @@ impl Held {
 
 pub(crate) struct EventState {
     pub ty: Atom,
+    /// A CustomEvent: its detail is in the host's `details`.
+    pub custom: bool,
     pub bubbles: bool,
     pub cancelable: bool,
     pub composed: bool,
@@ -64,6 +66,7 @@ impl EventState {
     pub fn new(ty: Atom, time: f64) -> Self {
         EventState {
             ty,
+            custom: false,
             bubbles: false,
             cancelable: false,
             composed: false,

@@ -17,7 +17,8 @@ glue (`shell.rs`).
 
 The parser reads the subset of Web IDL the files use: interfaces with
 a parent, a constructor, constants, attributes, operations with
-optional arguments and defaults (boolean, and string literals),
+optional arguments and defaults (boolean, string literals, and
+null for `any`),
 nullable types, and extended attribute
 lists (only `[HostOps]` and `[Side]` (its objects are not nodes) on an
 interface, `[Atom]` on an argument, and `[CEReactions]` and
@@ -270,6 +271,8 @@ def emit(ifaces, sources):
                 v = f'cv::arg::<E>(args, {k})'
                 if a['default'] is not None and a['type'] == 'DOMString' and re.fullmatch(r'"[^"\\]*"', a['default']):
                     body.append(f"let a{k} = cv::dom_string_or(e, h, {v}, b{a['default']})?;")
+                elif a['default'] == 'null' and a['type'] == 'any':
+                    body.append(f"let a{k} = cv::any_or_null::<E>(e, {v});")
                 elif a['default'] is not None:
                     if a['type'] != 'boolean' or a['default'] not in ('true', 'false'):
                         sys.exit(f"unsupported default: {a['type']} = {a['default']}")

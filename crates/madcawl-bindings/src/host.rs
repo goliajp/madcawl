@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use madcawl_dom::{Dom, NodeId, NodeKind};
 use madcawl_js::{
-    ClassDef, Deadline, Engine, ErrorKind, Halt, Host, HostRef, ModuleRequest, Owned, Root, Step,
+    ClassDef, Deadline, Engine, ErrorKind, Halt, Host, HostRef, Member, ModuleRequest, Owned, Root, Step,
 };
 use madcawl_str::{Atom, HeldAtoms};
 
@@ -46,6 +46,8 @@ pub struct DomHost<E: Engine> {
     pub(crate) collect_due: bool,
     /// The host objects that are not nodes (`side.rs`).
     pub(crate) sides: crate::side::Sides,
+    /// The detail of each CustomEvent that has one, a member of the event.
+    pub(crate) details: HashMap<crate::side::SideRef, Member<E>>,
 }
 
 impl<E: Engine> DomHost<E> {
@@ -75,6 +77,7 @@ impl<E: Engine> DomHost<E> {
             closed: false,
             collect_due: false,
             sides: Default::default(),
+            details: HashMap::new(),
         };
         if E::PLACES_WRAPPERS {
             h.dom.track_moves();
@@ -257,6 +260,7 @@ impl<E: Engine> Host<E> for DomHost<E> {
 /// The class of a side object.
 pub(crate) fn side_class<E: Engine>(data: &crate::side::SideData) -> &'static ClassDef<E, DomHost<E>> {
     match data {
+        crate::side::SideData::Event(ev) if ev.custom => &crate::generated::CustomEventClass::<E>::DEF,
         crate::side::SideData::Event(_) => &crate::generated::EventClass::<E>::DEF,
         crate::side::SideData::DomException(_) => &crate::generated::DOMExceptionClass::<E>::DEF,
     }

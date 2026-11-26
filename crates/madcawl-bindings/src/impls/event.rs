@@ -1,6 +1,6 @@
 //! The Event interface's members.
 
-use madcawl_js::{Engine, Key, ValueKind};
+use madcawl_js::{Engine, Key, Owned, ValueKind};
 use madcawl_str::DomString;
 
 use crate::convert::{Thrown, throw};
@@ -11,17 +11,35 @@ use crate::side::{SideData, SideRef};
 /// `new Event(type, eventInitDict)`: the dictionary's members are read
 /// in the order Web IDL converts a dictionary, by name.
 pub(crate) fn constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, ty: DomString, init: E::Value) -> Result<SideRef, Thrown> {
+    let (r, _) = make(e, h, ty, init, false)?;
+    Ok(r)
+}
+
+/// A new event of type `ty` from dictionary `init`; with `custom`, a
+/// CustomEvent, and its `detail` member (null when absent).
+pub(crate) fn make<E: Engine>(e: &mut E, h: &mut DomHost<E>, ty: DomString, init: E::Value, custom: bool) -> Result<(SideRef, Owned<E::Value>), Thrown> {
     let mut flags = [false; 3];
+    // SAFETY: null carries no count
+    let mut detail = unsafe { Owned::from_raw(E::null()) };
     match e.kind(init) {
         ValueKind::Undefined | ValueKind::Null => {}
         ValueKind::Object | ValueKind::Function => {
-            for (name, flag) in ["bubbles", "cancelable", "composed"].into_iter().zip(&mut flags) {
+            let names: &[&str] = if custom { &["bubbles", "cancelable", "composed", "detail"] } else { &["bubbles", "cancelable", "composed"] };
+            for (i, name) in names.iter().enumerate() {
                 let v = e.get(h, init, Key::Str(&DomString::from_wtf8(name.as_bytes())));
                 if E::is_thrown(v.get()) {
                     let _sentinel = v.into_raw();
+                    e.release(detail);
                     return Err(Thrown);
                 }
-                *flag = e.to_boolean(v.get());
+                if i == 3 {
+                    if e.kind(v.get()) != ValueKind::Undefined {
+                        detail = v;
+                        continue;
+                    }
+                } else {
+                    flags[i] = e.to_boolean(v.get());
+                }
                 e.release(v);
             }
         }
@@ -29,10 +47,11 @@ pub(crate) fn constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, ty: DomStrin
     }
     let mut ev = EventState::new(h.names.hold(&wtf8(&ty)), h.now_ms());
     [ev.bubbles, ev.cancelable, ev.composed] = flags;
-    Ok(h.sides.add(SideData::Event(ev)))
+    ev.custom = custom;
+    Ok((h.sides.add(SideData::Event(ev)), detail))
 }
 
-fn wtf8(s: &DomString) -> Vec<u8> {
+pub(crate) fn wtf8(s: &DomString) -> Vec<u8> {
     let mut b = Vec::new();
     s.write_wtf8(&mut b);
     b

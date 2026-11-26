@@ -85,6 +85,16 @@ interface Event {
   undefined initEvent(DOMString type, optional boolean bubbles = false, optional boolean cancelable = false);
 };
 
+// the CustomEventInit dictionary is read as any
+[Exposed=*, Side]
+interface CustomEvent : Event {
+  constructor(DOMString type, optional any eventInitDict);
+
+  readonly attribute any detail;
+
+  undefined initCustomEvent(DOMString type, optional boolean bubbles = false, optional boolean cancelable = false, optional any detail = null);
+};
+
 [Exposed=Window, HostOps]
 interface Node : EventTarget {
   const unsigned short ELEMENT_NODE = 1;

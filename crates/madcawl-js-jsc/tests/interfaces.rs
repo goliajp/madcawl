@@ -45,3 +45,27 @@ return [t instanceof DOMException, t.constructor === DOMException, t.name, t.cod
     assert_eq!(eval(&mut e, &mut h, src), "true,true,InvalidCharacterError,5,8,gone,Error,true,0,25,12");
     h.close(&mut e);
 }
+
+#[test]
+fn custom_events_carry_their_detail_and_are_freed_with_it() {
+    let (mut e, mut h) = page("<p>x</p>");
+    let src = "var o = { n: 1 }, seen = []; var b = document.querySelector('body');
+b.addEventListener('c', function (ev) { seen.push(ev.detail === o, ev instanceof CustomEvent, ev instanceof Event); });
+var c = new CustomEvent('c', { detail: o, bubbles: true }); b.dispatchEvent(c);
+var d = document.createEvent('CustomEvent'); var before = d.detail; d.initCustomEvent('c', false, false, 5);
+return [seen.join(), c.bubbles, before, d.detail, new CustomEvent('c').detail, d.type].map(String).join();";
+    assert_eq!(eval(&mut e, &mut h, src), "true,true,true,true,null,5,null,c");
+    let src = "for (let i = 0; i < 100; i++) { let c = new CustomEvent('c', { detail: {} }); c.detail.self = c; } return 'ok';";
+    assert_eq!(eval(&mut e, &mut h, src), "ok");
+    scrub();
+    e.collect_now();
+    while h.collect(&mut e, madcawl_js::Deadline::Work(u32::MAX)) != madcawl_js::Step::Done {}
+    assert!(h.side_objects() < 10, "{} side objects left", h.side_objects());
+    h.close(&mut e);
+}
+
+#[inline(never)]
+fn scrub() {
+    let pad = [0u8; 512 * 1024];
+    std::hint::black_box(&pad);
+}

@@ -72,10 +72,11 @@ pub(crate) fn create_event<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: Node
     let mut b = Vec::new();
     interface.write_wtf8(&mut b);
     b.make_ascii_lowercase();
-    if !matches!(&b[..], b"event" | b"events" | b"htmlevents" | b"svgevents") {
+    let custom = &b[..] == b"customevent";
+    if !custom && !matches!(&b[..], b"event" | b"events" | b"htmlevents" | b"svgevents") {
         return Err(crate::convert::throw_dom(e, h, "NotSupportedError", "no event interface of that name"));
     }
     let mut ev = crate::event::EventState::new(h.names.hold(b""), h.now_ms());
-    ev.initialized = false;
+    (ev.initialized, ev.custom) = (false, custom);
     Ok(h.sides.add(crate::side::SideData::Event(ev)))
 }

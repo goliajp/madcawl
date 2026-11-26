@@ -711,7 +711,7 @@ impl<E: Engine> EventClass<E> {
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Event",
         id: ClassId(6),
-        last: ClassId(6),
+        last: ClassId(7),
         parent: None,
         attributes: &[
             Attribute { name: "type", get: unsafe { Bound::host_fn(event_get_type_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
@@ -964,3 +964,62 @@ fn event_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::Value, 
 
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn event_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, event_constructor::<E>) } }
+
+pub struct CustomEventClass<E>(PhantomData<E>);
+
+impl<E: Engine> CustomEventClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "CustomEvent",
+        id: ClassId(7),
+        last: ClassId(7),
+        parent: Some(&EventClass::<E>::DEF),
+        attributes: &[
+            Attribute { name: "detail", get: unsafe { Bound::host_fn(custom_event_get_detail_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Any, get: Effects::NONE, set: Effects::NONE } },
+        ],
+        operations: &[
+            Operation { name: "initCustomEvent", length: 1, call: unsafe { Bound::host_fn(custom_event_init_custom_event_abi::<E>) }, sig: Signature { args: &[IdlType::String, IdlType::Boolean, IdlType::Boolean, IdlType::Any], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+        ],
+        constants: &[],
+        interceptors: None,
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: Some(unsafe { Bound::host_fn(custom_event_constructor_abi::<E>) }),
+    };
+}
+
+fn custom_event_get_detail<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &CustomEventClass::<E>::DEF)?;
+        impls::custom_event::detail(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn custom_event_get_detail_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, custom_event_get_detail::<E>) } }
+
+fn custom_event_init_custom_event<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &CustomEventClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        let a1 = cv::boolean_or(e, cv::arg::<E>(args, 1), false);
+        let a2 = cv::boolean_or(e, cv::arg::<E>(args, 2), false);
+        let a3 = cv::any_or_null::<E>(e, cv::arg::<E>(args, 3));
+        impls::custom_event::init_custom_event(e, h, this, a0, a1, a2, a3)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn custom_event_init_custom_event_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, custom_event_init_custom_event::<E>) } }
+
+fn custom_event_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        let a1 = cv::arg::<E>(args, 1);
+        impls::custom_event::constructor(e, h, a0, a1)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn custom_event_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, custom_event_constructor::<E>) } }

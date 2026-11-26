@@ -95,3 +95,8 @@ fn an_event_keeps_its_detached_target_wrapper_with_its_own_properties() {
 fn a_listener_object_holding_its_own_detached_node_is_freed() {
     batch::a_listener_object_holding_its_own_detached_node_is_freed::<E>();
 }
+
+#[test]
+fn a_custom_event_whose_detail_holds_it_is_freed() {
+    batch::a_custom_event_whose_detail_holds_it_is_freed::<E>();
+}

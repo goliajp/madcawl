@@ -279,3 +279,30 @@ fn listen_on_a_dropped_node<E: Driver>(js: &mut Js<E>) {
     js.run(div.get(), "addEventListener", &[x.get(), obj.get()]);
     js.drop_all([x, f, log, obj, div, doc]);
 }
+
+pub fn a_custom_event_whose_detail_holds_it_is_freed<E: Driver>() {
+    let mut js = Js::<E>::new();
+    for _ in 0..20 {
+        custom_event_holding_itself(&mut js);
+    }
+    super::trees::scrub();
+    js.e.collect_all(&mut js.h);
+    assert_eq!(js.h.side_objects(), 0);
+    let Js { mut e, h } = js;
+    h.close(&mut e);
+}
+
+/// `createEvent('CustomEvent')`, its detail an object that holds the
+/// event, both let go of.
+#[inline(never)]
+fn custom_event_holding_itself<E: Driver>(js: &mut Js<E>) {
+    let doc = js.doc();
+    let kind = js.str("CustomEvent");
+    let ev = js.call(doc.get(), "createEvent", &[kind.get()]);
+    let o = js.e.new_object(js.h.realm);
+    js.set(o.get(), "event", ev.get());
+    let x = js.str("x");
+    js.run(ev.get(), "initCustomEvent", &[x.get(), E::boolean(false), E::boolean(false), o.get()]);
+    assert!(js.is(ev.get(), "detail", o.get()));
+    js.drop_all([x, o, ev, kind, doc]);
+}
