@@ -148,6 +148,8 @@ impl<E: Engine> DomHost<E> {
     /// parser has a pending parsing-blocking script the text waits in
     /// the input.
     pub(crate) fn document_write(&mut self, e: &mut E, text: &DomString) {
+        // with no insertion point (a timer while the parser waits, or no
+        // parser at all) the standard opens a new document; this ignores it
         let Some(p) = self.scripts.parser.as_mut() else { return };
         if !p.tok.has_insertion_point() || p.writes_capped {
             return;

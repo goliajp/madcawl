@@ -12,7 +12,9 @@
 //! task. A host with a [`Loader`] fetches at once instead.
 //!
 //! Module scripts and import maps are not run, and nothing marks a
-//! script element as parser-made until its end tag is reached.
+//! script element as parser-made until its end tag is reached. Not done
+//! yet: `nomodule` (it runs as classic), `for` and `event` (ignored), and
+//! the children changed steps when a script's text changes in place.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -235,6 +237,7 @@ impl<E: Engine> DomHost<E> {
         }
         match self.scripts.loader.as_mut() {
             Some(l) => {
+                // read as UTF-8, whatever the charset or the document's encoding
                 let got = l(&text(&url)).map(|b| DomString::from_wtf8(String::from_utf8_lossy(&b).as_bytes()));
                 self.script_fetched(id, got);
             }
