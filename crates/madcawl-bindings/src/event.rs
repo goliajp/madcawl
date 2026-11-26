@@ -125,13 +125,17 @@ impl<E: Engine> IntoJs<E> for SideRef {
 
 impl<E: Engine> DomHost<E> {
     pub(crate) fn event(&self, r: SideRef) -> &EventState {
-        let SideData::Event(ev) = &self.sides.get(r).data;
-        ev
+        match &self.sides.get(r).data {
+            SideData::Event(ev) => ev,
+            _ => unreachable!("an event's side object"),
+        }
     }
 
     pub(crate) fn event_mut(&mut self, r: SideRef) -> &mut EventState {
-        let SideData::Event(ev) = &mut self.sides.get_mut(r).data;
-        ev
+        match &mut self.sides.get_mut(r).data {
+            SideData::Event(ev) => ev,
+            _ => unreachable!("an event's side object"),
+        }
     }
 
     fn hold_target(&mut self, t: Target) -> Held {

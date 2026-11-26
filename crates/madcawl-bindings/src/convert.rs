@@ -24,32 +24,14 @@ pub(crate) fn throw<E: Engine>(e: &mut E, kind: ErrorKind, message: &str) -> Thr
 /// page's setter on Object.prototype can intercept or refuse; that is
 /// accepted until the interface is bound and they are defined instead.
 pub(crate) fn throw_dom<E: Engine>(e: &mut E, h: &mut DomHost<E>, name: &'static str, message: &str) -> Thrown {
-    let ex = e.new_object(h.realm);
-    let code = legacy_code(name) as f64;
-    let name = e.string(DomString::from_wtf8(name.as_bytes()));
-    let message = e.string(DomString::from_wtf8(message.as_bytes()));
-    for (key, v) in [("name", name.get()), ("message", message.get()), ("code", E::number(code))] {
-        let _ = e.set(h, ex.get(), Key::Str(&DomString::from_wtf8(key.as_bytes())), v);
-    }
-    e.release(name);
-    e.release(message);
+    let x = crate::impls::dom_exception::DomException {
+        name: DomString::from_wtf8(name.as_bytes()),
+        message: DomString::from_wtf8(message.as_bytes()),
+    };
+    let r = h.sides.add(crate::side::SideData::DomException(x));
+    let ex = h.wrap_side(e, r);
     let _sentinel = e.throw(ex).into_raw();
     Thrown
-}
-
-/// The legacy `code` of the exception names thrown so far; 0 for the
-/// names that have none.
-fn legacy_code(name: &str) -> u16 {
-    match name {
-        "HierarchyRequestError" => 3,
-        "InvalidCharacterError" => 5,
-        "NotFoundError" => 8,
-        "NotSupportedError" => 9,
-        "InvalidStateError" => 11,
-        "SyntaxError" => 12,
-        "QuotaExceededError" => 22,
-        _ => 0,
-    }
 }
 
 pub(crate) trait IntoJs<E: Engine> {
@@ -256,6 +238,14 @@ pub(crate) fn dom_string_or_null<E: Engine>(
         return Ok(None);
     }
     dom_string(e, h, v).map(Some)
+}
+
+/// A `DOMString` argument with a default: `default` when undefined.
+pub(crate) fn dom_string_or<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Value, default: &[u8]) -> Result<DomString, Thrown> {
+    if e.kind(v) == ValueKind::Undefined {
+        return Ok(DomString::from_wtf8(default));
+    }
+    dom_string(e, h, v)
 }
 
 pub(crate) fn boolean_or<E: Engine>(e: &mut E, v: E::Value, default: bool) -> bool {

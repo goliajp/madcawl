@@ -17,7 +17,8 @@ glue (`shell.rs`).
 
 The parser reads the subset of Web IDL the files use: interfaces with
 a parent, a constructor, constants, attributes, operations with
-optional arguments and defaults, nullable types, and extended attribute
+optional arguments and defaults (boolean, and string literals),
+nullable types, and extended attribute
 lists (only `[HostOps]` and `[Side]` (its objects are not nodes) on an
 interface, `[Atom]` on an argument, and `[CEReactions]` and
 `[NewObject]` on a member are acted on; `[StaticList]` documents a list
@@ -53,6 +54,7 @@ KEYWORDS = {'type', 'match', 'move', 'ref', 'loop', 'fn', 'use', 'mod', 'impl', 
 
 
 def snake(name):
+    name = re.sub(r'(?<=[A-Z])([A-Z])(?=[a-z])', r'_\1', name)
     return re.sub(r'(?<=[a-z0-9])([A-Z])', r'_\1', name).lower()
 
 
@@ -266,7 +268,9 @@ def emit(ifaces, sources):
                 body.append(f'cv::need(e, args, {required})?;')
             for k, a in enumerate(o['args']):
                 v = f'cv::arg::<E>(args, {k})'
-                if a['default'] is not None:
+                if a['default'] is not None and a['type'] == 'DOMString' and re.fullmatch(r'"[^"\\]*"', a['default']):
+                    body.append(f"let a{k} = cv::dom_string_or(e, h, {v}, b{a['default']})?;")
+                elif a['default'] is not None:
                     if a['type'] != 'boolean' or a['default'] not in ('true', 'false'):
                         sys.exit(f"unsupported default: {a['type']} = {a['default']}")
                     body.append(f"let a{k} = cv::boolean_or(e, {v}, {a['default']});")

@@ -341,7 +341,10 @@ pub fn a_dom_exception_carries_name_message_and_code<E: Driver>() {
     assert_eq!(js.read(ex.get(), "name"), "InvalidCharacterError");
     assert_eq!(js.read(ex.get(), "code"), "5");
     assert_eq!(js.read(ex.get(), "message"), "not a valid element name");
-    js.drop_all([ex, bad, doc]);
+    let iface = js.e.interface_object(js.h.realm, &madcawl_bindings::DOMExceptionClass::<E>::DEF);
+    assert!(js.is(ex.get(), "constructor", iface.get()), "an object of the DOMException interface");
+    assert_eq!(js.read(iface.get(), "INVALID_CHARACTER_ERR"), "5");
+    js.drop_all([iface, ex, bad, doc]);
 }
 
 pub fn timers_and_microtasks_run_on_the_event_loop<E: Driver>() {

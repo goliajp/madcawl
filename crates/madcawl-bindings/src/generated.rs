@@ -615,14 +615,103 @@ fn document_write<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn document_write_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, document_write::<E>) } }
 
+pub struct DOMExceptionClass<E>(PhantomData<E>);
+
+impl<E: Engine> DOMExceptionClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "DOMException",
+        id: ClassId(5),
+        last: ClassId(5),
+        parent: None,
+        attributes: &[
+            Attribute { name: "name", get: unsafe { Bound::host_fn(dom_exception_get_name_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "message", get: unsafe { Bound::host_fn(dom_exception_get_message_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "code", get: unsafe { Bound::host_fn(dom_exception_get_code_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
+        ],
+        operations: &[],
+        constants: &[
+            Constant { name: "INDEX_SIZE_ERR", value: 1.0 },
+            Constant { name: "DOMSTRING_SIZE_ERR", value: 2.0 },
+            Constant { name: "HIERARCHY_REQUEST_ERR", value: 3.0 },
+            Constant { name: "WRONG_DOCUMENT_ERR", value: 4.0 },
+            Constant { name: "INVALID_CHARACTER_ERR", value: 5.0 },
+            Constant { name: "NO_DATA_ALLOWED_ERR", value: 6.0 },
+            Constant { name: "NO_MODIFICATION_ALLOWED_ERR", value: 7.0 },
+            Constant { name: "NOT_FOUND_ERR", value: 8.0 },
+            Constant { name: "NOT_SUPPORTED_ERR", value: 9.0 },
+            Constant { name: "INUSE_ATTRIBUTE_ERR", value: 10.0 },
+            Constant { name: "INVALID_STATE_ERR", value: 11.0 },
+            Constant { name: "SYNTAX_ERR", value: 12.0 },
+            Constant { name: "INVALID_MODIFICATION_ERR", value: 13.0 },
+            Constant { name: "NAMESPACE_ERR", value: 14.0 },
+            Constant { name: "INVALID_ACCESS_ERR", value: 15.0 },
+            Constant { name: "VALIDATION_ERR", value: 16.0 },
+            Constant { name: "TYPE_MISMATCH_ERR", value: 17.0 },
+            Constant { name: "SECURITY_ERR", value: 18.0 },
+            Constant { name: "NETWORK_ERR", value: 19.0 },
+            Constant { name: "ABORT_ERR", value: 20.0 },
+            Constant { name: "URL_MISMATCH_ERR", value: 21.0 },
+            Constant { name: "QUOTA_EXCEEDED_ERR", value: 22.0 },
+            Constant { name: "TIMEOUT_ERR", value: 23.0 },
+            Constant { name: "INVALID_NODE_TYPE_ERR", value: 24.0 },
+            Constant { name: "DATA_CLONE_ERR", value: 25.0 },
+        ],
+        interceptors: None,
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: Some(unsafe { Bound::host_fn(dom_exception_constructor_abi::<E>) }),
+    };
+}
+
+fn dom_exception_get_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &DOMExceptionClass::<E>::DEF)?;
+        impls::dom_exception::name(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn dom_exception_get_name_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, dom_exception_get_name::<E>) } }
+
+fn dom_exception_get_message<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &DOMExceptionClass::<E>::DEF)?;
+        impls::dom_exception::message(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn dom_exception_get_message_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, dom_exception_get_message::<E>) } }
+
+fn dom_exception_get_code<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &DOMExceptionClass::<E>::DEF)?;
+        impls::dom_exception::code(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn dom_exception_get_code_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, dom_exception_get_code::<E>) } }
+
+fn dom_exception_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let a0 = cv::dom_string_or(e, h, cv::arg::<E>(args, 0), b"")?;
+        let a1 = cv::dom_string_or(e, h, cv::arg::<E>(args, 1), b"Error")?;
+        impls::dom_exception::constructor(e, h, a0, a1)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn dom_exception_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, dom_exception_constructor::<E>) } }
+
 pub struct EventClass<E>(PhantomData<E>);
 
 impl<E: Engine> EventClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Event",
-        id: ClassId(5),
-        last: ClassId(5),
+        id: ClassId(6),
+        last: ClassId(6),
         parent: None,
         attributes: &[
             Attribute { name: "type", get: unsafe { Bound::host_fn(event_get_type_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },

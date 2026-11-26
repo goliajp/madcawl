@@ -258,5 +258,6 @@ impl<E: Engine> Host<E> for DomHost<E> {
 pub(crate) fn side_class<E: Engine>(data: &crate::side::SideData) -> &'static ClassDef<E, DomHost<E>> {
     match data {
         crate::side::SideData::Event(_) => &crate::generated::EventClass::<E>::DEF,
+        crate::side::SideData::DomException(_) => &crate::generated::DOMExceptionClass::<E>::DEF,
     }
 }

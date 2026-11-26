@@ -29,6 +29,7 @@ pub(crate) struct Side {
 
 pub(crate) enum SideData {
     Event(EventState),
+    DomException(crate::impls::dom_exception::DomException),
 }
 
 impl SideData {
@@ -36,12 +37,14 @@ impl SideData {
     fn nodes(&self, f: &mut impl FnMut(NodeId)) {
         match self {
             SideData::Event(ev) => ev.nodes(f),
+            SideData::DomException(_) => {}
         }
     }
 
     fn release(&mut self, out: &mut Vec<HeldNode>) {
         match self {
             SideData::Event(ev) => ev.release(out),
+            SideData::DomException(_) => {}
         }
     }
 }

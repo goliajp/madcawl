@@ -29,7 +29,7 @@ mod generated;
 pub use convert::Thrown;
 pub use event_loop::{Clock, EventLoop};
 pub use gc::NodeOps;
-pub use generated::{DocumentClass, ElementClass, EventClass, EventTargetClass, NodeClass};
+pub use generated::{DOMExceptionClass, DocumentClass, ElementClass, EventClass, EventTargetClass, NodeClass};
 pub use side::{SideOps, SideRef};
 pub use host::DomHost;
 pub use parse::Loader;
