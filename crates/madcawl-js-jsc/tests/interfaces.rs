@@ -64,6 +64,28 @@ return [seen.join(), c.bubbles, before, d.detail, new CustomEvent('c').detail, d
     h.close(&mut e);
 }
 
+#[test]
+fn event_targets_script_makes_dispatch_hold_and_free() {
+    let (mut e, mut h) = page("<p>x</p>");
+    let src = "var t = new EventTarget(), log = [];
+t.addEventListener('x', function (ev) { log.push(this === t, ev.target === t, ev.currentTarget === t, ev.eventPhase); });
+t.addEventListener('x', { handleEvent: function () { log.push('h'); } }, { capture: true });
+var r = t.dispatchEvent(new Event('x', { bubbles: true }));
+var bad; try { EventTarget.prototype.addEventListener.call({}, 'x', null); bad = 'none'; } catch (x) { bad = x.name; }
+return [log.join(), r, t instanceof EventTarget, Object.getPrototypeOf(t) === EventTarget.prototype, bad].join('|');";
+    assert_eq!(eval(&mut e, &mut h, src), "h,true,true,true,2|true|true|true|TypeError");
+    let src = "var ev = globalThis.ev = new Event('x'); (function () { var u = new EventTarget(); u.x = 'kept'; u.dispatchEvent(ev); })();
+for (let i = 0; i < 100; i++) { let u = new EventTarget(); u.addEventListener('x', () => u); } return 'ok';";
+    assert_eq!(eval(&mut e, &mut h, src), "ok");
+    let before = h.side_objects();
+    scrub();
+    e.collect_now();
+    while h.collect(&mut e, madcawl_js::Deadline::Work(u32::MAX)) != madcawl_js::Step::Done {}
+    assert_eq!(eval(&mut e, &mut h, "return globalThis.ev.target.x;"), "kept");
+    assert!(h.side_objects() < before.saturating_sub(90), "{} of {before} side objects left", h.side_objects());
+    h.close(&mut e);
+}
+
 #[inline(never)]
 fn scrub() {
     let pad = [0u8; 512 * 1024];

@@ -158,6 +158,22 @@ pub(crate) fn this_node<E: Engine>(
     }
 }
 
+/// `this` as an event target: a node, or a side object of `class`.
+pub(crate) fn this_target<E: Engine>(
+    e: &mut E,
+    h: &DomHost<E>,
+    this: E::Value,
+    class: &'static ClassDef<E, DomHost<E>>,
+) -> Result<crate::event::Target, Thrown> {
+    match e.host_of(this, class) {
+        Some(obj) => Ok(match h.sides.of(obj) {
+            Some(r) => crate::event::Target::Side(r),
+            None => crate::event::Target::Node(h.node(obj)),
+        }),
+        None => Err(throw(e, ErrorKind::Type, "illegal invocation")),
+    }
+}
+
 /// `this` as a side object of `class`.
 pub(crate) fn this_side<E: Engine>(
     e: &mut E,

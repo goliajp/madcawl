@@ -20,8 +20,8 @@ a parent, a constructor, constants, attributes, operations with
 optional arguments and defaults (boolean, string literals, and
 null for `any`),
 nullable types, and extended attribute
-lists (only `[HostOps]` and `[Side]` (its objects are not nodes) on an
-interface, `[Atom]` on an argument, and `[CEReactions]` and
+lists (only `[HostOps]`, `[Side]` (its objects are not nodes) and
+`[Targets]` (nodes, and side objects of its own) on an interface, `[Atom]` on an argument, and `[CEReactions]` and
 `[NewObject]` on a member are acted on; `[StaticList]` documents a list
 result).
 A `[Atom] DOMString` argument is a name, such as an event type: the
@@ -74,7 +74,8 @@ def parse(text):
     for m in re.finditer(r'(\[[^\]]*\])?\s*interface\s+(\w+)\s*(?::\s*(\w+))?\s*\{(.*?)\}\s*;', strip(text), re.S):
         ext, name, parent, body = m.groups()
         iface = {'name': name, 'parent': parent, 'host_ops': bool(ext and re.search(r'\bHostOps\b', ext)),
-                 'side': bool(ext and re.search(r'\bSide\b', ext)), 'consts': [], 'attrs': [], 'ops': [],
+                 'side': bool(ext and re.search(r'\bSide\b', ext)),
+                 'targets': bool(ext and re.search(r'\bTargets\b', ext)), 'consts': [], 'attrs': [], 'ops': [],
                  'ctor': None}
         for member in body.split(';'):
             ext = re.match(r'^\s*\[([^\]]*)\]', member)
@@ -201,7 +202,8 @@ def glue(fn, iface, body, kind, uses_args=True):
     }[kind]
     lines = [head, '    cv::run(e, h, |e, h| {']
     if kind != 'ctor':
-        lines.append(f"        let this = cv::this_{'side' if iface['side'] else 'node'}(e, h, this, &{iface['name']}Class::<E>::DEF)?;")
+        kind_of = 'side' if iface['side'] else 'target' if iface['targets'] else 'node'
+        lines.append(f"        let this = cv::this_{kind_of}(e, h, this, &{iface['name']}Class::<E>::DEF)?;")
     lines += ['        ' + b for b in body]
     lines += ['    })', '}', '']
     call = {
@@ -226,7 +228,7 @@ def emit(ifaces, sources):
            'use madcawl_js::{', '    Attribute, AttributeSig, Bound, ClassDef, ClassId, Constant, Ctx, Effects, Engine, IdlType, Operation, Owned,',
            '    Signature,', '};', '',
            'use crate::convert as cv;', 'use crate::gc::NodeOps;', 'use crate::host::DomHost;', 'use crate::impls;',
-           'use crate::shell;', 'use crate::side::SideOps;', '']
+           'use crate::shell;', 'use crate::side_ops::SideOps;', '']
     for i in sorted(ifaces, key=lambda i: i['id']):
         n, m = i['name'], snake(i['name'])
         out += [f'pub struct {n}Class<E>(PhantomData<E>);', '',
@@ -251,7 +253,7 @@ def emit(ifaces, sources):
                 out += [f'        {field}: &['] + ['            ' + x for x in items] + ['        ],']
             else:
                 out.append(f'        {field}: &[],')
-        ops_of = 'Some(&SideOps::<E>::OPS)' if i['side'] else 'Some(&NodeOps::<E>::OPS)' if i['host_ops'] else 'None'
+        ops_of = 'Some(&SideOps::<E>::OPS)' if i['side'] or i['targets'] else 'Some(&NodeOps::<E>::OPS)' if i['host_ops'] else 'None'
         ctor = f"Some(unsafe {{ Bound::host_fn({m}_constructor_abi::<E>) }})" if i['ctor'] else 'None'
         out += ['        interceptors: None,', f"        ops: {ops_of},", f'        constructor: {ctor},', '    };', '}', '']
         for a in i['attrs']:

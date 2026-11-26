@@ -14,7 +14,7 @@ use crate::gc::NodeOps;
 use crate::host::DomHost;
 use crate::impls;
 use crate::shell;
-use crate::side::SideOps;
+use crate::side_ops::SideOps;
 
 pub struct EventTargetClass<E>(PhantomData<E>);
 
@@ -33,14 +33,14 @@ impl<E: Engine> EventTargetClass<E> {
         ],
         constants: &[],
         interceptors: None,
-        ops: None,
-        constructor: None,
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: Some(unsafe { Bound::host_fn(event_target_constructor_abi::<E>) }),
     };
 }
 
 fn event_target_add_event_listener<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
-        let this = cv::this_node(e, h, this, &EventTargetClass::<E>::DEF)?;
+        let this = cv::this_target(e, h, this, &EventTargetClass::<E>::DEF)?;
         cv::need(e, args, 2)?;
         let a0 = cv::atom(e, h, cv::arg::<E>(args, 0))?;
         let a1 = cv::callback_or_null(e, cv::arg::<E>(args, 1))?;
@@ -54,7 +54,7 @@ unsafe extern "C" fn event_target_add_event_listener_abi<E: Engine>(ctx: *mut Ct
 
 fn event_target_remove_event_listener<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
-        let this = cv::this_node(e, h, this, &EventTargetClass::<E>::DEF)?;
+        let this = cv::this_target(e, h, this, &EventTargetClass::<E>::DEF)?;
         cv::need(e, args, 2)?;
         let a0 = cv::atom(e, h, cv::arg::<E>(args, 0))?;
         let a1 = cv::callback_or_null(e, cv::arg::<E>(args, 1))?;
@@ -68,7 +68,7 @@ unsafe extern "C" fn event_target_remove_event_listener_abi<E: Engine>(ctx: *mut
 
 fn event_target_dispatch_event<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
-        let this = cv::this_node(e, h, this, &EventTargetClass::<E>::DEF)?;
+        let this = cv::this_target(e, h, this, &EventTargetClass::<E>::DEF)?;
         cv::need(e, args, 1)?;
         let a0 = cv::side(e, h, cv::arg::<E>(args, 0), &EventClass::<E>::DEF)?;
         impls::event_target::dispatch_event(e, h, this, a0)
@@ -77,6 +77,15 @@ fn event_target_dispatch_event<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E
 
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn event_target_dispatch_event_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, event_target_dispatch_event::<E>) } }
+
+fn event_target_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        impls::event_target::constructor(e, h)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_target_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, event_target_constructor::<E>) } }
 
 pub struct NodeClass<E>(PhantomData<E>);
 

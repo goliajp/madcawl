@@ -20,6 +20,7 @@ mod listeners;
 mod parse;
 mod shell;
 mod side;
+mod side_ops;
 mod trees;
 mod window;
 
@@ -30,6 +31,7 @@ pub use convert::Thrown;
 pub use event_loop::{Clock, EventLoop};
 pub use gc::NodeOps;
 pub use generated::{DOMExceptionClass, DocumentClass, ElementClass, EventClass, EventTargetClass, NodeClass};
-pub use side::{SideOps, SideRef};
+pub use side::SideRef;
+pub use side_ops::SideOps;
 pub use host::DomHost;
 pub use parse::Loader;

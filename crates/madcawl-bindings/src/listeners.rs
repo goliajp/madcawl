@@ -13,7 +13,7 @@ use madcawl_dom::NodeId;
 use madcawl_js::{Engine, ErrorKind, Key, Member, ValueKind};
 use madcawl_str::{Atom, DomString, atom};
 
-use crate::convert::{Thrown, throw};
+use crate::convert::{IntoJs, Thrown, throw};
 use crate::event::Target;
 use crate::host::DomHost;
 
@@ -79,6 +79,7 @@ impl<E: Engine> DomHost<E> {
     pub(crate) fn list_of(&self, t: Target) -> &[Listener<E>] {
         match t {
             Target::Node(n) => self.listeners.get(&n.index()).map_or(&[], Vec::as_slice),
+            Target::Side(r) => self.side_listeners.get(&r).map_or(&[], Vec::as_slice),
             Target::Window => &self.window_listeners,
         }
     }
@@ -97,9 +98,9 @@ impl<E: Engine> DomHost<E> {
         self.next_listener += 1;
         let id = self.next_listener;
         let callback = match t {
-            Target::Node(n) => {
-                // held beside the node's wrapper
-                let owner = self.wrap(e, n);
+            // held beside the target's wrapper
+            Target::Node(_) | Target::Side(_) => {
+                let owner = t.into_js(e, self);
                 let m = Member::of(e, owner.get(), cb);
                 e.release(owner);
                 m
@@ -109,6 +110,7 @@ impl<E: Engine> DomHost<E> {
         let l = Listener { ty, capture: o.capture, once: o.once, passive, id, callback };
         match t {
             Target::Node(n) => self.listeners.entry(n.index()).or_default().push(l),
+            Target::Side(r) => self.side_listeners.entry(r).or_default().push(l),
             Target::Window => self.window_listeners.push(l),
         }
     }
@@ -130,18 +132,19 @@ impl<E: Engine> DomHost<E> {
     pub(crate) fn remove_listener(&mut self, e: &mut E, t: Target, ty: Atom, capture: bool, cb: E::Value) {
         let at = |l: &Listener<E>| l.ty == ty && l.capture == capture && l.callback.get() == Some(cb);
         let list = match t {
-            Target::Node(n) => match self.listeners.get_mut(&n.index()) {
-                Some(list) => list,
-                None => return,
-            },
-            Target::Window => &mut self.window_listeners,
+            Target::Node(n) => self.listeners.get_mut(&n.index()),
+            Target::Side(r) => self.side_listeners.get_mut(&r),
+            Target::Window => Some(&mut self.window_listeners),
         };
+        let Some(list) = list else { return };
         let Some(i) = list.iter().position(at) else { return };
         let mut l = list.remove(i);
-        if let Target::Node(n) = t
-            && list.is_empty()
-        {
-            self.listeners.remove(&n.index());
+        if list.is_empty() {
+            match t {
+                Target::Node(n) => drop(self.listeners.remove(&n.index())),
+                Target::Side(r) => drop(self.side_listeners.remove(&r)),
+                Target::Window => {}
+            }
         }
         l.callback.clear(e);
     }

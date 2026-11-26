@@ -6,13 +6,11 @@
 //! reports.
 
 use std::collections::HashMap;
-use std::marker::PhantomData;
 
-use madcawl_dom::{HeldNode, NodeId};
-use madcawl_js::{Engine, HostOps, HostRef, Owned, Tracer, Tree, Unlinker};
+use madcawl_js::{Engine, HostRef, Owned, Tree};
 use madcawl_str::abi;
 
-use crate::event::EventState;
+use crate::event::{EventState, Held};
 use crate::host::DomHost;
 
 /// A side object, by its address.
@@ -23,28 +21,29 @@ pub struct SideRef(usize);
 pub(crate) struct Side {
     header: u64,
     /// As a node's: the wrapper's pointer, with the preserved bit.
-    wrapper: u64,
+    pub wrapper: u64,
     pub data: SideData,
 }
 
 pub(crate) enum SideData {
     Event(EventState),
+    /// An `EventTarget` script made: its listeners are in the host's
+    /// `side_listeners`.
+    Target,
     DomException(crate::impls::dom_exception::DomException),
 }
 
 impl SideData {
-    /// The nodes it holds, for `traverse`.
-    fn nodes(&self, f: &mut impl FnMut(NodeId)) {
-        match self {
-            SideData::Event(ev) => ev.nodes(f),
-            SideData::DomException(_) => {}
+    /// The targets it holds by count, for `traverse`.
+    pub(crate) fn held(&self, f: &mut impl FnMut(&Held)) {
+        if let SideData::Event(ev) = self {
+            ev.held(f);
         }
     }
 
-    fn release(&mut self, out: &mut Vec<HeldNode>) {
-        match self {
-            SideData::Event(ev) => ev.release(out),
-            SideData::DomException(_) => {}
+    pub(crate) fn release(&mut self, out: &mut Vec<Held>) {
+        if let SideData::Event(ev) = self {
+            ev.release(out);
         }
     }
 }
@@ -132,11 +131,13 @@ impl<E: Engine> DomHost<E> {
     }
 
     /// Place the wrapper of `r` in no tree: it lives while script holds
-    /// it. `false` when the engine could not place it now.
+    /// it, or anchored while an event holds `r` (as a held node's tree
+    /// is). `false` when the engine could not place it now.
     fn place_side(&mut self, e: &mut E, r: SideRef) -> bool {
         let word = self.sides.get(r).wrapper & !1;
+        let tree = if self.side_holds.contains_key(&r) { Tree::Anchored } else { Tree::New };
         let mut refused = Vec::new();
-        if !e.place_wrappers(Tree::New, &[word], &mut refused) {
+        if !e.place_wrappers(tree, &[word], &mut refused) {
             return false;
         }
         if !refused.is_empty() {
@@ -145,7 +146,30 @@ impl<E: Engine> DomHost<E> {
         true
     }
 
-    /// Place the side wrappers the engine could not place before.
+    /// An event came to hold `r`: its wrapper is placed again before
+    /// script runs.
+    pub(crate) fn hold_side(&mut self, r: SideRef) {
+        if E::PLACES_WRAPPERS {
+            let k = self.side_holds.entry(r).or_insert(0);
+            *k += 1;
+            if *k == 1 {
+                self.unplaced_sides.push(r);
+            }
+        }
+    }
+
+    pub(crate) fn let_go_side(&mut self, r: SideRef) {
+        if let Some(k) = self.side_holds.get_mut(&r) {
+            *k -= 1;
+            if *k == 0 {
+                self.side_holds.remove(&r);
+                self.unplaced_sides.push(r);
+            }
+        }
+    }
+
+    /// Place the side wrappers the engine could not place before, and
+    /// those whose holds changed.
     pub(crate) fn place_sides(&mut self, e: &mut E) {
         for r in std::mem::take(&mut self.unplaced_sides) {
             let live = self.sides.map.get(&r.0).is_some_and(|s| s.wrapper != 0);
@@ -179,11 +203,14 @@ impl<E: Engine> DomHost<E> {
                 if let Some(mut d) = self.details.remove(&SideRef(addr)) {
                     d.clear(e);
                 }
+                for mut l in self.side_listeners.remove(&SideRef(addr)).unwrap_or_default() {
+                    l.callback.clear(e);
+                }
                 e.forget(HostRef::new(addr).expect("nonzero"));
             }
         }
-        for n in held {
-            self.dom.let_go(n);
+        for x in held {
+            self.let_go_held(x);
         }
         for addr in std::mem::take(&mut self.sides.suspects) {
             if self.sides.map.contains_key(&addr) {
@@ -195,11 +222,15 @@ impl<E: Engine> DomHost<E> {
 
     /// `r`'s wrapper is gone: on an engine that keeps members beside the
     /// wrapper, so are its members.
-    fn drop_side_members(&mut self, r: SideRef) {
-        if E::PLACES_WRAPPERS
-            && let Some(mut d) = self.details.remove(&r)
-        {
+    pub(crate) fn drop_side_members(&mut self, r: SideRef) {
+        if !E::PLACES_WRAPPERS {
+            return;
+        }
+        if let Some(mut d) = self.details.remove(&r) {
             d.forget();
+        }
+        for mut l in self.side_listeners.remove(&r).unwrap_or_default() {
+            l.callback.forget();
         }
     }
 
@@ -208,6 +239,9 @@ impl<E: Engine> DomHost<E> {
     pub(crate) fn close_sides(&mut self, e: &mut E) {
         for (_, mut d) in std::mem::take(&mut self.details) {
             d.clear(e);
+        }
+        for mut l in std::mem::take(&mut self.side_listeners).into_values().flatten() {
+            l.callback.clear(e);
         }
         let mut held = Vec::new();
         for s in self.sides.map.values_mut() {
@@ -218,68 +252,8 @@ impl<E: Engine> DomHost<E> {
                 e.release(unsafe { Owned::from_raw(E::wrapper_value(s.wrapper)) });
             }
         }
-        for n in held {
-            self.dom.let_go(n);
+        for x in held {
+            self.let_go_held(x);
         }
     }
-}
-
-pub struct SideOps<E>(PhantomData<E>);
-
-impl<E: Engine> SideOps<E> {
-    pub const OPS: HostOps<E, DomHost<E>> = HostOps {
-        traverse: traverse::<E>,
-        unlink: unlink::<E>,
-        can_skip: |_, _| false,
-        wrapper_needs_preserve: preserve::<E>,
-        wrapper_died: died::<E>,
-    };
-}
-
-fn side_of<E: Engine>(h: &DomHost<E>, obj: HostRef) -> SideRef {
-    h.sides.of(obj).expect("a live side object")
-}
-
-fn traverse<E: Engine>(h: &DomHost<E>, obj: HostRef, t: &mut E::Tracer) {
-    let r = side_of(h, obj);
-    let s = h.sides.get(r);
-    s.data.nodes(&mut |n| t.host(h.host_ref(n)));
-    if let Some(d) = h.details.get(&r) {
-        d.trace(t);
-    }
-    if s.wrapper & 1 != 0 {
-        t.value(E::wrapper_value(s.wrapper & !1));
-    }
-}
-
-fn unlink<E: Engine>(h: &mut DomHost<E>, obj: HostRef, u: &mut E::Unlinker) {
-    let r = side_of(h, obj);
-    if let Some(mut d) = h.details.remove(&r) {
-        d.unlink(u);
-    }
-    let mut held = Vec::new();
-    let s = h.sides.get_mut(r);
-    s.data.release(&mut held);
-    if s.wrapper & 1 != 0 {
-        s.wrapper &= !1;
-        // SAFETY: the count the preserved edge held on the wrapper
-        u.release(unsafe { Owned::from_raw(E::wrapper_value(s.wrapper)) });
-    }
-    for n in held {
-        h.dom.let_go(n);
-    }
-}
-
-fn preserve<E: Engine>(h: &mut DomHost<E>, obj: HostRef) {
-    let r = side_of(h, obj);
-    h.sides.get_mut(r).wrapper |= 1;
-}
-
-fn died<E: Engine>(h: &mut DomHost<E>, obj: HostRef) {
-    let r = side_of(h, obj);
-    h.drop_side_members(r);
-    let s = h.sides.get_mut(r);
-    assert_eq!(s.wrapper & 1, 0, "a preserved wrapper does not die");
-    s.wrapper = 0;
-    h.sides.dec(r);
 }

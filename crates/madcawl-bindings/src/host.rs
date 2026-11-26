@@ -40,12 +40,17 @@ pub struct DomHost<E: Engine> {
     pub(crate) pinned: Vec<NodeId>,
     /// The realm is detached: nothing is placed any more.
     pub(crate) closed: bool,
-    /// Side objects whose wrapper the engine could not place yet.
+    /// Side objects whose wrapper is to be placed (again).
     pub(crate) unplaced_sides: Vec<crate::side::SideRef>,
+    /// How many event holds each side object has, on an engine that
+    /// places wrappers.
+    pub(crate) side_holds: HashMap<crate::side::SideRef, u32>,
     /// Suspects went to the engine since its last collection finished.
     pub(crate) collect_due: bool,
     /// The host objects that are not nodes (`side.rs`).
     pub(crate) sides: crate::side::Sides,
+    /// The listeners of each `EventTarget` script made, members of it.
+    pub(crate) side_listeners: HashMap<crate::side::SideRef, Vec<Listener<E>>>,
     /// The detail of each CustomEvent that has one, a member of the event.
     pub(crate) details: HashMap<crate::side::SideRef, Member<E>>,
 }
@@ -74,10 +79,12 @@ impl<E: Engine> DomHost<E> {
             moved: Vec::new(),
             pinned: Vec::new(),
             unplaced_sides: Vec::new(),
+            side_holds: HashMap::new(),
             closed: false,
             collect_due: false,
             sides: Default::default(),
             details: HashMap::new(),
+            side_listeners: HashMap::new(),
         };
         if E::PLACES_WRAPPERS {
             h.dom.track_moves();
@@ -262,6 +269,7 @@ pub(crate) fn side_class<E: Engine>(data: &crate::side::SideData) -> &'static Cl
     match data {
         crate::side::SideData::Event(ev) if ev.custom => &crate::generated::CustomEventClass::<E>::DEF,
         crate::side::SideData::Event(_) => &crate::generated::EventClass::<E>::DEF,
+        crate::side::SideData::Target => &crate::generated::EventTargetClass::<E>::DEF,
         crate::side::SideData::DomException(_) => &crate::generated::DOMExceptionClass::<E>::DEF,
     }
 }

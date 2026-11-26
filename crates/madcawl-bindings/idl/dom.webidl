@@ -4,8 +4,12 @@
 // [HostOps] marks the class whose table carries the host object
 // callbacks; its subclasses inherit them
 
-[Exposed=Window]
+// [Targets] (not in the standard): its own objects are side objects,
+// and its members take nodes and those as `this`
+[Exposed=*, Targets]
 interface EventTarget {
+  constructor();
+
   // the options, a boolean or a dictionary, are read as any: of the
   // dictionary only capture and once are acted on; [Atom] (not in the
   // standard) takes the type as an atom

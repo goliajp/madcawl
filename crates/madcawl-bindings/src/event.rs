@@ -1,8 +1,9 @@
 //! Events and their dispatch, as the DOM Standard's "dispatch" and
-//! "inner invoke" algorithms, for node targets: the path is the target
-//! and its ancestors, then the window when the target is in the
-//! document; capture listeners run from the top down, then the target's,
-//! then bubbling ones from the bottom up when the event bubbles.
+//! "inner invoke" algorithms: for a node the path is the target and its
+//! ancestors, then the window when the target is in the document, and
+//! for an event target script made, the target alone; capture listeners
+//! run from the top down, then the target's, then bubbling ones from
+//! the bottom up when the event bubbles.
 
 use madcawl_dom::{HeldNode, NodeId};
 use madcawl_js::{Engine, Halt, Host, Key, Root};
@@ -17,9 +18,11 @@ pub const CAPTURING_PHASE: u16 = 1;
 pub const AT_TARGET: u16 = 2;
 pub const BUBBLING_PHASE: u16 = 3;
 
-/// An event target as an event refers to it.
+/// An event target as an event refers to it: a node or an event target
+/// script made by a count of its own.
 pub(crate) enum Held {
     Node(HeldNode),
+    Side(SideRef),
     Window,
 }
 
@@ -27,6 +30,8 @@ pub(crate) enum Held {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Target {
     Node(NodeId),
+    /// An `EventTarget` made by its constructor.
+    Side(SideRef),
     Window,
 }
 
@@ -34,6 +39,7 @@ impl Held {
     pub(crate) fn target(&self) -> Target {
         match self {
             Held::Node(n) => Target::Node(n.id()),
+            Held::Side(r) => Target::Side(*r),
             Held::Window => Target::Window,
         }
     }
@@ -85,22 +91,13 @@ impl EventState {
         }
     }
 
-    pub fn nodes(&self, f: &mut impl FnMut(NodeId)) {
-        let all = self.target.iter().chain(&self.current).chain(&self.path);
-        for h in all {
-            if let Held::Node(n) = h {
-                f(n.id());
-            }
-        }
+    /// The targets it holds by count, for `traverse`.
+    pub fn held(&self, f: &mut impl FnMut(&Held)) {
+        self.target.iter().chain(&self.current).chain(&self.path).for_each(f);
     }
 
-    pub fn release(&mut self, out: &mut Vec<HeldNode>) {
-        let all = self.target.take().into_iter().chain(self.current.take()).chain(std::mem::take(&mut self.path));
-        for h in all {
-            if let Held::Node(n) = h {
-                out.push(n);
-            }
-        }
+    pub fn release(&mut self, out: &mut Vec<Held>) {
+        out.extend(self.target.take().into_iter().chain(self.current.take()).chain(std::mem::take(&mut self.path)));
     }
 
     /// Cancel, when a listener may.
@@ -115,6 +112,7 @@ impl<E: Engine> IntoJs<E> for Target {
     fn into_js(self, e: &mut E, h: &mut DomHost<E>) -> madcawl_js::Owned<E::Value> {
         match self {
             Target::Node(n) => h.wrap(e, n),
+            Target::Side(r) => h.wrap_side(e, r),
             Target::Window => e.global(h.realm),
         }
     }
@@ -144,30 +142,53 @@ impl<E: Engine> DomHost<E> {
     fn hold_target(&mut self, t: Target) -> Held {
         match t {
             Target::Node(n) => Held::Node(self.dom.hold(n)),
+            Target::Side(r) => {
+                self.sides.inc(r);
+                self.hold_side(r);
+                Held::Side(r)
+            }
             Target::Window => Held::Window,
+        }
+    }
+
+    /// Give back what `held` holds.
+    pub(crate) fn let_go_held(&mut self, held: Held) {
+        match held {
+            Held::Node(n) => self.dom.let_go(n),
+            Held::Side(r) => {
+                self.let_go_side(r);
+                self.sides.dec(r);
+            }
+            Held::Window => {}
         }
     }
 
     pub(crate) fn set_held(&mut self, r: SideRef, which: fn(&mut EventState) -> &mut Option<Held>, t: Option<Target>) {
         let new = t.map(|t| self.hold_target(t));
-        if let Some(Held::Node(old)) = std::mem::replace(which(self.event_mut(r)), new) {
-            self.dom.let_go(old);
+        if let Some(old) = std::mem::replace(which(self.event_mut(r)), new) {
+            self.let_go_held(old);
         }
     }
 
     /// Dispatch event `r` at node `target`; whether no listener canceled
     /// it. Listeners' exceptions are reported, not thrown.
-    pub(crate) fn dispatch(&mut self, e: &mut E, r: SideRef, target: NodeId) -> Result<bool, Thrown> {
+    pub(crate) fn dispatch(&mut self, e: &mut E, r: SideRef, target: Target) -> Result<bool, Thrown> {
         let ev = self.event(r);
         if ev.dispatching || !ev.initialized {
             return Err(throw_dom(e, self, "InvalidStateError", "the event is being dispatched or was not initialized"));
         }
         self.event_mut(r).dispatching = true;
-        self.set_held(r, |ev| &mut ev.target, Some(Target::Node(target)));
-        let mut path: Vec<Target> = std::iter::successors(Some(target), |&n| self.dom.parent(n)).map(Target::Node).collect();
-        if self.dom.in_main_tree(target) {
-            path.push(Target::Window);
-        }
+        self.set_held(r, |ev| &mut ev.target, Some(target));
+        let path = match target {
+            Target::Node(n) => {
+                let mut path: Vec<Target> = std::iter::successors(Some(n), |&n| self.dom.parent(n)).map(Target::Node).collect();
+                if self.dom.in_main_tree(n) {
+                    path.push(Target::Window);
+                }
+                path
+            }
+            t => vec![t],
+        };
         let held: Vec<Held> = path.iter().map(|&t| self.hold_target(t)).collect();
         self.event_mut(r).path = held;
         // a detached target's tree is held now: its wrappers stay while
@@ -185,17 +206,12 @@ impl<E: Engine> DomHost<E> {
             }
         }
         e.release(event);
-        let mut gone = Vec::new();
         let ev = self.event_mut(r);
         (ev.phase, ev.dispatching, ev.stop, ev.stop_now) = (NONE, false, false, false);
-        for h in std::mem::take(&mut ev.path).into_iter().chain(ev.current.take()) {
-            if let Held::Node(n) = h {
-                gone.push(n);
-            }
-        }
+        let gone: Vec<Held> = std::mem::take(&mut ev.path).into_iter().chain(ev.current.take()).collect();
         let canceled = ev.canceled;
-        for n in gone {
-            self.dom.let_go(n);
+        for h in gone {
+            self.let_go_held(h);
         }
         Ok(!canceled)
     }
