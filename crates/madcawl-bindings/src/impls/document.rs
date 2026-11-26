@@ -15,6 +15,10 @@ pub(crate) fn document_element<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: N
     Ok(h.dom.children(this).find(|&c| h.dom.kind(c) == NodeKind::Element))
 }
 
+pub(crate) fn current_script<E: Engine>(_: &mut E, h: &mut DomHost<E>, _this: NodeId) -> Result<Option<NodeId>, Thrown> {
+    Ok(h.current_script())
+}
+
 /// The names `createElement` refuses: empty, or holding a character
 /// no element name can (whitespace, `/`, `>`, NUL).
 fn bad_name(b: &[u8]) -> bool {

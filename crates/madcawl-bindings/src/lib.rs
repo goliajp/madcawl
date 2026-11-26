@@ -24,6 +24,8 @@ mod impls;
 mod listeners;
 mod lists;
 mod parse;
+mod script_run;
+mod scripts;
 mod shell;
 mod side;
 mod side_ops;

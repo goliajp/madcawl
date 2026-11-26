@@ -1,4 +1,4 @@
-// CODEGEN: tools/gen-bindings.py from crates/madcawl-bindings/idl/attr.webidl, crates/madcawl-bindings/idl/dom.webidl
+// CODEGEN: tools/gen-bindings.py from crates/madcawl-bindings/idl/attr.webidl, crates/madcawl-bindings/idl/dom.webidl, crates/madcawl-bindings/idl/html.webidl
 //! The class tables of the bound interfaces, and the glue between
 //! script values and the implementations in `impls`.
 
@@ -187,7 +187,7 @@ impl<E: Engine> EventTargetClass<E> {
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "EventTarget",
         id: ClassId(2),
-        last: ClassId(11),
+        last: ClassId(12),
         parent: None,
         attributes: &[],
         operations: &[
@@ -363,7 +363,7 @@ impl<E: Engine> NodeClass<E> {
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Node",
         id: ClassId(4),
-        last: ClassId(11),
+        last: ClassId(12),
         parent: Some(&EventTargetClass::<E>::DEF),
         attributes: &[
             Attribute { name: "nodeType", get: unsafe { Bound::host_fn(node_get_node_type_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
@@ -856,7 +856,7 @@ impl<E: Engine> ElementClass<E> {
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Element",
         id: ClassId(6),
-        last: ClassId(6),
+        last: ClassId(7),
         parent: Some(&NodeClass::<E>::DEF),
         attributes: &[
             Attribute { name: "localName", get: unsafe { Bound::host_fn(element_get_local_name_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
@@ -1233,17 +1233,194 @@ fn element_query_selector_all<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E:
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn element_query_selector_all_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, element_query_selector_all::<E>) } }
 
+pub struct HTMLScriptElementClass<E>(PhantomData<E>);
+
+impl<E: Engine> HTMLScriptElementClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "HTMLScriptElement",
+        id: ClassId(7),
+        last: ClassId(7),
+        parent: Some(&ElementClass::<E>::DEF),
+        attributes: &[
+            Attribute { name: "src", get: unsafe { Bound::host_fn(html_script_element_get_src_abi::<E>) }, set: Some(unsafe { Bound::host_fn(html_script_element_set_src_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+            Attribute { name: "type", get: unsafe { Bound::host_fn(html_script_element_get_type_abi::<E>) }, set: Some(unsafe { Bound::host_fn(html_script_element_set_type_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+            Attribute { name: "async", get: unsafe { Bound::host_fn(html_script_element_get_async_abi::<E>) }, set: Some(unsafe { Bound::host_fn(html_script_element_set_async_abi::<E>) }), sig: AttributeSig { ty: IdlType::Boolean, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+            Attribute { name: "defer", get: unsafe { Bound::host_fn(html_script_element_get_defer_abi::<E>) }, set: Some(unsafe { Bound::host_fn(html_script_element_set_defer_abi::<E>) }), sig: AttributeSig { ty: IdlType::Boolean, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+            Attribute { name: "text", get: unsafe { Bound::host_fn(html_script_element_get_text_abi::<E>) }, set: Some(unsafe { Bound::host_fn(html_script_element_set_text_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+            Attribute { name: "onload", get: unsafe { Bound::host_fn(html_script_element_get_onload_abi::<E>) }, set: Some(unsafe { Bound::host_fn(html_script_element_set_onload_abi::<E>) }), sig: AttributeSig { ty: IdlType::Callback, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+            Attribute { name: "onerror", get: unsafe { Bound::host_fn(html_script_element_get_onerror_abi::<E>) }, set: Some(unsafe { Bound::host_fn(html_script_element_set_onerror_abi::<E>) }), sig: AttributeSig { ty: IdlType::Callback, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+        ],
+        operations: &[],
+        statics: &[],
+        constants: &[],
+        interceptors: None,
+        ops: None,
+        constructor: None,
+        length: 0,
+        error_prototype: false,
+    };
+}
+
+fn html_script_element_get_src<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLScriptElementClass::<E>::DEF)?;
+        impls::html_script_element::src(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_script_element_get_src_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, html_script_element_get_src::<E>) } }
+
+fn html_script_element_set_src<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLScriptElementClass::<E>::DEF)?;
+        let value = cv::dom_string(e, h, value)?;
+        impls::html_script_element::set_src(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_script_element_set_src_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, html_script_element_set_src::<E>) } }
+
+fn html_script_element_get_type<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLScriptElementClass::<E>::DEF)?;
+        impls::html_script_element::r#type(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_script_element_get_type_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, html_script_element_get_type::<E>) } }
+
+fn html_script_element_set_type<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLScriptElementClass::<E>::DEF)?;
+        let value = cv::dom_string(e, h, value)?;
+        impls::html_script_element::set_type(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_script_element_set_type_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, html_script_element_set_type::<E>) } }
+
+fn html_script_element_get_async<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLScriptElementClass::<E>::DEF)?;
+        impls::html_script_element::r#async(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_script_element_get_async_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, html_script_element_get_async::<E>) } }
+
+fn html_script_element_set_async<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLScriptElementClass::<E>::DEF)?;
+        let value = e.to_boolean(value);
+        impls::html_script_element::set_async(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_script_element_set_async_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, html_script_element_set_async::<E>) } }
+
+fn html_script_element_get_defer<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLScriptElementClass::<E>::DEF)?;
+        impls::html_script_element::defer(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_script_element_get_defer_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, html_script_element_get_defer::<E>) } }
+
+fn html_script_element_set_defer<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLScriptElementClass::<E>::DEF)?;
+        let value = e.to_boolean(value);
+        impls::html_script_element::set_defer(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_script_element_set_defer_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, html_script_element_set_defer::<E>) } }
+
+fn html_script_element_get_text<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLScriptElementClass::<E>::DEF)?;
+        impls::html_script_element::text(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_script_element_get_text_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, html_script_element_get_text::<E>) } }
+
+fn html_script_element_set_text<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLScriptElementClass::<E>::DEF)?;
+        let value = cv::dom_string(e, h, value)?;
+        impls::html_script_element::set_text(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_script_element_set_text_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, html_script_element_set_text::<E>) } }
+
+fn html_script_element_get_onload<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLScriptElementClass::<E>::DEF)?;
+        impls::html_script_element::onload(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_script_element_get_onload_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, html_script_element_get_onload::<E>) } }
+
+fn html_script_element_set_onload<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLScriptElementClass::<E>::DEF)?;
+        let value = cv::event_handler::<E>(e, value);
+        impls::html_script_element::set_onload(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_script_element_set_onload_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, html_script_element_set_onload::<E>) } }
+
+fn html_script_element_get_onerror<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLScriptElementClass::<E>::DEF)?;
+        impls::html_script_element::onerror(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_script_element_get_onerror_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, html_script_element_get_onerror::<E>) } }
+
+fn html_script_element_set_onerror<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLScriptElementClass::<E>::DEF)?;
+        let value = cv::event_handler::<E>(e, value);
+        impls::html_script_element::set_onerror(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_script_element_set_onerror_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, html_script_element_set_onerror::<E>) } }
+
 pub struct DocumentClass<E>(PhantomData<E>);
 
 impl<E: Engine> DocumentClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Document",
-        id: ClassId(7),
-        last: ClassId(7),
+        id: ClassId(8),
+        last: ClassId(8),
         parent: Some(&NodeClass::<E>::DEF),
         attributes: &[
             Attribute { name: "documentElement", get: unsafe { Bound::host_fn(document_get_document_element_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "currentScript", get: unsafe { Bound::host_fn(document_get_current_script_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "children", get: unsafe { Bound::host_fn(document_get_children_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Object, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "firstElementChild", get: unsafe { Bound::host_fn(document_get_first_element_child_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "lastElementChild", get: unsafe { Bound::host_fn(document_get_last_element_child_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
@@ -1282,6 +1459,16 @@ fn document_get_document_element<E: Engine>(e: &mut E, h: &mut DomHost<E>, this:
 
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn document_get_document_element_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, document_get_document_element::<E>) } }
+
+fn document_get_current_script<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
+        impls::document::current_script(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_get_current_script_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, document_get_current_script::<E>) } }
 
 fn document_get_children<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -1471,8 +1658,8 @@ impl<E: Engine> DocumentFragmentClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "DocumentFragment",
-        id: ClassId(8),
-        last: ClassId(8),
+        id: ClassId(9),
+        last: ClassId(9),
         parent: Some(&NodeClass::<E>::DEF),
         attributes: &[
             Attribute { name: "children", get: unsafe { Bound::host_fn(document_fragment_get_children_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Object, get: Effects::NONE, set: Effects::NONE } },
@@ -1586,8 +1773,8 @@ impl<E: Engine> CharacterDataClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "CharacterData",
-        id: ClassId(9),
-        last: ClassId(11),
+        id: ClassId(10),
+        last: ClassId(12),
         parent: Some(&NodeClass::<E>::DEF),
         attributes: &[
             Attribute { name: "data", get: unsafe { Bound::host_fn(character_data_get_data_abi::<E>) }, set: Some(unsafe { Bound::host_fn(character_data_set_data_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
@@ -1745,8 +1932,8 @@ impl<E: Engine> TextClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Text",
-        id: ClassId(10),
-        last: ClassId(10),
+        id: ClassId(11),
+        last: ClassId(11),
         parent: Some(&CharacterDataClass::<E>::DEF),
         attributes: &[
             Attribute { name: "wholeText", get: unsafe { Bound::host_fn(text_get_whole_text_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
@@ -1802,8 +1989,8 @@ impl<E: Engine> CommentClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Comment",
-        id: ClassId(11),
-        last: ClassId(11),
+        id: ClassId(12),
+        last: ClassId(12),
         parent: Some(&CharacterDataClass::<E>::DEF),
         attributes: &[],
         operations: &[],
@@ -1833,8 +2020,8 @@ impl<E: Engine> DOMExceptionClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "DOMException",
-        id: ClassId(12),
-        last: ClassId(12),
+        id: ClassId(13),
+        last: ClassId(13),
         parent: None,
         attributes: &[
             Attribute { name: "name", get: unsafe { Bound::host_fn(dom_exception_get_name_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
@@ -1925,8 +2112,8 @@ impl<E: Engine> EventClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Event",
-        id: ClassId(13),
-        last: ClassId(14),
+        id: ClassId(14),
+        last: ClassId(15),
         parent: None,
         attributes: &[
             Attribute { name: "type", get: unsafe { Bound::host_fn(event_get_type_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
@@ -2189,8 +2376,8 @@ impl<E: Engine> CustomEventClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "CustomEvent",
-        id: ClassId(14),
-        last: ClassId(14),
+        id: ClassId(15),
+        last: ClassId(15),
         parent: Some(&EventClass::<E>::DEF),
         attributes: &[
             Attribute { name: "detail", get: unsafe { Bound::host_fn(custom_event_get_detail_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Any, get: Effects::NONE, set: Effects::NONE } },
@@ -2251,8 +2438,8 @@ impl<E: Engine> AbortControllerClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "AbortController",
-        id: ClassId(15),
-        last: ClassId(15),
+        id: ClassId(16),
+        last: ClassId(16),
         parent: None,
         attributes: &[
             Attribute { name: "signal", get: unsafe { Bound::host_fn(abort_controller_get_signal_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Object, get: Effects::NONE, set: Effects::NONE } },
@@ -2306,8 +2493,8 @@ impl<E: Engine> NodeListClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "NodeList",
-        id: ClassId(16),
-        last: ClassId(16),
+        id: ClassId(17),
+        last: ClassId(17),
         parent: None,
         attributes: &[
             Attribute { name: "length", get: unsafe { Bound::host_fn(node_list_get_length_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
@@ -2378,8 +2565,8 @@ impl<E: Engine> HTMLCollectionClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "HTMLCollection",
-        id: ClassId(17),
-        last: ClassId(17),
+        id: ClassId(18),
+        last: ClassId(18),
         parent: None,
         attributes: &[
             Attribute { name: "length", get: unsafe { Bound::host_fn(html_collection_get_length_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },

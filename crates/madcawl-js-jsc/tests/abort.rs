@@ -15,6 +15,9 @@ fn page() -> (Jsc, DomHost<Jsc>) {
     h.install_window(&mut e);
     h.use_virtual_time();
     h.parse_document(&mut e, b"<p>x</p>");
+    // DOMContentLoaded and load
+    assert_eq!(h.run_tasks(&mut e, 10), 2);
+    assert!(h.is_loaded());
     (e, h)
 }
 

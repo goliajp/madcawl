@@ -11,7 +11,8 @@ use madcawl_str::{Atom, DomString};
 use crate::convert::{Thrown, arg, run, throw};
 use crate::generated::{
     AbortControllerClass, AbortSignalClass, AttrClass, CharacterDataClass, CommentClass, CustomEventClass, DOMExceptionClass,
-    DocumentClass, DocumentFragmentClass, ElementClass, EventClass, EventTargetClass, HTMLCollectionClass, NamedNodeMapClass,
+    DocumentClass, DocumentFragmentClass, ElementClass, EventClass, EventTargetClass, HTMLCollectionClass, HTMLScriptElementClass,
+    NamedNodeMapClass,
     NodeClass, NodeListClass, TextClass,
 };
 use crate::event::Target;
@@ -38,7 +39,7 @@ impl<E: Engine> DomHost<E> {
         let d = self.wrap(e, doc);
         put(e, self, global.get(), "document", d.get());
         e.release(d);
-        let classes: [&'static ClassDef<E, DomHost<E>>; 17] = [
+        let classes: [&'static ClassDef<E, DomHost<E>>; 18] = [
             &AbortControllerClass::<E>::DEF,
             &AbortSignalClass::<E>::DEF,
             &AttrClass::<E>::DEF,
@@ -53,6 +54,7 @@ impl<E: Engine> DomHost<E> {
             &NodeClass::<E>::DEF,
             &ElementClass::<E>::DEF,
             &DocumentClass::<E>::DEF,
+            &HTMLScriptElementClass::<E>::DEF,
             &EventClass::<E>::DEF,
             &NodeListClass::<E>::DEF,
             &HTMLCollectionClass::<E>::DEF,
@@ -110,14 +112,6 @@ impl<E: Engine> DomHost<E> {
         e.release(arg);
         e.release(window);
         called
-    }
-
-    /// The end of loading: `DOMContentLoaded` at the document, then
-    /// `load` at the window.
-    pub fn finish_loading(&mut self, e: &mut E) {
-        let doc = self.dom.document();
-        self.fire(e, doc, madcawl_str::atom!("DOMContentLoaded"));
-        self.fire_window(e, madcawl_str::atom!("load"));
     }
 
     pub(crate) fn close_window(&mut self, e: &mut E) {

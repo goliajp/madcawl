@@ -94,10 +94,17 @@ fn checked_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, el: NodeId, name: &Dom
     Ok(n)
 }
 
-fn set<E: Engine>(e: &mut E, h: &mut DomHost<E>, el: NodeId, local: Atom, value: &DomString) -> Result<(), Thrown> {
+pub(crate) fn set<E: Engine>(e: &mut E, h: &mut DomHost<E>, el: NodeId, local: Atom, value: &DomString) -> Result<(), Thrown> {
     let mut v = Vec::new();
     value.write_wtf8(&mut v);
-    if h.dom.set_attribute(el, local, &v) { Ok(()) } else { Err(full(e, h)) }
+    let new_src = local == atom!("src") && h.dom.attribute(el, local).is_none();
+    if !h.dom.set_attribute(el, local, &v) {
+        return Err(full(e, h));
+    }
+    if new_src {
+        h.script_src_added(e, el);
+    }
+    Ok(())
 }
 
 pub(crate) fn set_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, name: DomString, value: DomString) -> Result<(), Thrown> {

@@ -107,6 +107,7 @@ pub(crate) fn set_text_content<E: Engine>(
             }
             let Some(t) = dom.new_text(value) else { return Err(full(e, h)) };
             dom.insert_node(this, t, None);
+            h.scripts_inserted(e, this, &[]);
             Ok(())
         }
     }
@@ -129,11 +130,14 @@ pub(crate) fn insert_before<E: Engine>(
     let dom = &mut h.dom;
     let before = if child == Some(node) { dom.next_sibling(node) } else { child };
     if dom.kind(node) == NodeKind::Fragment {
-        while let Some(c) = dom.first_child(node) {
+        let children: Vec<NodeId> = dom.children(node).collect();
+        for &c in &children {
             dom.insert_node(this, c, before);
         }
+        h.scripts_inserted(e, this, &children);
     } else {
         dom.insert_node(this, node, before);
+        h.scripts_inserted(e, this, &[node]);
     }
     Ok(node)
 }

@@ -6,7 +6,7 @@ IDL types and effects in the signature of each table entry."""
 import re
 import sys
 
-KEYWORDS = {'type', 'match', 'move', 'ref', 'loop', 'fn', 'use', 'mod', 'impl', 'self', 'super', 'where', 'as'}
+KEYWORDS = {'type', 'async', 'match', 'move', 'ref', 'loop', 'fn', 'use', 'mod', 'impl', 'self', 'super', 'where', 'as'}
 
 
 def snake(name):

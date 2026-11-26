@@ -14,6 +14,7 @@ pub(crate) mod dom_exception;
 pub(crate) mod element;
 pub(crate) mod event;
 pub(crate) mod event_target;
+pub(crate) mod html_script_element;
 pub(crate) mod named_node_map;
 pub(crate) mod node;
 pub(crate) mod parent;

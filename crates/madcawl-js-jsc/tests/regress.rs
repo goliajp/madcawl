@@ -26,6 +26,9 @@ fn page(html: &str, virtual_time: bool) -> (Jsc, DomHost<Jsc>) {
         h.use_virtual_time();
     }
     h.parse_document(&mut e, html.as_bytes());
+    // DOMContentLoaded and load, which come before any timer
+    assert_eq!(h.run_tasks(&mut e, 2), 2);
+    assert!(h.is_loaded());
     (e, h)
 }
 

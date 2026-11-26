@@ -36,6 +36,12 @@ pub(crate) struct Timer<E: Engine> {
     pub abort: bool,
 }
 
+/// A queued task: a callback script queued, or one of the host's own.
+pub(crate) enum Task<E: Engine> {
+    Call(Root<E>),
+    Script(crate::scripts::ScriptTask),
+}
+
 pub enum Clock {
     Real(Instant),
     /// Nanoseconds since the loop began.
@@ -51,7 +57,7 @@ pub struct EventLoop<E: Engine> {
     /// The next id of an abort timer, from 2^31.
     next_abort: u32,
     seq: u64,
-    tasks: VecDeque<Root<E>>,
+    pub(crate) tasks: VecDeque<Task<E>>,
     clock: Clock,
     /// The nesting level of the timer running, 0 outside one.
     nesting: u32,
@@ -156,7 +162,7 @@ impl<E: Engine> DomHost<E> {
 
     /// Queue a task that calls `callback` with no arguments.
     pub fn post_task(&mut self, callback: Owned<E::Value>) {
-        self.event_loop.tasks.push_back(Root::new(callback));
+        self.event_loop.tasks.push_back(Task::Call(Root::new(callback)));
     }
 
     pub fn event_loop(&self) -> &EventLoop<E> {
@@ -168,10 +174,15 @@ impl<E: Engine> DomHost<E> {
     pub fn run_tasks(&mut self, e: &mut E, max: usize) -> usize {
         let mut n = 0;
         while n < max && e.halt() == Halt::Running {
-            if let Some(cb) = self.event_loop.tasks.pop_front() {
-                let r = e.call(self, cb.get(), E::undefined(), &[]);
-                self.finish_task(e, r);
-                cb.release(e);
+            if let Some(t) = self.event_loop.tasks.pop_front() {
+                match t {
+                    Task::Call(cb) => {
+                        let r = e.call(self, cb.get(), E::undefined(), &[]);
+                        self.finish_task(e, r);
+                        cb.release(e);
+                    }
+                    Task::Script(t) => self.script_task(e, t),
+                }
             } else if let Some(t) = self.event_loop.take_due() {
                 self.run_timer(e, t);
             } else {
@@ -239,7 +250,7 @@ impl<E: Engine> DomHost<E> {
         }
         self.settle(e);
         // the trees whose last wrapper died since are freed here
-        if self.collect_due {
+        if self.collect_due && self.scripts.parser.is_none() {
             let deadline = Deadline::At(self.now().saturating_add(COLLECT_SLICE_NS));
             self.collect(e, deadline);
         }
@@ -254,8 +265,10 @@ impl<E: Engine> DomHost<E> {
             }
         }
         self.event_loop.by_id.clear();
-        for cb in std::mem::take(&mut self.event_loop.tasks) {
-            cb.release(e);
+        for t in std::mem::take(&mut self.event_loop.tasks) {
+            if let Task::Call(cb) = t {
+                cb.release(e);
+            }
         }
     }
 }

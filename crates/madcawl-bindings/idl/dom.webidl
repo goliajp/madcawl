@@ -202,6 +202,8 @@ interface Element : Node {
 [Exposed=Window]
 interface Document : Node {
   readonly attribute Element? documentElement;
+  // the HTML Standard's, from its partial Document interface
+  readonly attribute Element? currentScript;
 
   [NewObject] Element createElement(DOMString localName);
   [NewObject] DocumentFragment createDocumentFragment();

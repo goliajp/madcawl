@@ -22,12 +22,11 @@ pub struct DomHost<E: Engine> {
     pub(crate) names: HeldAtoms,
     /// Exceptions nothing caught, reported to the host.
     pub reported: u32,
-    freed: Vec<NodeId>,
+    pub(crate) freed: Vec<NodeId>,
     suspects: Vec<NodeId>,
     pub(crate) event_loop: EventLoop<E>,
-    /// The parser, while `parse_document` runs.
-    pub(crate) parser: Option<Box<crate::parse::Parser>>,
-    pub(crate) loader: Option<crate::parse::Loader>,
+    /// Script elements, the parser, the document's loading.
+    pub(crate) scripts: crate::scripts::Scripts<E>,
     /// The window's listeners: the window lives as long as the host, so
     /// they are roots.
     pub(crate) window_listeners: Vec<Listener<E>>,
@@ -89,8 +88,7 @@ impl<E: Engine> DomHost<E> {
             freed: Vec::new(),
             suspects: Vec::new(),
             event_loop: EventLoop::new(),
-            parser: None,
-            loader: None,
+            scripts: crate::scripts::Scripts::new(),
             window_listeners: Vec::new(),
             next_listener: 0,
             moved: Vec::new(),
@@ -149,9 +147,10 @@ impl<E: Engine> DomHost<E> {
             // a side object freed last round may have let go of a held node
             self.regroup(e);
             let delivered = e.drain_host(self);
-            self.dom.free_dead(&mut self.freed);
+            self.free_dead_unless_parsing();
             let freed = std::mem::take(&mut self.freed);
             for &n in &freed {
+                self.forget_script(n);
                 for mut l in self.take_listeners(n) {
                     l.callback.clear(e);
                 }
@@ -173,8 +172,12 @@ impl<E: Engine> DomHost<E> {
     }
 
     /// Run the cycle collector until `deadline`.
+    /// Nothing is collected while the parser lives (`Done`, still due).
     pub fn collect(&mut self, e: &mut E, deadline: Deadline) -> Step {
         self.settle(e);
+        if self.scripts.parser.is_some() {
+            return Step::Done;
+        }
         let step = e.collect_cycles(self, deadline);
         self.collect_due = step == Step::More;
         self.settle(e);
@@ -237,7 +240,12 @@ impl<E: Engine> DomHost<E> {
     /// realm. What script still holds is the engine's to free; the
     /// engine tells no host about this realm's wrappers again.
     pub fn close(mut self, e: &mut E) {
+        self.shut(e);
+    }
+
+    pub(crate) fn shut(&mut self, e: &mut E) {
         self.close_loop(e);
+        self.close_scripts(e);
         self.close_window(e);
         for (_, list) in std::mem::take(&mut self.listeners) {
             for mut l in list {
@@ -268,6 +276,7 @@ impl<E: Engine> Host<E> for DomHost<E> {
         }
         match self.dom.kind(self.node(obj)) {
             NodeKind::Document => &DocumentClass::<E>::DEF,
+            NodeKind::Element if crate::scripts::is_script(&self.dom, self.node(obj)) => &crate::generated::HTMLScriptElementClass::<E>::DEF,
             NodeKind::Element => &ElementClass::<E>::DEF,
             NodeKind::Text => &crate::generated::TextClass::<E>::DEF,
             NodeKind::Comment => &crate::generated::CommentClass::<E>::DEF,
