@@ -72,3 +72,19 @@ pub(crate) fn install_watchdog(group: JSContextGroupRef, flags: *const Flags) {
     unsafe { &*flags }.group.store(group as usize, Ordering::Relaxed);
     arm(group, flags);
 }
+
+const SYNC_GC: &CStr = c"JSSynchronousGarbageCollectForDebugging";
+type SyncGc = unsafe extern "C" fn(JSContextRef);
+
+impl crate::isolate::Jsc {
+    /// A full collection and sweep now, finalizers run: for tests and
+    /// gauges, which need one at a known moment. Not on the path of a
+    /// page, whose collections the framework times itself; so the entry
+    /// point is looked up here and is not among those [`check`] needs.
+    pub fn collect_now(&mut self) {
+        let f = lookup(SYNC_GC);
+        assert!(!f.is_null(), "the system JavaScriptCore exports {SYNC_GC:?}");
+        // SAFETY: the exported function of this signature, on a live context
+        unsafe { std::mem::transmute::<*mut c_void, SyncGc>(f)(self.base) };
+    }
+}

@@ -51,8 +51,15 @@ impl Dom {
             self.record(&change);
         }
         let node = match change {
-            Change::Inserted(n) | Change::Attributes(n) | Change::Text(n) => n,
-            Change::Removed { parent, .. } => parent,
+            Change::Inserted(n) => {
+                self.record_move(n);
+                n
+            }
+            Change::Attributes(n) | Change::Text(n) => n,
+            Change::Removed { parent, child } => {
+                self.record_move(child);
+                parent
+            }
             Change::Freed(_) => return,
         };
         self.m(node).flags |= STYLE_DIRTY;

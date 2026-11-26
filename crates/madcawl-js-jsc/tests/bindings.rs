@@ -33,6 +33,11 @@ impl batch::Driver for Jsc {
         self.release(make);
         f
     }
+
+    fn collect_all(&mut self, h: &mut DomHost<Self>) {
+        self.collect_now();
+        while h.collect(self, madcawl_js::Deadline::Work(u32::MAX)) == madcawl_js::Step::More {}
+    }
 }
 
 include!("../../madcawl-bindings/tests/batch/tests.rs");

@@ -10,7 +10,7 @@ use crate::ffi::{self, JSObjectRef, JSValueRef};
 use crate::frame;
 use crate::isolate::{Jsc, Realm};
 use crate::protos::Helper;
-use crate::value::{THROWN, Value};
+use crate::value::{FALSE, NULL, THROWN, TRUE, UNDEFINED, Value};
 
 impl Jsc {
     /// Run `f` inside the framework; `None` when it threw, with the
@@ -107,6 +107,24 @@ impl Jsc {
             }
         })
         .is_some()
+    }
+
+    pub(crate) fn value_kind(&self, v: Value) -> madcawl_js::ValueKind {
+        use madcawl_js::ValueKind;
+        match v {
+            UNDEFINED => return ValueKind::Undefined,
+            NULL => return ValueKind::Null,
+            TRUE | FALSE => return ValueKind::Boolean,
+            _ if v.as_number().is_some() => return ValueKind::Number,
+            _ => {}
+        }
+        // SAFETY: a live cell
+        match unsafe { ffi::JSValueGetType(self.base, v.raw()) } {
+            ffi::kJSTypeString => ValueKind::String,
+            ffi::kJSTypeSymbol => ValueKind::Symbol,
+            ffi::kJSTypeObject if self.callable(v) => ValueKind::Function,
+            _ => ValueKind::Object,
+        }
     }
 
     pub(crate) fn callable(&self, v: Value) -> bool {

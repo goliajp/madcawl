@@ -151,17 +151,58 @@ fn document_write_nested_past_21_is_ignored() {
     h.close(&mut e);
 }
 
+/// Overwrite the stack below the caller, where stale copies of values
+/// script dropped would keep them for the collector's stack scan.
+#[inline(never)]
+fn scrub() {
+    let pad = [0u8; 512 * 1024];
+    std::hint::black_box(&pad);
+}
+
+/// What a long idle time does: the framework collects, and the host
+/// frees the trees whose wrappers died.
+fn collect_everything(e: &mut Jsc, h: &mut DomHost<Jsc>) {
+    scrub();
+    e.collect_now();
+    while h.collect(e, Deadline::Work(u32::MAX)) != Step::Done {}
+}
+
 #[test]
-fn closing_lets_go_of_the_wrappers_of_detached_nodes() {
-    guard(60, "detached wrappers");
+fn detached_trees_script_dropped_are_freed_before_the_page_closes() {
+    guard(60, "detached trees");
+    let (mut e, mut h) = page("<p>x</p>", true);
+    let (before, pages) = (h.dom.node_count(), h.dom.used_pages());
+    eval(&mut e, &mut h, "for (let i = 0; i < 5000; i++) { let d = document.createElement('div'); d.appendChild(document.createElement('span')); d.x = i; } 0");
+    collect_everything(&mut e, &mut h);
+    assert_eq!(h.dom.node_count(), before);
+    assert_eq!(h.dom.audit().mismatches(), 0);
+    // nodes added to the document and taken out again, over and over:
+    // the arena's pages come back to where they started
+    let churn = "var b = document.querySelector('body'); for (let i = 0; i < 2000; i++) { let d = document.createElement('div'); d.appendChild(document.createTextNode('t')); b.appendChild(d); b.removeChild(d); } 0";
+    for _ in 0..5 {
+        eval(&mut e, &mut h, churn);
+        collect_everything(&mut e, &mut h);
+    }
+    assert_eq!(h.dom.node_count(), before);
+    assert!(h.dom.used_pages() <= pages + 1, "{} pages, {pages} at the start", h.dom.used_pages());
+    h.close(&mut e);
+}
+
+#[test]
+fn a_tree_held_by_one_wrapper_put_back_and_removed_again_is_freed() {
+    guard(60, "a tree put back");
     let (mut e, mut h) = page("<p>x</p>", true);
     let before = h.dom.node_count();
-    eval(&mut e, &mut h, "for (let i = 0; i < 500; i++) { let d = document.createElement('div'); d.appendChild(document.createElement('span')); } 0");
-    while h.collect(&mut e, Deadline::Work(u32::MAX)) != Step::Done {}
-    // the bound until tree groups: script-made detached nodes live until
-    // the host closes
-    assert_eq!(h.dom.node_count(), before + 1000);
-    assert_eq!(h.dom.wrapped().len(), 1000 + 1);
+    eval(&mut e, &mut h, "var b = document.querySelector('body'); var d = document.createElement('div'), s = document.createElement('span'); d.appendChild(s); b.appendChild(d); d.x = 'kept'; b.removeChild(d); var held = s; d = null; s = null; 0");
+    collect_everything(&mut e, &mut h);
+    assert_eq!(h.dom.node_count(), before + 2, "held by the span's wrapper");
+    let back = "var d = held.parentNode; var ok = d.x === 'kept'; b.appendChild(d); held = null; d = null; ok ? 1 : 0";
+    assert_eq!(eval(&mut e, &mut h, back), 1.0, "the parent's wrapper, with its own property");
+    collect_everything(&mut e, &mut h);
+    let again = "var l = b.lastChild; var ok = l.x === 'kept'; b.removeChild(l); l = null; ok ? 1 : 0";
+    assert_eq!(eval(&mut e, &mut h, again), 1.0, "kept by the document");
+    collect_everything(&mut e, &mut h);
+    assert_eq!(h.dom.node_count(), before);
     h.close(&mut e);
 }
 

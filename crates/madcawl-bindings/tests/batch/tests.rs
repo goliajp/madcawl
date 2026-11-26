@@ -55,3 +55,18 @@ fn a_closed_host_leaves_a_sound_dom() {
 fn timers_and_microtasks_run_on_the_event_loop() {
     batch::timers_and_microtasks_run_on_the_event_loop::<E>();
 }
+
+#[test]
+fn a_detached_tree_script_let_go_of_is_freed_before_close() {
+    batch::a_detached_tree_script_let_go_of_is_freed_before_close::<E>();
+}
+
+#[test]
+fn holding_one_wrapper_keeps_its_whole_tree() {
+    batch::holding_one_wrapper_keeps_its_whole_tree::<E>();
+}
+
+#[test]
+fn the_arena_gives_back_what_a_loop_of_detached_trees_took() {
+    batch::the_arena_gives_back_what_a_loop_of_detached_trees_took::<E>();
+}

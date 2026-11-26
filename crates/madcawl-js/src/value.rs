@@ -92,3 +92,17 @@ impl HostRef {
         self.0.get()
     }
 }
+
+/// Which tree the host objects of some wrappers are in now, for an
+/// engine that keeps wrappers alive by reach ([`crate::Engine::place_wrappers`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tree<V> {
+    /// A document that lives as long as the realm: its wrappers live as
+    /// long as the realm does.
+    Anchored,
+    /// A tree of their own, apart from every other: these wrappers live
+    /// while script holds any one of them.
+    New,
+    /// The detached tree that wrapper `V`, already placed, is in.
+    With(V),
+}

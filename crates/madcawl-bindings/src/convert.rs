@@ -127,7 +127,10 @@ pub(crate) fn run<E: Engine, T: IntoJs<E>>(
     h: &mut DomHost<E>,
     f: impl FnOnce(&mut E, &mut DomHost<E>) -> Result<T, Thrown>,
 ) -> Owned<E::Value> {
-    match f(e, h) {
+    let r = f(e, h);
+    // before script runs again: its collector may run at any allocation
+    h.regroup(e);
+    match r {
         Ok(v) => v.into_js(e, h),
         Err(Thrown) => E::thrown(),
     }

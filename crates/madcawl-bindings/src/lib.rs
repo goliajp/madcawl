@@ -17,6 +17,7 @@ mod host;
 mod impls;
 mod parse;
 mod shell;
+mod trees;
 mod window;
 
 #[rustfmt::skip]

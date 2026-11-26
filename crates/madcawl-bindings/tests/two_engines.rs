@@ -35,6 +35,10 @@ impl batch::Driver for Stub {
         let log = self.retain(log);
         self.new_closure::<DomHost<Stub>>(h.realm, counting, vec![log])
     }
+
+    fn collect_all(&mut self, h: &mut DomHost<Self>) {
+        while h.collect(self, madcawl_js::Deadline::Work(u32::MAX)) == madcawl_js::Step::More {}
+    }
 }
 
 include!("batch/tests.rs");

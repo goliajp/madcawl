@@ -16,7 +16,13 @@ pub trait Driver: Engine {
     /// A function that adds one to `log.calls` each time it is called,
     /// and throws a TypeError when `log.fail` is truthy.
     fn counting(&mut self, h: &mut DomHost<Self>, log: Self::Value) -> Owned<Self::Value>;
+    /// Collect everything script no longer reaches, wrappers and nodes,
+    /// as a long idle time would.
+    fn collect_all(&mut self, h: &mut DomHost<Self>);
 }
+
+mod trees;
+pub use trees::*;
 
 pub struct Js<E: Driver> {
     pub e: E,
@@ -334,26 +340,6 @@ pub fn a_dom_exception_carries_name_message_and_code<E: Driver>() {
     assert_eq!(js.read(ex.get(), "code"), "5");
     assert_eq!(js.read(ex.get(), "message"), "not a valid element name");
     js.drop_all([ex, bad, doc]);
-}
-
-pub fn a_closed_host_leaves_a_sound_dom<E: Driver>() {
-    let mut js = Js::<E>::new();
-    let doc = js.doc();
-    let html = js.element(doc.get(), "html");
-    let div = js.element(doc.get(), "div");
-    js.run(doc.get(), "appendChild", &[html.get()]);
-    js.run(html.get(), "appendChild", &[div.get()]);
-    let s = js.str("expando");
-    js.set(div.get(), "x", s.get());
-    let log = js.e.new_object(js.h.realm);
-    let f = js.e.counting(&mut js.h, log.get());
-    let click = js.str("click");
-    js.run(div.get(), "addEventListener", &[click.get(), f.get()]);
-    assert_eq!(js.read(div.get(), "x"), "expando");
-    js.drop_all([click, f, log, s, div, html, doc]);
-    js.audit();
-    let Js { mut e, h } = js;
-    h.close(&mut e);
 }
 
 pub fn timers_and_microtasks_run_on_the_event_loop<E: Driver>() {

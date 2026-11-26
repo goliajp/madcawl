@@ -60,6 +60,7 @@ mod engine;
 mod graph;
 mod halt;
 mod handle;
+mod host;
 mod script;
 mod sig;
 mod value;
@@ -70,10 +71,11 @@ pub use class::{
     Attribute, Bound, ClassDef, ClassId, Constant, Ctx, Getter, HostFn, HostOps, IndexGetter,
     Interceptors, Length, Operation, Setter,
 };
-pub use engine::{Engine, Host};
+pub use engine::Engine;
+pub use host::Host;
 pub use graph::{Deadline, Step, Tracer, Unlinker};
 pub use halt::{Control, Halt, Interrupt, Unsupported};
 pub use handle::{Member, Root};
 pub use script::{ModuleRequest, ScriptOrigin};
 pub use sig::{AttributeSig, Effects, IdlType, Signature};
-pub use value::{ErrorKind, HostRef, Key, Owned, ValueKind};
+pub use value::{ErrorKind, HostRef, Key, Owned, Tree, ValueKind};

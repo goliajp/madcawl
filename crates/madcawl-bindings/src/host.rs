@@ -36,12 +36,16 @@ pub struct DomHost<E: Engine> {
     /// The window's listeners: the window lives as long as the host, so
     /// they are roots.
     pub(crate) window_listeners: Vec<(Atom, Root<E>)>,
+    /// Nodes moved between trees, being placed (`trees.rs`).
+    pub(crate) moved: Vec<NodeId>,
+    /// Suspects went to the engine since its last collection finished.
+    pub(crate) collect_due: bool,
 }
 
 impl<E: Engine> DomHost<E> {
     pub fn new(e: &mut E, dom: Dom) -> Self {
         let () = E::VALUE_IS_ONE_WORD;
-        DomHost {
+        let mut h = DomHost {
             dom,
             realm: e.new_realm(),
             listeners: HashMap::new(),
@@ -53,7 +57,13 @@ impl<E: Engine> DomHost<E> {
             parser: None,
             loader: None,
             window_listeners: Vec::new(),
+            moved: Vec::new(),
+            collect_due: false,
+        };
+        if E::PLACES_WRAPPERS {
+            h.dom.track_moves();
         }
+        h
     }
 
     pub fn node(&self, obj: HostRef) -> NodeId {
@@ -72,18 +82,14 @@ impl<E: Engine> DomHost<E> {
             if let Some(v) = e.wrapper_upgrade(w & !1) {
                 return v;
             }
-            // the engine sends no notice for a wrapper it refused: let go
-            // of it here as `wrapper_died` would
-            if w & 1 != 0 {
-                self.dom.set_wrapper_preserved(n, false);
-                // SAFETY: the count the preserved edge held
-                e.release(unsafe { Owned::from_raw(E::wrapper_value(w & !1)) });
-            }
-            self.dom.clear_wrapper(n);
+            // the engine sends no notice for a wrapper it refused
+            self.let_go_of_wrapper(e, n);
         }
         let obj = self.host_ref(n);
         let v = e.new_wrapper(self.realm, self.class_of(obj), obj);
-        self.dom.set_wrapper(n, E::wrapper_word(v.get()));
+        let word = E::wrapper_word(v.get());
+        self.dom.set_wrapper(n, word);
+        self.place_new(e, n, word);
         v
     }
 
@@ -92,6 +98,7 @@ impl<E: Engine> DomHost<E> {
     /// hand over the nodes that left a document still counted. Called
     /// after every call into the engine and every tree change.
     pub fn settle(&mut self, e: &mut E) {
+        self.regroup(e);
         loop {
             let delivered = e.drain_host(self);
             self.dom.free_dead(&mut self.freed);
@@ -103,6 +110,7 @@ impl<E: Engine> DomHost<E> {
                 e.forget(self.host_ref(n));
             }
             self.dom.take_suspects(&mut self.suspects);
+            self.collect_due |= !self.suspects.is_empty();
             for n in std::mem::take(&mut self.suspects) {
                 e.suspect(self.host_ref(n));
             }
@@ -118,6 +126,7 @@ impl<E: Engine> DomHost<E> {
     pub fn collect(&mut self, e: &mut E, deadline: Deadline) -> Step {
         self.settle(e);
         let step = e.collect_cycles(self, deadline);
+        self.collect_due = step == Step::More;
         self.settle(e);
         step
     }

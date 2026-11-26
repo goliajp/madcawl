@@ -76,6 +76,12 @@ impl Arena {
         self.count
     }
 
+    /// Arena pages with a live node.
+    pub(crate) fn used_pages(&self) -> u32 {
+        let pages = (self.next as usize).div_ceil(PAGE_SLOTS);
+        self.live[..pages].iter().filter(|&&n| n != 0).count() as u32
+    }
+
     /// One past the highest slot ever used.
     pub(crate) fn high(&self) -> u32 {
         self.next

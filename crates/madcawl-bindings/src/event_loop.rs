@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::time::Instant;
 
-use madcawl_js::{Engine, Halt, Host, Owned, Root, ScriptOrigin};
+use madcawl_js::{Deadline, Engine, Halt, Host, Owned, Root, ScriptOrigin};
 use madcawl_str::DomString;
 
 use crate::host::DomHost;
@@ -18,6 +18,8 @@ use crate::host::DomHost;
 const NESTING_CLAMP: u32 = 5;
 const MIN_NESTED_MS: u32 = 4;
 const NS_PER_MS: u64 = 1_000_000;
+/// How long the collection after a task may take before it yields.
+const COLLECT_SLICE_NS: u64 = 2 * NS_PER_MS;
 
 pub(crate) struct Timer<E: Engine> {
     pub id: u32,
@@ -200,6 +202,11 @@ impl<E: Engine> DomHost<E> {
             e.run_microtasks(self);
         }
         self.settle(e);
+        // the trees whose last wrapper died since are freed here
+        if self.collect_due {
+            let deadline = Deadline::At(self.now().saturating_add(COLLECT_SLICE_NS));
+            self.collect(e, deadline);
+        }
     }
 
     /// Give back the timers and tasks: the window is going.

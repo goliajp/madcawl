@@ -3,7 +3,7 @@
 //! microtasks, weak references, the WindowProxy, handler compilation)
 //! and the interface and prototype objects of the host classes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use madcawl_js::{ClassDef, Host};
 
@@ -29,6 +29,9 @@ pub(crate) enum Helper {
     FunctionProto = 11,
     ObjectProto = 12,
     Call = 13,
+    Group = 14,
+    Ungroup = 15,
+    DerefAll = 16,
 }
 
 const HELPERS: &str = r#"(function () {
@@ -38,6 +41,16 @@ const HELPERS: &str = r#"(function () {
     dp(f, 'length', { value: l, configurable: true });
   };
   const resolved = Promise.resolve();
+  // each placed wrapper to its tree's group, which holds every wrapper
+  // of the tree: one held keeps all, and none held lets all go
+  const groupOf = new WeakMap();
+  const join = (g, w) => {
+    const old = groupOf.get(w);
+    if (old === g) return;
+    if (old) old.delete(w);
+    g.add(w);
+    groupOf.set(w, g);
+  };
   // the scopes come innermost first (element, form, document)
   function handler(__mcParams, __mcBody, __mcScopes) {
     const __mcS = __mcScopes.slice(0, 3).reverse();
@@ -90,6 +103,36 @@ const HELPERS: &str = r#"(function () {
     Function.prototype,
     Object.prototype,
     Function.prototype.call,
+    // the group of `r`, or a new one when `r` is undefined; a `WeakRef`
+    // for each wrapper whose `need` is true
+    (r, ws, need) => {
+      let g;
+      if (r === undefined) {
+        g = new Set();
+      } else {
+        g = groupOf.get(r);
+        if (!g) {
+          g = new Set();
+          join(g, r);
+        }
+      }
+      const out = [];
+      for (let i = 0; i < ws.length; i++) {
+        join(g, ws[i]);
+        if (need[i]) out.push(new WeakRef(ws[i]));
+      }
+      return out;
+    },
+    (ws) => {
+      for (const w of ws) {
+        const g = groupOf.get(w);
+        if (g) {
+          g.delete(w);
+          groupOf.delete(w);
+        }
+      }
+    },
+    (rs) => rs.map((r) => r.deref()),
   ];
 })()"#;
 
@@ -100,6 +143,8 @@ pub(crate) struct RealmData {
     /// class id, made when first asked for; counted.
     pub protos: HashMap<u16, (Value, Value)>,
     pub helpers: Vec<Value>,
+    /// The records of the realm's wrappers not yet freed.
+    pub wrappers: HashSet<usize>,
 }
 
 impl Jsc {
@@ -111,7 +156,7 @@ impl Jsc {
         // SAFETY: the helper script on a live context
         let arr = unsafe { ffi::JSEvaluateScript(ctx, src.s, std::ptr::null_mut(), std::ptr::null_mut(), 1, &mut exc) };
         assert!(exc.is_null(), "the realm helpers compile");
-        let helpers = (0..=Helper::Call as u32)
+        let helpers = (0..=Helper::DerefAll as u32)
             .map(|i| {
                 // SAFETY: the array the script returned
                 let v = Value::from_ref(unsafe {
@@ -122,7 +167,7 @@ impl Jsc {
             })
             .collect();
         let r = self.realms.len() as u32;
-        self.realms.push(RealmData { ctx, detached: false, protos: HashMap::new(), helpers });
+        self.realms.push(RealmData { ctx, detached: false, protos: HashMap::new(), helpers, wrappers: HashSet::new() });
         Realm(r, self.id)
     }
 
@@ -222,6 +267,15 @@ pub(crate) fn detach(e: &mut Jsc, r: u32) {
     d.detached = true;
     let mut held: Vec<Value> = d.protos.drain().flat_map(|(_, (i, p))| [i, p]).collect();
     held.append(&mut d.helpers);
+    // what keeps the realm's wrappers: their records stay until finalized
+    for rec in d.wrappers.drain() {
+        // SAFETY: a record not yet freed
+        let rec = unsafe { &mut *(rec as *mut crate::objects::WrapRec) };
+        if std::mem::take(&mut rec.strong) {
+            held.push(rec.js);
+        }
+        held.push(std::mem::replace(&mut rec.weak, Value(0)));
+    }
     let ctx = d.ctx;
     for v in held {
         e.unprotect(v);

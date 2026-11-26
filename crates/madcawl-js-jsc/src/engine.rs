@@ -2,7 +2,7 @@
 
 use madcawl_js::{
     Bound, ClassDef, Deadline, Engine, ErrorKind, Halt, Host, HostFn, HostRef, Key, Owned, ScriptOrigin, Step,
-    Unsupported, ValueKind,
+    Tree, Unsupported, ValueKind,
 };
 use madcawl_str::{Atom, DomString, HeldAtoms};
 
@@ -66,20 +66,7 @@ impl Engine for Jsc {
     }
 
     fn kind(&self, v: Value) -> ValueKind {
-        match v {
-            UNDEFINED => return ValueKind::Undefined,
-            NULL => return ValueKind::Null,
-            TRUE | FALSE => return ValueKind::Boolean,
-            _ if v.as_number().is_some() => return ValueKind::Number,
-            _ => {}
-        }
-        // SAFETY: a live cell
-        match unsafe { ffi::JSValueGetType(self.base, v.raw()) } {
-            ffi::kJSTypeString => ValueKind::String,
-            ffi::kJSTypeSymbol => ValueKind::Symbol,
-            ffi::kJSTypeObject if self.callable(v) => ValueKind::Function,
-            _ => ValueKind::Object,
-        }
+        self.value_kind(v)
     }
 
     fn as_boolean(&self, v: Value) -> Option<bool> {
@@ -244,6 +231,12 @@ impl Engine for Jsc {
 
     fn drain_host<H: Host<Jsc>>(&mut self, host: &mut H) -> usize {
         self.drain(host)
+    }
+
+    const PLACES_WRAPPERS: bool = true;
+
+    fn place_wrappers(&mut self, tree: Tree<Value>, words: &[u64], refused: &mut Vec<usize>) {
+        self.place(tree, words, refused);
     }
 
     fn weak(&mut self, v: Value) -> u32 {

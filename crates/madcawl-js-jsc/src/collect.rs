@@ -1,21 +1,21 @@
 //! The host side of collection.
 //!
 //! The framework's collector traces its own heap and sees nothing of
-//! the host's. Every wrapper is preserved as soon as it is made (the
-//! host is told at its next settle), so a wrapper lives while its host
-//! object does and a wrapper word never names a freed object; the
-//! framework's lazy sweeping, which frees a dead object some time after
-//! the collection that found it dead, never meets a word the host
-//! still reads.
+//! the host's. A wrapper of a node in the document is protected; the
+//! wrappers of a detached tree keep one another alive there and die
+//! together once script holds none (`groups.rs`). Their finalizers queue
+//! notices, and when the host next settles it is told, clears the
+//! wrapper words, and the nodes' counts drop; each such node outside the
+//! document becomes a suspect.
 //!
-//! What is left for the adapter is cycles among host objects alone: a
-//! detached subtree no wrapper and no outside count holds. The host
-//! suspects such objects; [`Jsc::collect_host`] runs the trial deletion
-//! of `madcawl_js::trial` over the host graph its `traverse` reports,
-//! from the suspects, and unlinks what is garbage. A host object with a
-//! wrapper has a count no `traverse` explains (the wrapper's), so it is
-//! never garbage here: a subtree script touched lives until its realm
-//! is closed. Edges to script values are not part of the graph.
+//! What is left for the adapter is the cycles among host objects alone:
+//! a detached tree that no wrapper and no outside count holds any more.
+//! [`Jsc::collect_host`] runs the trial deletion of `madcawl_js::trial`
+//! over the host graph `traverse` reports, from the suspects, and
+//! unlinks what is garbage: a tree whose counts the tree's own edges
+//! explain. A host object with a live wrapper has a count no `traverse`
+//! explains (the wrapper's), so it is never garbage here. Edges to
+//! script values are not part of the graph.
 
 use madcawl_js::trial::SideGraph;
 use madcawl_js::{Deadline, Host, HostRef, Owned, Step, Tracer, Unlinker};

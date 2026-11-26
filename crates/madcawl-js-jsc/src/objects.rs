@@ -50,8 +50,18 @@ pub(crate) struct WrapRec {
     pub realm: u32,
     /// Finalized: its notice is queued.
     pub dead: bool,
-    /// Refused by `wrapper_upgrade`: the host let go of it already.
+    /// Refused by `wrapper_upgrade`: the host let go of it already, and
+    /// it no longer reaches its host object.
     pub orphan: bool,
+    /// Protected: in an anchored tree, or never placed. Otherwise kept by
+    /// its tree's group alone, and read through `weak`.
+    pub strong: bool,
+    /// A protected `WeakRef` to the wrapper once it was placed in a
+    /// detached tree, 0 before: what tells a wrapper the collector found
+    /// dead from a live one before its finalizer runs.
+    pub weak: Value,
+    /// In a group (`groups.rs`).
+    pub grouped: bool,
     pub shared: *const Shared,
 }
 

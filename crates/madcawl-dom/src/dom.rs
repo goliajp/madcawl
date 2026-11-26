@@ -88,6 +88,9 @@ pub struct Dom {
     pub(crate) by_count: bool,
     /// The change record of an observer, when one asked (`observe.rs`)
     pub(crate) observer: Option<Box<crate::observe::Observer>>,
+    /// The nodes inserted or removed, once the bindings track them
+    /// (`moves.rs`).
+    pub(crate) moves: Option<Vec<u32>>,
 }
 
 /// An attribute as stored.
@@ -134,6 +137,7 @@ impl Dom {
             held: HashMap::new(),
             by_count: false,
             observer: None,
+            moves: None,
         };
         dom.doc = dom.new_document(false).expect("room for the document");
         dom
@@ -300,30 +304,9 @@ impl Dom {
         (k, self.tables.list(k))
     }
 
-    /// The node's reference count.
-    pub fn ref_count(&self, n: NodeId) -> u32 {
-        self.n(n.index()).count()
-    }
-
-    pub fn node_count(&self) -> u32 {
-        self.arena.count()
-    }
-
     /// The bytes counted against `Limits::bytes`.
     pub fn bytes(&self) -> usize {
         self.bytes
-    }
-
-    /// The node's address, fixed from creation to release.
-    pub fn address(&self, n: NodeId) -> usize {
-        self.arena.addr(n.index())
-    }
-
-    /// The live node at `addr`, if it is one of this DOM's.
-    pub fn node_at(&self, addr: usize) -> Option<NodeId> {
-        let ours = Arena::base_of(addr) == self.arena.addr(0) && addr.is_multiple_of(64);
-        let i = if ours { self.arena.index(addr) } else { 0 };
-        self.arena.is_live(i).then(|| NodeId::at(i))
     }
 
     /// Which limit the DOM has reached, if one.

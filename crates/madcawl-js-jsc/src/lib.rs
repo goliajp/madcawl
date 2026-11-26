@@ -16,9 +16,11 @@
 //!   names the C-ABI function and its data word; the isolate and the
 //!   host they get come from the engine call they run inside
 //!   (`frame.rs`).
-//! - Wrappers are preserved from the start: a host object's wrapper
-//!   lives as long as the host object (`collect.rs` says what that
-//!   costs).
+//! - A wrapper of a node in the document is protected while its realm
+//!   lives; the wrappers of a detached tree keep one another alive in
+//!   the framework's heap and die together once script holds none
+//!   (`groups.rs`), after which the host's trial deletion frees the
+//!   tree (`collect.rs`).
 //! - Microtasks share the framework's queue, which it drains as the
 //!   outermost call returns (`micro.rs`).
 //! - Interrupts go through the framework's execution time limit, one
@@ -29,6 +31,7 @@ mod collect;
 mod engine;
 mod ffi;
 mod frame;
+mod groups;
 mod halt;
 mod isolate;
 mod micro;

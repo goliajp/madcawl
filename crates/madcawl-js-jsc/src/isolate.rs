@@ -59,9 +59,6 @@ pub struct Jsc {
     /// framework at the next checkpoint, in order.
     pub(crate) pending: Vec<Value>,
     pub(crate) in_checkpoint: bool,
-    /// Wrappers made since the host last settled: the host is told at
-    /// `drain_host` that they are preserved.
-    pub(crate) unannounced: Vec<*mut WrapRec>,
     /// The spelling of each static atom, made once.
     pub(crate) atom_strings: HashMap<u32, JSStringRef>,
     pub(crate) weak: Vec<Option<WeakSlot>>,
@@ -118,7 +115,6 @@ impl Jsc {
             flags,
             pending: Vec::new(),
             in_checkpoint: false,
-            unannounced: Vec::new(),
             atom_strings: HashMap::new(),
             weak: Vec::new(),
             weak_free: Vec::new(),

@@ -6,10 +6,11 @@ use std::mem::{align_of, size_of};
 use madcawl_str::{Atom, DomString, HeldAtoms};
 
 use crate::class::{Bound, ClassDef, HostFn};
+use crate::host::Host;
 use crate::graph::{Deadline, Step, Tracer, Unlinker};
 use crate::halt::{Control, Halt, Unsupported};
-use crate::script::{ModuleRequest, ScriptOrigin};
-use crate::value::{ErrorKind, HostRef, Key, Owned, ValueKind};
+use crate::script::ScriptOrigin;
+use crate::value::{ErrorKind, HostRef, Key, Owned, Tree, ValueKind};
 
 /// One isolate of an engine, used on the thread it belongs to: every
 /// method is a call into that isolate. Calls that can run script or
@@ -230,6 +231,24 @@ pub trait Engine: Control + Sized + 'static {
     /// count stay held.
     fn drain_host<H: Host<Self>>(&mut self, host: &mut H) -> usize;
 
+    /// Whether the host must say where wrappers are
+    /// ([`Engine::place_wrappers`]): true for an engine that frees a
+    /// wrapper once script no longer reaches it, whatever counts its
+    /// host object has.
+    const PLACES_WRAPPERS: bool = false;
+    /// The host objects of the wrappers whose words are `words` are in
+    /// `tree` now: a node made, inserted or removed. Such an engine keeps
+    /// the wrappers of one tree reachable from one another, so that
+    /// script holding any one keeps all of them, with what script put on
+    /// them, and keeps those of an anchored document as long as the realm.
+    ///
+    /// A word whose wrapper is gone has its index put in `refused`,
+    /// which the host treats as [`Engine::wrapper_upgrade`] returning
+    /// `None` for it. `With` names a live wrapper the caller holds.
+    fn place_wrappers(&mut self, tree: Tree<Self::Value>, words: &[u64], refused: &mut Vec<usize>) {
+        let _ = (tree, words, refused);
+    }
+
     /// A weak handle to `v`. A weak handle to a wrapper does not
     /// preserve it: the wrapper may die while its host object lives, and
     /// the handle then reads as gone.
@@ -349,60 +368,4 @@ pub trait Engine: Control + Sized + 'static {
         payload: Self::ModulePayload,
         result: Owned<Self::Value>,
     );
-}
-
-/// The embedder's side: what the engine calls back.
-pub trait Host<E: Engine>: Sized + 'static {
-    /// The most derived class of host object `obj`.
-    fn class_of(&self, obj: HostRef) -> &'static ClassDef<E, Self>;
-
-    /// An exception no caller catches (a microtask's, a listener's).
-    fn report_exception(&mut self, e: &mut E, exception: Owned<E::Value>) {
-        e.release(exception);
-    }
-
-    /// `HostEnsureCanCompileStrings`: content security policy.
-    fn can_compile_strings(&mut self, realm: E::Realm) -> bool {
-        let _ = realm;
-        true
-    }
-
-    /// `HostLoadImportedModule`: the module map belongs to the host,
-    /// which fetches and then calls [`Engine::finish_loading_module`].
-    fn load_imported_module(
-        &mut self,
-        e: &mut E,
-        request: &ModuleRequest<'_>,
-        payload: E::ModulePayload,
-    );
-
-    /// `HostPromiseRejectionTracker`: `handled` false for "reject",
-    /// true for "handle".
-    fn promise_rejection(&mut self, e: &mut E, promise: E::Value, handled: bool) {
-        let _ = (e, promise, handled);
-    }
-
-    /// An [`crate::Interrupt::request_callback`] request, seen on the
-    /// isolate's thread; script may be on the stack. It may read and
-    /// change host state and make values, and runs no script.
-    fn interrupt_callback(&mut self, e: &mut E) {
-        let _ = e;
-    }
-
-    /// Memory use went past the soft limit
-    /// ([`Control::set_memory_limits`]): the host frees what it can
-    /// (caches, a collection soon). Called once each time use crosses
-    /// the limit going up, on the isolate's thread; it runs no script.
-    fn memory_pressure(&mut self, e: &mut E) {
-        let _ = e;
-    }
-
-    /// The host's monotonic clock in nanoseconds, which
-    /// [`crate::Deadline::At`] is read against: the engine reads no
-    /// clock of its own. The default counts from the first call in the
-    /// process.
-    fn now(&self) -> u64 {
-        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-        START.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
-    }
 }
