@@ -114,6 +114,18 @@ impl Dom {
     }
 }
 
+impl Dom {
+    /// Whether the parser may put `child` into `parent`: a document
+    /// takes one element child ("insert an element at the adjusted
+    /// insertion location" gives up otherwise). Only script, by moving
+    /// a table under the document, makes the parser try.
+    fn can_insert(&self, parent: NodeId, child: NodeId) -> bool {
+        self.kind(parent) != NodeKind::Document
+            || self.kind(child) != NodeKind::Element
+            || !self.children(parent).any(|c| c != child && self.kind(c) == NodeKind::Element)
+    }
+}
+
 impl TreeSink for Dom {
     type Handle = NodeId;
 
@@ -168,15 +180,23 @@ impl TreeSink for Dom {
     }
 
     fn append(&mut self, parent: NodeId, child: NodeId) {
-        self.insert(parent.index(), child.index(), 0);
+        if self.can_insert(parent, child) {
+            self.insert(parent.index(), child.index(), 0);
+        }
     }
 
     fn insert_before(&mut self, parent: NodeId, child: NodeId, before: NodeId) {
-        self.insert(parent.index(), child.index(), before.index());
+        if self.can_insert(parent, child) {
+            self.insert(parent.index(), child.index(), before.index());
+        }
     }
 
     fn insert_text(&mut self, parent: NodeId, before: Option<NodeId>, text: &[u8]) {
-        self.add_text(parent.index(), before.map_or(0, NodeId::index), text);
+        // text cannot be a document's child: possible only once script
+        // made the document the parent foster parenting finds
+        if self.kind(parent) != NodeKind::Document {
+            self.add_text(parent.index(), before.map_or(0, NodeId::index), text);
+        }
     }
 
     fn remove(&mut self, node: NodeId) {

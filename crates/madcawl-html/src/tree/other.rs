@@ -13,8 +13,14 @@ impl<S: TreeSink> TreeBuilder<S> {
                 return Step::Again;
             }
             Tok::End(_) => {
+                let top = self.open.last().copied();
                 self.pop();
                 self.mode = self.original_mode;
+                if self.pause_scripts
+                    && let Some(t) = top.filter(|t| t.html(Tag::Script))
+                {
+                    self.script = Some(t.node);
+                }
             }
             _ => {}
         }

@@ -76,6 +76,10 @@ pub struct TreeBuilder<S: TreeSink> {
     stopped: bool,
     /// The depth limit has been hit once; it is reported once.
     depth_capped: bool,
+    /// Stop after a script element's end tag, for its script to run.
+    pause_scripts: bool,
+    /// The script element whose end tag made the parser stop.
+    script: Option<S::Handle>,
 }
 
 impl<S: TreeSink> TreeBuilder<S> {
@@ -107,6 +111,8 @@ impl<S: TreeSink> TreeBuilder<S> {
             next_state: None,
             stopped: false,
             depth_capped: false,
+            pause_scripts: false,
+            script: None,
         }
     }
 
@@ -163,6 +169,23 @@ impl<S: TreeSink> TreeBuilder<S> {
 
     pub fn sink(&self) -> &S {
         &self.sink
+    }
+
+    /// The sink, for a script that runs while the parser waits.
+    pub fn sink_mut(&mut self) -> &mut S {
+        &mut self.sink
+    }
+
+    /// Have the tokenizer stop (`Step::Paused`) after each script
+    /// element's end tag, as when scripting runs: the element is then
+    /// [`TreeBuilder::take_script`]'s.
+    pub fn pause_for_scripts(&mut self, on: bool) {
+        self.pause_scripts = on;
+    }
+
+    /// The script element the parser stopped after, once.
+    pub fn take_script(&mut self) -> Option<S::Handle> {
+        self.script.take()
     }
 
     pub fn into_sink(self) -> S {
@@ -326,6 +349,7 @@ impl<S: TreeSink> Sink for TreeBuilder<S> {
         }
         match self.next_state.take() {
             Some(state) => Flow::Switch(state),
+            None if self.script.is_some() => Flow::Pause,
             None => Flow::Continue,
         }
     }
