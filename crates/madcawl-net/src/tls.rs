@@ -1,5 +1,10 @@
-//! A TLS 1.3 client stream: `torajs-tls`'s sans-I/O connection driven over
-//! a blocking `TcpStream`.
+//! A TLS client stream: `torajs-tls`'s sans-I/O connection driven over a
+//! blocking `TcpStream`. It offers TLS 1.3 and TLS 1.2; what TLS 1.2 may
+//! use is fixed by `torajs-tls`: ECDHE key exchange, AES-GCM or
+//! ChaCha20-Poly1305 records, the extended master secret (a server
+//! without it is refused, stricter than RFC 7627's SHOULD), no
+//! renegotiation and no resumption, and a TLS 1.3 server's downgrade
+//! marker in a TLS 1.2 `ServerHello` aborts the handshake.
 
 use crate::error::NetError;
 use crate::sock::{Bounds, Tcp};
@@ -13,7 +18,7 @@ use torajs_tls::client::{ClientConfig, ClientHello, Connection, DnsName, RECOMME
 use torajs_tls::torajs_crypto::cpu::CpuFeatures;
 use torajs_tls::torajs_crypto::rand::{EntropyError, EntropySource};
 use torajs_tls::torajs_x509::{ServerName, UnixTime};
-use torajs_tls::{Error, MIN_BUFFER_LEN};
+use torajs_tls::{CipherSuite, Error, MIN_BUFFER_LEN, ProtocolVersion};
 
 const ALPN: &[&[u8]] = &[b"http/1.1"];
 
@@ -86,6 +91,22 @@ impl TlsStream {
     /// Runs the handshake for `host` over `tcp`, within the bounds it
     /// carries.
     pub fn handshake(tcp: Tcp, host: &str, trust: Arc<Trust>) -> Result<Self, NetError> {
+        Self::handshake_with(tcp, host, trust, &mut OsEntropy, now())
+    }
+
+    /// `handshake` with the client's randomness drawn from `entropy` and
+    /// the certificates checked at `now`; fixed ones make the bytes the
+    /// client sends repeatable, as replaying a captured handshake needs.
+    // only for capture replay and its recorder: real connections go through
+    // `handshake`, which draws from the system's randomness
+    #[doc(hidden)]
+    pub fn handshake_with(
+        tcp: Tcp,
+        host: &str,
+        trust: Arc<Trust>,
+        entropy: &mut impl EntropySource,
+        now: UnixTime,
+    ) -> Result<Self, NetError> {
         take_rejection_reason();
         let host: *mut str = Box::into_raw(host.to_owned().into_boxed_str());
         let recv: *mut [u8] = Box::into_raw(vec![0u8; RECOMMENDED_BUFFER_LEN].into_boxed_slice());
@@ -94,7 +115,7 @@ impl TlsStream {
         // (see Drop), and nothing else touches them
         let (h, r, s, t): (&'static str, &'static mut [u8], &'static mut [u8], &'static Trust) =
             unsafe { (&*host, &mut *recv, &mut *send, &*Arc::as_ptr(&trust)) };
-        let started = start(h, r, s, t);
+        let started = start(h, r, s, t, entropy, now);
         let conn = match started {
             Ok(c) => c,
             Err(e) => {
@@ -156,6 +177,11 @@ impl TlsStream {
         self.conn.alpn()
     }
 
+    /// The version the server chose; set once the handshake is done.
+    pub fn protocol_version(&self) -> Option<ProtocolVersion> {
+        self.conn.protocol_version()
+    }
+
     pub fn trust(&self) -> &Arc<Trust> {
         &self.trust
     }
@@ -168,16 +194,26 @@ impl TlsStream {
     }
 }
 
-fn start(host: &'static str, recv: &'static mut [u8], send: &'static mut [u8], trust: &'static Trust) -> Result<Conn, NetError> {
+fn start(
+    host: &'static str,
+    recv: &'static mut [u8],
+    send: &'static mut [u8],
+    trust: &'static Trust,
+    entropy: &mut impl EntropySource,
+    now: UnixTime,
+) -> Result<Conn, NetError> {
     let ip = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
-    let mut config = ClientConfig::new().with_alpn(ALPN).map_err(tls_error)?;
-    let mut check = ServerCheck::new(trust, now());
+    let mut config = ClientConfig::new()
+        .with_alpn(ALPN)
+        .and_then(|c| c.with_min_version(ProtocolVersion::Tls12).with_tls12_cipher_suites(CipherSuite::DEFAULT_TLS12))
+        .map_err(tls_error)?;
+    let mut check = ServerCheck::new(trust, now);
     if ip.parse::<IpAddr>().is_ok() {
         check = check.with_server_name(ServerName::try_from(ip).map_err(|e| NetError::Tls(format!("{e:?}")))?);
     } else {
         config = config.with_server_name(DnsName::new(host).map_err(tls_error)?);
     }
-    let hello = ClientHello::new(config, &mut OsEntropy).map_err(tls_error)?;
+    let hello = ClientHello::new(config, entropy).map_err(tls_error)?;
     Connection::new(hello, check, CpuFeatures::compile_time(), recv, send).map_err(tls_error)
 }
 
