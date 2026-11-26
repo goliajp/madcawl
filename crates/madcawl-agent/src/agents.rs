@@ -7,10 +7,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use madcawl_dom::{Dom, NodeId};
 
 use crate::refs::{Ref, RefError};
+pub use crate::request::{AgentError, ViewKind};
 use crate::ring::{Entry, Ring};
 use crate::sync::{Delta, live};
 use crate::tree::{Inputs, SemTree};
-use crate::view::{Query, View, ViewOpts};
+use crate::view::{Scope, View, ViewOpts};
 
 pub type SessionId = u32;
 
@@ -20,39 +21,6 @@ pub const RING_CAP: usize = 4096;
 
 /// Sessions one page takes at most.
 pub const MAX_SESSIONS: usize = 64;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AgentError {
-    NoSession,
-    Ref(RefError),
-    /// The diff reaches back past what the session's ring holds
-    TooFarBehind,
-    /// The page has `MAX_SESSIONS` sessions already
-    TooManySessions,
-    /// A request field holds a value the request cannot take
-    BadRequest(&'static str),
-}
-
-impl AgentError {
-    pub fn message(self) -> &'static str {
-        match self {
-            AgentError::NoSession => "no such agent session on this page",
-            AgentError::Ref(e) => e.message(),
-            AgentError::TooFarBehind => "too far behind: take a new snapshot",
-            AgentError::TooManySessions => "too many agent sessions on this page",
-            AgentError::BadRequest(m) => m,
-        }
-    }
-}
-
-/// Which view to read.
-#[derive(Clone, Debug)]
-pub enum ViewKind {
-    Outline,
-    Snapshot,
-    Markdown,
-    Find(Query),
-}
 
 struct Session {
     id: SessionId,
@@ -70,6 +38,8 @@ pub struct Agents {
     gens: Option<&'static AtomicU32>,
     seq: u64,
     deltas: Vec<(u32, u32, Delta)>,
+    /// Trees are built only for the page outline until more is asked
+    defer: bool,
 }
 
 impl Agents {
@@ -82,6 +52,16 @@ impl Agents {
     /// stale on every other, not just on this page's later documents.
     pub fn sharing_generations(gens: &'static AtomicU32) -> Self {
         Agents { gens: Some(gens), ..Agents::default() }
+    }
+
+    /// Agents that build a document's tree only as far as the page
+    /// outline reads it, and the rest on the first request for more
+    /// (`partial.rs`); every answer is the one a whole tree gives.
+    pub fn deferring(self) -> Self {
+        Agents {
+            defer: true,
+            ..self
+        }
     }
 
     fn next_gen(&mut self) -> u32 {
@@ -99,7 +79,7 @@ impl Agents {
         }
         if self.tree.is_none() {
             let g = self.next_gen();
-            self.tree = Some(SemTree::build(dom, inputs, g));
+            self.tree = Some(self.build(dom, inputs, g, false));
         }
         self.next += 1;
         self.sessions.push(Session {
@@ -128,14 +108,34 @@ impl Agents {
         if self.tree.take().is_none() {
             return;
         }
-        self.rebuild(dom, inputs);
+        self.rebuild(dom, inputs, false);
+    }
+
+    fn build(&self, dom: &mut Dom, inputs: Inputs, g: u32, whole: bool) -> SemTree {
+        match self.defer && !whole {
+            true => SemTree::build_outline(dom, inputs, g),
+            false => SemTree::build(dom, inputs, g),
+        }
+    }
+
+    /// A tree built for the outline made whole when `whole` asks more
+    /// than the page outline, or read again whole under a new page
+    /// generation when what it was built from changed (`partial.rs`).
+    fn settle(&mut self, dom: &mut Dom, inputs: Inputs, whole: bool) {
+        if self
+            .tree
+            .as_mut()
+            .is_some_and(|t| !t.settle(dom, inputs, whole))
+        {
+            self.rebuild(dom, inputs, true);
+        }
     }
 
     /// A new tree under a new page generation: every reference handed out
     /// goes stale, every session's ring starts again.
-    fn rebuild(&mut self, dom: &mut Dom, inputs: Inputs) {
+    fn rebuild(&mut self, dom: &mut Dom, inputs: Inputs, whole: bool) {
         let g = self.next_gen();
-        self.tree = Some(SemTree::build(dom, inputs, g));
+        self.tree = Some(self.build(dom, inputs, g, whole));
         self.seq += 1;
         for s in &mut self.sessions {
             s.ring = Ring::new(RING_CAP, self.seq);
@@ -146,12 +146,18 @@ impl Agents {
         self.tree.is_some()
     }
 
+    /// The tree, once it is whole.
     pub fn tree(&self) -> Option<&SemTree> {
-        self.tree.as_ref()
+        self.tree.as_ref().filter(|t| !t.is_partial())
     }
 
     pub(crate) fn tree_mut(&mut self) -> Option<&mut SemTree> {
-        self.tree.as_mut()
+        self.tree.as_mut().filter(|t| !t.is_partial())
+    }
+
+    /// The page generation of the references handed out; 0 with no session.
+    pub fn page_gen(&self) -> u32 {
+        self.tree.as_ref().map_or(0, SemTree::page_gen)
     }
 
     pub(crate) fn has_session(&self, id: SessionId) -> bool {
@@ -175,13 +181,14 @@ impl Agents {
     /// Brings the tree up to date with the DOM and puts what changed into
     /// every session's ring; the sequence advances when anything did.
     pub fn sync(&mut self, dom: &mut Dom, inputs: Inputs) -> u64 {
+        self.settle(dom, inputs, true);
         let Some(t) = self.tree.as_mut() else {
             return self.seq;
         };
         self.deltas.clear();
         if !t.sync(dom, inputs, &mut self.deltas) {
             // the DOM's record overflowed: freed slots may have gone unseen
-            self.rebuild(dom, inputs);
+            self.rebuild(dom, inputs, true);
             return self.seq;
         }
         if !self.deltas.is_empty() {
@@ -218,7 +225,12 @@ impl Agents {
         opts: ViewOpts,
     ) -> Result<(u64, View), AgentError> {
         self.check(id)?;
-        let seq = self.sync(dom, inputs);
+        let page_outline = matches!(kind, ViewKind::Outline) && opts.scope == Scope::Page;
+        self.settle(dom, inputs, !page_outline);
+        let seq = match self.tree.as_ref().is_some_and(SemTree::is_partial) {
+            true => self.seq,
+            false => self.sync(dom, inputs),
+        };
         let t = self.check(id)?;
         let v = match kind {
             ViewKind::Outline => t.outline(dom, inputs, opts),

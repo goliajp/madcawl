@@ -97,7 +97,7 @@ impl Page {
             owner,
             last_used: Instant::now(),
             doc,
-            agents: Agents::sharing_generations(&PAGE_GENS),
+            agents: Agents::sharing_generations(&PAGE_GENS).deferring(),
             session: 0,
             conn: None,
             net: net.cloned(),

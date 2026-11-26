@@ -12,7 +12,8 @@
 //!
 //! None of it exists until an agent attaches: `Agents` holds no tree,
 //! the DOM records no changes, nothing is allocated. The first session
-//! builds the tree whole; after that it follows the DOM's change record
+//! builds the tree whole (or, for a host that asks, only as far as the
+//! page outline reads it, the rest on the first request for more); after that it follows the DOM's change record
 //! and recomputes only what a change can reach; the last session to go
 //! releases it.
 //!
@@ -35,10 +36,12 @@ mod html_table;
 mod index;
 mod name;
 mod native;
+mod partial;
 mod pool;
 mod protocol;
 pub mod record;
 mod refs;
+mod request;
 mod ring;
 mod role;
 mod states;

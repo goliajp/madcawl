@@ -25,7 +25,7 @@ pub(crate) fn env(shared: &Shared, owner: u32) -> Env<'_> {
 }
 
 fn page_gen(p: &Page) -> u32 {
-    p.agents.tree().map_or(0, |t| t.page_gen())
+    p.agents.page_gen()
 }
 
 fn us(from: Instant, to: Instant) -> u64 {

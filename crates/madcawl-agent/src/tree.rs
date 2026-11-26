@@ -14,9 +14,9 @@ use crate::cx::Cx;
 use crate::geom::Geometry;
 use crate::index::AttrIndex;
 use crate::name::Source;
+use crate::partial::Fill;
 use crate::pool::Pool;
 use crate::record::*;
-use crate::role::Role;
 use crate::text::{attr_string, collapsed, id_list, text_content};
 
 /// The most DOM changes kept between two syncs; past it the tree is read
@@ -77,11 +77,17 @@ pub struct SemTree {
     pub(crate) inputs_versions: (u64, u64),
     /// Control state an agent's actions set
     pub(crate) controls: Controls,
+    /// Only what the page outline reads is computed yet (`partial.rs`)
+    pub(crate) partial: bool,
 }
 
 impl SemTree {
     /// Starts observing the DOM and builds every record.
     pub fn build(dom: &mut Dom, inputs: Inputs, page_gen: u32) -> SemTree {
+        SemTree::build_as(dom, inputs, page_gen, Fill::Whole)
+    }
+
+    pub(crate) fn build_as(dom: &mut Dom, inputs: Inputs, page_gen: u32, fill: Fill) -> SemTree {
         dom.observe(MUTATION_CAP);
         let mut t = SemTree {
             records: Vec::new(),
@@ -97,11 +103,12 @@ impl SemTree {
             muts: Vec::new(),
             inputs_versions: inputs.versions(),
             controls: Controls::default(),
+            partial: fill == Fill::Outline,
         };
-        let doc = dom.document();
-        t.ids.add_subtree(dom, doc, &mut Vec::new());
-        t.label_for.add_subtree(dom, doc, &mut Vec::new());
-        t.build_all(dom, inputs);
+        if fill == Fill::Whole {
+            t.build_indexes(dom);
+        }
+        t.build_all(dom, inputs, fill);
         t
     }
 
@@ -110,7 +117,7 @@ impl SemTree {
         dom.unobserve();
     }
 
-    fn build_all(&mut self, dom: &Dom, inputs: Inputs) {
+    pub(crate) fn build_all(&mut self, dom: &Dom, inputs: Inputs, fill: Fill) {
         let doc = dom.document();
         let mut order = vec![doc];
         order.extend(dom.descendants(doc));
@@ -126,8 +133,8 @@ impl SemTree {
         for n in order {
             let i = n.index() as usize;
             let up = dom.parent(n).is_some_and(|p| clear[p.index() as usize]);
-            clear[i] = up || self.opaque_zero(inputs, dom, n);
-            let r = self.compute(dom, inputs, n, clear[i]);
+            clear[i] = fill != Fill::Rest && (up || self.opaque_zero(inputs, dom, n));
+            let r = self.fill(fill, dom, inputs, n, clear[i]);
             self.put(n.index(), r);
         }
         self.pool.trim();
@@ -178,22 +185,12 @@ impl SemTree {
     /// The record of `n`, a node in the document; its pool strings are
     /// counted for it.
     pub(crate) fn compute(&mut self, dom: &Dom, inputs: Inputs, n: NodeId, clear: bool) -> Record {
-        let computed = {
+        let computed = self.classify(dom, inputs, n).map(|(role, level)| {
             let cx = self.cx(dom, inputs);
-            let (role, level) = cx.role_of(n);
-            // the text of a script, a style, a title is not read
-            let unread_text = role == Role::Text
-                && dom.parent(n).is_some_and(|p| {
-                    dom.kind(p) == NodeKind::Element && cx.role_of(p).0 == Role::None
-                });
-            if role == Role::None || unread_text {
-                None
-            } else {
-                let (name, src) = cx.name_of(n, role);
-                let (flags, value) = cx.states(n, role);
-                Some((role, level, name, src, flags, value))
-            }
-        };
+            let (name, src) = cx.name_of(n, role);
+            let (flags, value) = cx.states(n, role);
+            (role, level, name, src, flags, value)
+        });
         let Some((role, level, name, src, flags, value)) = computed else {
             self.unregister_refs(n);
             return Record {

@@ -2,6 +2,7 @@
 //! kept up to date from the DOM's change record: names follow
 //! `aria-labelledby` and `label for` through it.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::rc::Rc;
@@ -58,6 +59,10 @@ pub(crate) struct AttrIndex {
     /// The value is one allocation, shared by both maps
     by_value: HashMap<Rc<str>, Nodes>,
     of: HashMap<NodeId, Rc<str>, BuildHasherDefault<SlotHasher>>,
+    /// The document is not indexed yet (`build`): a lookup finds nothing
+    /// and is marked missed
+    unbuilt: bool,
+    missed: Cell<bool>,
 }
 
 impl AttrIndex {
@@ -67,6 +72,27 @@ impl AttrIndex {
             only,
             by_value: HashMap::new(),
             of: HashMap::default(),
+            unbuilt: true,
+            missed: Cell::new(false),
+        }
+    }
+
+    /// Indexes the whole document, unless it is already.
+    pub fn build(&mut self, dom: &Dom) {
+        if self.unbuilt {
+            self.add_subtree(dom, dom.document(), &mut Vec::new());
+            self.unbuilt = false;
+        }
+    }
+
+    /// A lookup found the document not indexed yet since the last call.
+    pub fn take_missed(&self) -> bool {
+        self.missed.replace(false)
+    }
+
+    fn look(&self) {
+        if self.unbuilt {
+            self.missed.set(true);
         }
     }
 
@@ -146,16 +172,19 @@ impl AttrIndex {
 
     /// The first element in tree order with the value.
     pub fn first(&self, dom: &Dom, value: &str) -> Option<NodeId> {
+        self.look();
         let list = self.by_value.get(value)?.as_slice();
         list.iter().copied().min_by(|&a, &b| tree_order(dom, a, b))
     }
 
     /// Every element with the value.
     pub fn all(&self, value: &str) -> &[NodeId] {
+        self.look();
         self.by_value.get(value).map_or(&[], Nodes::as_slice)
     }
 
     pub fn value_of(&self, n: NodeId) -> Option<&str> {
+        self.look();
         self.of.get(&n).map(|v| &**v)
     }
 
