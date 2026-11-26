@@ -5,3 +5,4 @@ pub(crate) mod document;
 pub(crate) mod element;
 pub(crate) mod event_target;
 pub(crate) mod node;
+pub(crate) mod parent;

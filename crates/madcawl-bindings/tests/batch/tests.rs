@@ -50,3 +50,8 @@ fn a_dom_exception_carries_name_message_and_code() {
 fn a_closed_host_leaves_a_sound_dom() {
     batch::a_closed_host_leaves_a_sound_dom::<E>();
 }
+
+#[test]
+fn timers_and_microtasks_run_on_the_event_loop() {
+    batch::timers_and_microtasks_run_on_the_event_loop::<E>();
+}

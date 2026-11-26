@@ -43,6 +43,7 @@ fn legacy_code(name: &str) -> u16 {
         "HierarchyRequestError" => 3,
         "InvalidCharacterError" => 5,
         "NotFoundError" => 8,
+        "SyntaxError" => 12,
         "QuotaExceededError" => 22,
         _ => 0,
     }
@@ -75,6 +76,12 @@ impl<E: Engine> IntoJs<E> for u16 {
     }
 }
 
+impl<E: Engine> IntoJs<E> for f64 {
+    fn into_js(self, _: &mut E, _: &mut DomHost<E>) -> Owned<E::Value> {
+        plain::<E>(E::number(self))
+    }
+}
+
 impl<E: Engine> IntoJs<E> for DomString {
     fn into_js(self, e: &mut E, _: &mut DomHost<E>) -> Owned<E::Value> {
         e.string(self)
@@ -93,6 +100,25 @@ impl<E: Engine, T: IntoJs<E>> IntoJs<E> for Option<T> {
             Some(x) => x.into_js(e, h),
             None => plain::<E>(E::null()),
         }
+    }
+}
+
+/// A list made when asked for, as an array of wrappers: what an
+/// operation returns until `NodeList` and `HTMLCollection` are bound.
+pub(crate) struct StaticList(pub Vec<NodeId>);
+
+impl<E: Engine> IntoJs<E> for StaticList {
+    fn into_js(self, e: &mut E, h: &mut DomHost<E>) -> Owned<E::Value> {
+        let items: Vec<Owned<E::Value>> = self.0.into_iter().map(|n| h.wrap(e, n)).collect();
+        let global = e.global(h.realm);
+        let array = e.get(h, global.get(), Key::Str(&DomString::from_wtf8(b"Array")));
+        let of = e.get(h, array.get(), Key::Str(&DomString::from_wtf8(b"of")));
+        let values: Vec<E::Value> = items.iter().map(Owned::get).collect();
+        let r = e.call(h, of.get(), array.get(), &values);
+        for v in items.into_iter().chain([of, array, global]) {
+            e.release(v);
+        }
+        r
     }
 }
 

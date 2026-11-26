@@ -19,7 +19,8 @@ The parser reads the subset of Web IDL the files use: interfaces with
 a parent, constants, attributes, operations with optional arguments and
 defaults, nullable types, and extended attribute lists (only
 `[HostOps]` on an interface, `[Atom]` on an argument, and
-`[CEReactions]` and `[NewObject]` on a member are acted on).
+`[CEReactions]` and `[NewObject]` on a member are acted on;
+`[StaticList]` documents a list result).
 A `[Atom] DOMString` argument is a name, such as an event type: the
 implementation gets an atom made from the value, with no string block
 for a short string.
@@ -119,6 +120,9 @@ def convert(t, v, names):
 
 
 STRINGS = ('DOMString', 'DOMString?', '[Atom] DOMString')
+# list types a [StaticList] operation returns: the implementation gives a
+# `cv::StaticList`, made an array of wrappers
+LISTS = ('NodeList', 'HTMLCollection')
 
 
 def idl_type(t, names):
@@ -132,6 +136,8 @@ def idl_type(t, names):
         return 'Callback'
     if t.rstrip('?') in names:
         return 'NullableObject' if t.endswith('?') else 'Object'
+    if t in LISTS:
+        return 'Object'
     sys.exit(f'unsupported IDL type: {t}')
 
 

@@ -12,11 +12,14 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+# querySelector matches with the cascade's selector matcher
+madcawl-css = { path = "../madcawl-css" }
 madcawl-dom = { path = "../madcawl-dom" }
+# the parser runs scripts as it reaches them (parse.rs)
+madcawl-html = { path = "../madcawl-html" }
 madcawl-js = { path = "../madcawl-js" }
 madcawl-str = { path = "../madcawl-str" }
 
 # the binding tests run on the stub engine
 [dev-dependencies]
-madcawl-html = { path = "../madcawl-html" }
 madcawl-js-stub = { path = "../madcawl-js-stub" }

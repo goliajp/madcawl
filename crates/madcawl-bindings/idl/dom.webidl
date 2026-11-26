@@ -48,12 +48,22 @@ interface Element : Node {
   readonly attribute DOMString localName;
   readonly attribute DOMString tagName;
 
-  // reflected attributes are readonly until attributes can be set
-  readonly attribute DOMString id;
+  [CEReactions] attribute DOMString id;
   readonly attribute DOMString className;
 
   DOMString? getAttribute(DOMString qualifiedName);
   boolean hasAttribute(DOMString qualifiedName);
+  [CEReactions] undefined setAttribute(DOMString qualifiedName, DOMString value);
+
+  // the ChildNode mixin, on Element only until text nodes are bound
+  [CEReactions] undefined remove();
+
+  // the ParentNode mixin; [StaticList] (not in the standard) marks a
+  // list made when called, an array, until NodeList and HTMLCollection
+  // are bound: getElementsByTagName's is not live
+  Element? querySelector(DOMString selectors);
+  [StaticList] NodeList querySelectorAll(DOMString selectors);
+  [StaticList] HTMLCollection getElementsByTagName(DOMString qualifiedName);
 };
 
 [Exposed=Window]
@@ -66,4 +76,12 @@ interface Document : Node {
   [NewObject] Node createComment(DOMString data);
 
   Element? getElementById(DOMString elementId);
+
+  Element? querySelector(DOMString selectors);
+  [StaticList] NodeList querySelectorAll(DOMString selectors);
+  [StaticList] HTMLCollection getElementsByTagName(DOMString qualifiedName);
+
+  // one string, not the standard's variadic list, until variadic
+  // arguments are bound
+  [CEReactions] undefined write(DOMString text);
 };

@@ -9,6 +9,7 @@ use madcawl_js::{
 };
 use madcawl_str::{Atom, HeldAtoms};
 
+use crate::event_loop::EventLoop;
 use crate::generated::{DocumentClass, ElementClass, NodeClass};
 
 pub(crate) struct Listener<E: Engine> {
@@ -28,6 +29,13 @@ pub struct DomHost<E: Engine> {
     pub reported: u32,
     freed: Vec<NodeId>,
     suspects: Vec<NodeId>,
+    pub(crate) event_loop: EventLoop<E>,
+    /// The parser, while `parse_document` runs.
+    pub(crate) parser: Option<Box<crate::parse::Parser>>,
+    pub(crate) loader: Option<crate::parse::Loader>,
+    /// The window's listeners: the window lives as long as the host, so
+    /// they are roots.
+    pub(crate) window_listeners: Vec<(Atom, Root<E>)>,
 }
 
 impl<E: Engine> DomHost<E> {
@@ -41,6 +49,10 @@ impl<E: Engine> DomHost<E> {
             reported: 0,
             freed: Vec::new(),
             suspects: Vec::new(),
+            event_loop: EventLoop::new(),
+            parser: None,
+            loader: None,
+            window_listeners: Vec::new(),
         }
     }
 
@@ -172,6 +184,8 @@ impl<E: Engine> DomHost<E> {
     /// preserved wrappers, the realm. What script still holds is the
     /// engine's to free.
     pub fn close(mut self, e: &mut E) {
+        self.close_loop(e);
+        self.close_window(e);
         for (_, list) in std::mem::take(&mut self.listeners) {
             for mut l in list {
                 l.callback.clear(e);
