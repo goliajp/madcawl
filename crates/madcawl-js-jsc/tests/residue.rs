@@ -1,10 +1,11 @@
 //! Dropped collections and the trees they hold are freed by a full
 //! collection, batch after batch, on a page that keeps two others. The
-//! test has a binary of its own, so one engine runs in the process: a
-//! dropped tree left over a full collection has been seen only with
-//! several engines running in one process (parallel test threads), and
-//! its root is not identified. Here no tree may be left after any batch,
-//! and one that is names its round.
+//! test has a binary of its own, so one engine runs in the process: with
+//! several engines on threads of one process the framework now and then
+//! keeps one dropped tree past every later full collection, also when
+//! the other threads call nothing but the framework's own C interface;
+//! with one engine per process it has not been seen. Here no tree may be
+//! left after any batch, and one that is names its round.
 
 use madcawl_bindings::DomHost;
 use madcawl_dom::{Dom, NodeId};
