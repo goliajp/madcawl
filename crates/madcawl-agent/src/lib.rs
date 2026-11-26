@@ -60,7 +60,7 @@ pub use role::Role;
 pub use sync::Delta;
 pub use target::{Check, pick_point, scroll_into_view};
 pub use text::estimate_tokens;
-pub use tree::{Inputs, MUTATION_CAP, SemTree};
+pub use tree::{Inputs, MAX_NAME, MUTATION_CAP, SemTree};
 pub use view::{Query, Scope, View, ViewOpts};
 
 /// The record of a node and its name, for checking a tree against

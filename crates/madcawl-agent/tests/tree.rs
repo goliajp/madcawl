@@ -179,3 +179,25 @@ fn the_tree_kept_up_to_date_reads_as_one_built_fresh() {
     let rec = madcawl_agent::role_and_name(&fresh, h).unwrap();
     assert_eq!(rec, (Role::Heading, "New title".to_owned()));
 }
+
+#[test]
+fn a_name_past_the_cap_is_cut_at_a_character_boundary() {
+    // one 42 KB element named three times over: a name of 126 KB
+    let big = "語".repeat(14_000);
+    let mut p = Page::new(&format!(
+        r#"<meta charset=utf-8><span id=l>{big}</span>
+        <div role=button id=b aria-labelledby="l l l">x</div>"#
+    ));
+    p.attach();
+    let b = p.by_id("b");
+    let (role, name) = madcawl_agent::role_and_name(p.agents.tree().unwrap(), b).unwrap();
+    assert_eq!(role, Role::Button);
+    assert!(name.len() <= madcawl_agent::MAX_NAME, "{}", name.len());
+    assert!(name.len() > madcawl_agent::MAX_NAME - 8);
+    let tail: String = name.chars().rev().take(5).collect();
+    assert!(
+        name.starts_with(&big[..30]) && name.ends_with('…'),
+        "{:?} {tail:?}",
+        &name[..30]
+    );
+}

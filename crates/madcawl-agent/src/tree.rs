@@ -23,6 +23,24 @@ use crate::text::{attr_string, collapsed, id_list, text_content};
 /// again whole.
 pub const MUTATION_CAP: usize = 1 << 16;
 
+/// The longest name or value a record keeps, in bytes: names are
+/// computed (an `aria-labelledby` may name one large element many times
+/// over), so the DOM's byte limit does not bound them
+pub const MAX_NAME: usize = 64 << 10;
+
+/// `s` cut to `MAX_NAME` bytes at a character boundary, ending in `…`
+/// when it was longer.
+fn capped(s: &str) -> std::borrow::Cow<'_, str> {
+    if s.len() <= MAX_NAME {
+        return s.into();
+    }
+    let mut at = MAX_NAME - '…'.len_utf8();
+    while !s.is_char_boundary(at) {
+        at -= 1;
+    }
+    format!("{}…", &s[..at]).into()
+}
+
 /// What records are computed from besides the DOM.
 #[derive(Clone, Copy, Default)]
 pub struct Inputs<'a> {
@@ -94,19 +112,25 @@ impl SemTree {
 
     fn build_all(&mut self, dom: &Dom, inputs: Inputs) {
         let doc = dom.document();
-        let mut clear: Vec<bool> = Vec::new();
         let mut order = vec![doc];
         order.extend(dom.descendants(doc));
+        // one record per slot up to the highest, allocated once
+        let slots = order
+            .iter()
+            .map(|n| n.index() as usize + 1)
+            .max()
+            .unwrap_or(0);
+        self.records
+            .reserve_exact(slots.saturating_sub(self.records.len()));
+        let mut clear = vec![false; slots];
         for n in order {
             let i = n.index() as usize;
-            if clear.len() <= i {
-                clear.resize(i + 1, false);
-            }
             let up = dom.parent(n).is_some_and(|p| clear[p.index() as usize]);
             clear[i] = up || self.opaque_zero(inputs, dom, n);
             let r = self.compute(dom, inputs, n, clear[i]);
             self.put(n.index(), r);
         }
+        self.pool.trim();
     }
 
     pub(crate) fn opaque_zero(&self, inputs: Inputs, dom: &Dom, n: NodeId) -> bool {
@@ -194,8 +218,8 @@ impl SemTree {
         }
         self.register_refs(dom, n);
         Record {
-            name: self.pool.intern(&name),
-            value: value.map_or(0, |v| self.pool.intern(&v)),
+            name: self.pool.intern(&capped(&name)),
+            value: value.map_or(0, |v| self.pool.intern(&capped(&v))),
             generation: 0,
             role,
             level,
@@ -270,5 +294,23 @@ impl SemTree {
             + refs * 2
             + self.muts.capacity() * size_of::<Mutation>()
             + self.controls.bytes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_NAME, capped};
+
+    #[test]
+    fn a_long_name_is_cut_at_a_character_boundary() {
+        assert_eq!(capped("short"), "short");
+        let exact = "a".repeat(MAX_NAME);
+        assert_eq!(capped(&exact).len(), MAX_NAME);
+        // three-byte characters: the cut cannot fall on the limit itself
+        let long = "語".repeat(MAX_NAME);
+        let c = capped(&long);
+        assert!(c.len() <= MAX_NAME && c.len() > MAX_NAME - 6, "{}", c.len());
+        assert!(c.ends_with('…'));
+        assert!(c[..c.len() - '…'.len_utf8()].chars().all(|ch| ch == '語'));
     }
 }
