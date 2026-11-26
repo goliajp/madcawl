@@ -4,6 +4,8 @@
 //! one live host per isolate requires, and gives it up with its DOM once
 //! loaded.
 
+use std::time::Duration;
+
 use madcawl_bindings::DomHost;
 use madcawl_dom::Dom;
 use madcawl_js_jsc::Jsc;
@@ -54,6 +56,11 @@ impl ScriptPage for JscPage {
             ran += n;
         }
         h.is_loaded()
+    }
+
+    fn due(&self) -> Option<Duration> {
+        let h = self.h.as_ref().expect("a host until the DOM is taken");
+        h.next_work_in().map(Duration::from_nanos)
     }
 
     fn into_dom(mut self: Box<Self>) -> Dom {

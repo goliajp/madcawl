@@ -8,7 +8,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use madcawl_mcp::json::{self, Value};
 use madcawl_shell::serve::{Config, Server};
@@ -26,6 +26,14 @@ document.addEventListener('error', e => log('error:' + e.target.getAttribute('sr
 <script src=/missing.js></script>
 <script>log('inline:' + document.currentScript.localName)</script>
 </body>"#;
+
+/// A page that never loads: each script's fetch fails at once, and its
+/// `error` handler adds another such script.
+const ENDLESS: &str = r#"<!doctype html><title>Endless</title><script>
+function f() { var s = document.createElement('script'); s.src = 'about:blank';
+s.onerror = () => { s.remove(); f(); }; document.querySelector('head').appendChild(s); }
+f();
+</script>"#;
 
 fn respond(s: &mut TcpStream, status: &str, extra: &str, body: &[u8]) {
     let head = format!("HTTP/1.1 {status}\r\nConnection: close\r\n{extra}Content-Length: {}\r\n\r\n", body.len());
@@ -50,6 +58,7 @@ fn handle(mut s: TcpStream) {
         "/" => respond(&mut s, "200 OK", "Content-Type: text/html; charset=utf-8\r\nSet-Cookie: sid=k1; Path=/\r\n", PAGE.as_bytes()),
         "/blocking.js" if cookie.contains("sid=k1") => respond(&mut s, "200 OK", JS, b"log('blocking:' + document.currentScript.getAttribute('src'))"),
         "/blocking.js" => respond(&mut s, "200 OK", JS, b"log('blocking-without-the-cookie')"),
+        "/endless" => respond(&mut s, "200 OK", "Content-Type: text/html\r\n", ENDLESS.as_bytes()),
         "/defer.js" => respond(&mut s, "200 OK", JS, b"log('defer')"),
         "/slow.js" => {
             std::thread::sleep(Duration::from_millis(300));
@@ -121,6 +130,21 @@ fn a_page_s_scripts_come_over_its_connection_and_run_in_order_before_it_is_read(
     for js in ["/blocking.js", "/slow.js", "/defer.js", "/missing.js"] {
         assert!(log.lines().any(|l| l.contains("script") && l.contains(js)), "{js} in the request log: {log}");
     }
+}
+
+#[test]
+fn a_page_whose_scripts_never_let_it_load_still_returns_each_call_in_time() {
+    let origin = site();
+    let mut h = Host::start();
+    let opened = h.call("open", &format!("{{\"path\":{}}}", json::s(&format!("{origin}/")).to_json()));
+    let page = opened.split_whitespace().nth(1).unwrap().to_owned();
+    let to = json::s(&format!("{origin}/endless")).to_json();
+    let t0 = Instant::now();
+    let acted = h.call("act", &format!(r#"{{"page":"{page}","action":"navigate","value":{to},"timeout_ms":1500}}"#));
+    assert!(acted.contains("not stable after 1500 ms") && acted.contains("its window has not loaded"), "{acted}");
+    let waited = h.call("wait", &format!(r#"{{"page":"{page}","timeout_ms":500}}"#));
+    assert!(waited.contains("its window has not loaded"), "{waited}");
+    assert!(t0.elapsed() < Duration::from_secs(10), "two calls of 1.5 s and 0.5 s took {:?}", t0.elapsed());
 }
 
 /// The executable with `--isolate`: the page lives in a content process

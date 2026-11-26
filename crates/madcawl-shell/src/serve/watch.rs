@@ -1,6 +1,6 @@
 //! The watchdog of a session's request loop, which is the main thread of
 //! a content process. Each request is timed and split into named stages
-//! (parse, style, layout, agent, network, paint); a request that
+//! (parse, style, layout, agent, network, script, paint); a request that
 //! took longer than the slow threshold gets one line naming the stages
 //! that took the time, and while a request is still running, a thread of
 //! the watchdog's own says so once at the slow threshold and once more at

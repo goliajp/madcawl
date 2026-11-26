@@ -5,7 +5,7 @@
 //! what has arrived kept, so a wait that runs out can be taken up again.
 
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use madcawl_css::style::{SheetSource, sheet_sources};
 use madcawl_dom::Dom;
@@ -21,6 +21,8 @@ use crate::load::MAX_FILE;
 
 /// The most stylesheets one document has fetched.
 pub const MAX_SHEETS: usize = 32;
+/// The shortest read between two turns of a page's scripts.
+const MIN_READ: Duration = Duration::from_millis(1);
 
 pub(crate) struct Pending {
     pub what: &'static str,
@@ -189,7 +191,9 @@ impl Loader {
             if matches!(self.stage, Stage::Idle) {
                 return Ok(Loaded::Pending);
             }
-            let Some(f) = conn.next(deadline)? else { return Ok(Loaded::Pending) };
+            let Some(f) = conn.next(self.read_until(deadline))? else {
+                if Instant::now() >= deadline { return Ok(Loaded::Pending) } else { continue }
+            };
             let id = f.get_num(tag::ID).unwrap_or(0);
             if let Some((_, p)) = self.inflight.iter_mut().find(|(i, p)| *i == id && !p.done) {
                 p.take(&f);
@@ -198,6 +202,13 @@ impl Loader {
                 }
             }
         }
+    }
+
+    /// Until `deadline`, or until the page's scripts have work but at
+    /// least `MIN_READ`: a busy page still has its fetches read.
+    fn read_until(&self, deadline: Instant) -> Instant {
+        let Stage::Scripts(s) = &self.stage else { return deadline };
+        s.due().map_or(deadline, |d| deadline.min(Instant::now() + d.max(MIN_READ)))
     }
 
     fn done(&self, id: u64) -> bool {

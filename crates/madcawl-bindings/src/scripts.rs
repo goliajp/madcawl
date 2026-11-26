@@ -134,22 +134,10 @@ pub(crate) fn is_script(dom: &madcawl_dom::Dom, n: NodeId) -> bool {
 /// A JavaScript MIME type essence, ASCII case-insensitive.
 fn is_js_type(t: &str) -> bool {
     const TYPES: [&str; 16] = [
-        "application/ecmascript",
-        "application/javascript",
-        "application/x-ecmascript",
-        "application/x-javascript",
-        "text/ecmascript",
-        "text/javascript",
-        "text/javascript1.0",
-        "text/javascript1.1",
-        "text/javascript1.2",
-        "text/javascript1.3",
-        "text/javascript1.4",
-        "text/javascript1.5",
-        "text/jscript",
-        "text/livescript",
-        "text/x-ecmascript",
-        "text/x-javascript",
+        "application/ecmascript", "application/javascript", "application/x-ecmascript", "application/x-javascript",
+        "text/ecmascript", "text/javascript", "text/javascript1.0", "text/javascript1.1", "text/javascript1.2",
+        "text/javascript1.3", "text/javascript1.4", "text/javascript1.5", "text/jscript", "text/livescript",
+        "text/x-ecmascript", "text/x-javascript",
     ];
     TYPES.iter().any(|x| x.eq_ignore_ascii_case(t))
 }
@@ -276,6 +264,15 @@ impl<E: Engine> DomHost<E> {
         }
         p.result = Some(text);
         self.event_loop.tasks.push_back(Task::Script(ScriptTask::Fetched(id)));
+    }
+
+    /// Nanoseconds until the window has something to run: 0 with a task
+    /// or a source request waiting, else the next timer's, if any.
+    pub fn next_work_in(&self) -> Option<u64> {
+        if !self.scripts.requests.is_empty() || !self.event_loop.tasks.is_empty() {
+            return Some(0);
+        }
+        self.event_loop.next_due_in()
     }
 
     /// How many script sources are awaited.
