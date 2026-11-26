@@ -1,7 +1,9 @@
 //! The network service in a process of its own (`--isolate`), which the
 //! host starts again when it ends: pages loaded before stay as they
-//! were, later loads go to the new process, and a process that keeps
-//! ending is not started a fourth time within a minute.
+//! were, later loads go to the new process, each session with pages
+//! from the network is told once that its cookies went with the old
+//! process, and a process that keeps ending is not started a fourth time
+//! within a minute.
 
 mod isolate;
 
@@ -35,7 +37,12 @@ fn killing_the_network_process_keeps_loaded_pages_and_later_loads_work() {
     assert!(until(10, || stat(&f, "netd-restarts") == 1), "the network process is started again");
     let second = stat(&f, "netd-pid") as i32;
     assert_ne!(first, second);
-    assert_eq!(read(&mut m, &p), before, "a page loaded before the crash is as it was");
+    let after = read(&mut m, &p);
+    let told = |l: &str| l.contains("network process was restarted") && l.contains("cookies");
+    assert_eq!(after.lines().filter(|l| told(l)).count(), 1, "the session is told its cookies went: {after}");
+    let rest: Vec<&str> = after.lines().filter(|l| !told(l)).collect();
+    assert_eq!(rest.join("\n"), before, "a page loaded before the crash is as it was");
+    assert_eq!(read(&mut m, &p), before, "told once");
     let login = m.ok("open", &path_arg(&format!("{origin}/login")));
     assert!(login.contains("Log in"), "a load after the crash goes to the new process: {login}");
 }

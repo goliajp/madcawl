@@ -4,7 +4,8 @@
 //! it when it ends. Requests in flight when it ends fail; the pages
 //! already loaded keep their documents; the next request a page makes
 //! connects to the new process. Cookie partitions live in that process's
-//! memory, so a restart empties every session's jar. A process that
+//! memory, so a restart empties every session's jar; each session that
+//! had cookies is told so in its next reply. A process that
 //! ends three times in a minute is not started again: the pages stay as
 //! they are and loads from the network fail until the host restarts.
 
@@ -132,6 +133,7 @@ pub(crate) fn start(spec: Spec, net: impl FnOnce(UnixStream, i32) -> io::Result<
 /// <per-file> <total>]`, with the control channel on standard input: the
 /// network process. It exits with its host.
 pub fn child_main(args: &[&str]) -> ExitCode {
+    super::orphan::close_inherited_fds();
     let parsed = match args {
         [socket, "--partitions", n] => n.parse().ok().map(|n| (socket, n, None)),
         [socket, "--partitions", n, "--downloads", dir, per, total] => match (n.parse(), per.parse(), total.parse()) {
@@ -171,8 +173,22 @@ fn serve(socket: &Path, partitions: usize, downloads: Option<(PathBuf, u64, u64)
     serve_guarded(listener, control, client, ServerLimits::default(), d)
 }
 
+unsafe extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+}
+
 impl Process {
     pub fn pid(&self) -> i32 {
         self.pid.load(Ordering::SeqCst)
+    }
+
+    /// Kills the network process, which this host started; its
+    /// supervisor then finds the host's network gone and starts no other.
+    pub fn kill(&self) {
+        let pid = self.pid.swap(0, Ordering::SeqCst);
+        if pid > 0 {
+            // SAFETY: kill only sends a signal, to the process this host started
+            unsafe { kill(pid, 9) };
+        }
     }
 }

@@ -1,5 +1,6 @@
 //! A process the host starts ends with the host: a thread blocked in
-//! `kevent` on the parent's exit, which costs no wakeups until then.
+//! `kevent` on the parent's exit, which costs no wakeups until then. It
+//! keeps none of the host's descriptors but its standard three.
 
 use std::io;
 
@@ -22,6 +23,7 @@ unsafe extern "C" {
     fn kqueue() -> i32;
     fn kevent(kq: i32, changes: *const Kevent, nchanges: i32, events: *mut Kevent, nevents: i32, timeout: *const core::ffi::c_void) -> i32;
     fn getppid() -> i32;
+    fn getpid() -> i32;
     fn close(fd: i32) -> i32;
 }
 
@@ -45,6 +47,21 @@ fn wait_exit(pid: i32) -> io::Result<()> {
         // SAFETY: the queue is this function's own
         unsafe { close(kq) };
         return if n < 0 { Err(e) } else { Ok(()) };
+    }
+}
+
+/// Closes every descriptor above standard error, which a child of the
+/// host inherited without asking for it (a listening socket handed to
+/// the host, say); called first thing, before any thread starts.
+pub(crate) fn close_inherited_fds() {
+    // SAFETY: getpid has no preconditions
+    let fds = match crate::rusage::fds(unsafe { getpid() }) {
+        Ok(f) => f,
+        Err(e) => return eprintln!("madcawl-shell: cannot list the inherited descriptors: {e}"),
+    };
+    for fd in fds.into_iter().filter(|&fd| fd > 2) {
+        // SAFETY: nothing in this process holds these yet
+        unsafe { close(fd) };
     }
 }
 

@@ -26,6 +26,9 @@ pub(super) struct Content {
     buf: Vec<u8>,
 }
 
+/// Answers a content process's question; nothing for a notice.
+pub(super) type Answer<'a> = &'a mut dyn FnMut(&Frame) -> Option<Frame>;
+
 /// Why an answer did not come.
 pub(super) enum Fault {
     /// The process ended; how
@@ -51,6 +54,13 @@ impl Content {
         Ok(Content { child, s: host, buf: Vec::new() })
     }
 
+    /// A handle on `child`, which speaks on `s`, for tests that play the
+    /// content process.
+    #[cfg(test)]
+    pub fn fake(child: Child, s: UnixStream) -> Content {
+        Content { child, s, buf: Vec::new() }
+    }
+
     pub fn pid(&self) -> i32 {
         self.child.id() as i32
     }
@@ -60,8 +70,8 @@ impl Content {
     }
 
     /// The answer to `f`. Questions the process asks meanwhile are
-    /// answered with `answer`.
-    pub fn ask(&mut self, f: &Frame, wait: Duration, answer: &mut dyn FnMut(&Frame) -> Frame) -> Result<Frame, Fault> {
+    /// answered with `answer`, which answers notices with nothing.
+    pub fn ask(&mut self, f: &Frame, wait: Duration, answer: Answer) -> Result<Frame, Fault> {
         let deadline = Instant::now() + wait;
         if write(&mut self.s, f).is_err() {
             return Err(Fault::Ended(self.reap()));
@@ -69,7 +79,9 @@ impl Content {
         loop {
             match read_until(&mut self.s, &mut self.buf, deadline) {
                 Ok(Some(q)) if internal::is_internal(q.kind) => {
-                    if write(&mut self.s, &answer(&q)).is_err() {
+                    if let Some(a) = answer(&q)
+                        && write(&mut self.s, &a).is_err()
+                    {
                         return Err(Fault::Ended(self.reap()));
                     }
                 }
@@ -80,12 +92,22 @@ impl Content {
         }
     }
 
-    /// Reads what the process said while no request was open: `None` when
-    /// it has ended, with how.
-    pub fn idle_read(&mut self) -> Option<String> {
-        match read_until(&mut self.s, &mut self.buf, Instant::now() + Duration::from_millis(50)) {
-            Ok(_) => None,
-            Err(_) => Some(self.reap()),
+    /// Reads what the process said while no request was open (audit
+    /// lines, to `answer`): how it ended, when it has.
+    pub fn idle_read(&mut self, answer: Answer) -> Option<String> {
+        let mut deadline = Instant::now() + Duration::from_millis(50);
+        loop {
+            match read_until(&mut self.s, &mut self.buf, deadline) {
+                Ok(Some(q)) => {
+                    // only notices come while idle: questions wait for a request
+                    if q.kind == internal::AUDIT {
+                        answer(&q);
+                    }
+                    deadline = Instant::now();
+                }
+                Ok(None) => return None,
+                Err(_) => return Some(self.reap()),
+            }
         }
     }
 
@@ -116,7 +138,7 @@ impl Content {
 
     /// Ends the session: the process closes its pages, asking what it
     /// needs on the way, and exits.
-    pub fn finish(mut self, answer: &mut dyn FnMut(&Frame) -> Frame) {
+    pub fn finish(mut self, answer: Answer) {
         if write(&mut self.s, &Frame::new(internal::END)).is_err() {
             self.reap();
             return;
@@ -125,7 +147,9 @@ impl Content {
         loop {
             match read_until(&mut self.s, &mut self.buf, deadline) {
                 Ok(Some(q)) if internal::is_internal(q.kind) => {
-                    let _ = write(&mut self.s, &answer(&q));
+                    if let Some(a) = answer(&q) {
+                        let _ = write(&mut self.s, &a);
+                    }
                 }
                 Ok(Some(_)) => {}
                 Ok(None) => {
@@ -137,6 +161,14 @@ impl Content {
                     return;
                 }
             }
+        }
+    }
+}
+
+impl Drop for Content {
+    fn drop(&mut self) {
+        if let Ok(None) = self.child.try_wait() {
+            self.kill();
         }
     }
 }

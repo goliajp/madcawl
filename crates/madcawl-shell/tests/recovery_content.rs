@@ -3,13 +3,21 @@
 //! session; a process that stops answering or goes over its memory cap
 //! is recovered the same way; one that keeps crashing is braked; frames
 //! of the host's own are refused from agents; an ended session's process
-//! exits.
+//! exits, as every child does when the host is killed; children keep no
+//! descriptor the host did not hand them.
 
 mod isolate;
 
-use isolate::{SIGKILL, SIGSTOP, Session, alive, isolated, long_page, signal, until};
+use isolate::{Fixture, SIGKILL, SIGSTOP, Session, alive, isolated, long_page, signal, until};
 use madcawl_agent::{Frame, kind, tag};
+use madcawl_shell::rusage::fds;
 use std::time::{Duration, Instant};
+
+unsafe extern "C" {
+    fn pipe(fds: *mut i32) -> i32;
+    fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+    fn close(fd: i32) -> i32;
+}
 
 const CRASHED: u64 = 24;
 const HUNG: u64 = 25;
@@ -120,7 +128,7 @@ fn a_content_process_that_keeps_crashing_is_not_started_again_for_its_pages() {
 fn frames_of_the_hosts_own_are_refused_from_an_agent() {
     let f = isolated(false, |_| {});
     let mut s = Session::new(&f);
-    for k in [240u16, 241, 242, 243, 244] {
+    for k in [240u16, 241, 242, 243, 244, 245, 246] {
         let r = s.ask(Frame::new(k).str(tag::URL, &f.page()).num(tag::PAGE, 1));
         assert_eq!((r.kind, r.get_num(tag::CODE)), (kind::ERROR, Some(6)), "kind {k}");
     }
@@ -138,4 +146,59 @@ fn an_ended_sessions_content_process_exits() {
     assert!(until(5, || !alive(pid)), "the content process exits with its session");
     let audit = f.audit();
     assert!(audit.contains("\tclose-session\t"), "{audit}");
+}
+
+/// A descriptor of the test process's, numbered 200 or above, that every
+/// child it starts inherits unless the child closes it.
+fn leaked_fd() -> i32 {
+    const F_DUPFD: i32 = 0;
+    let mut p = [0i32; 2];
+    // SAFETY: pipe fills two descriptors; F_DUPFD copies one without close-on-exec; the originals are closed
+    unsafe {
+        assert_eq!(pipe(p.as_mut_ptr()), 0);
+        let high = fcntl(p[0], F_DUPFD, 200);
+        assert!(high >= 200, "{high}");
+        close(p[0]);
+        close(p[1]);
+        high
+    }
+}
+
+#[test]
+fn content_and_network_processes_keep_no_descriptor_of_the_hosts() {
+    let leaked = leaked_fd();
+    let f = isolated(true, |_| {});
+    let mut s = Session::new(&f);
+    s.open(&f.page());
+    let mut control = std::process::Command::new("/bin/sleep").arg("10").spawn().unwrap();
+    let theirs = fds(control.id() as i32).unwrap();
+    let _ = control.kill();
+    let _ = control.wait();
+    assert!(theirs.contains(&leaked), "the probe sees an inherited descriptor: {theirs:?}");
+    for name in ["content-pid", "netd-pid"] {
+        let list = fds(s.stat(name) as i32).unwrap();
+        assert!(list.starts_with(&[0, 1, 2]) && list.iter().all(|&fd| fd < 200), "{name}: {list:?}");
+    }
+}
+
+#[test]
+fn killing_the_host_ends_its_content_and_network_processes() {
+    let f = Fixture::new();
+    let mut host = std::process::Command::new(env!("CARGO_BIN_EXE_madcawl-shell"))
+        .arg("--serve")
+        .arg(&f.config.socket)
+        .args(["--isolate", "--stats", "--net", "--allow"])
+        .arg(&f.dir)
+        .arg("--audit")
+        .arg(f.dir.join("audit.log"))
+        .spawn()
+        .unwrap();
+    assert!(until(10, || f.config.socket.exists()), "the host listens");
+    let mut s = Session::new(&f);
+    s.open(&f.page());
+    let children = [s.stat("content-pid") as i32, s.stat("netd-pid") as i32];
+    assert!(children.iter().all(|&p| alive(p)));
+    signal(host.id() as i32, SIGKILL);
+    host.wait().unwrap();
+    assert!(until(5, || children.iter().all(|&p| !alive(p))), "children {children:?} outlived the host");
 }

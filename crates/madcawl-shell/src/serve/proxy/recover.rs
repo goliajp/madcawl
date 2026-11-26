@@ -19,6 +19,7 @@ impl Proxy<'_> {
             c.reap();
         }
         self.log("crash", how);
+        self.drop_registrations();
         for id in std::mem::take(&mut self.reserved) {
             self.release(id);
         }
@@ -44,7 +45,7 @@ impl Proxy<'_> {
                 }
                 _ => {
                     done.push(format!("p{} could not be opened again", p.id));
-                    self.release(p.id);
+                    self.lose(p.id);
                 }
             }
         }
@@ -59,14 +60,20 @@ impl Proxy<'_> {
     fn drop_pages(&mut self, why: &str) -> String {
         let gone: Vec<u32> = self.pages.drain(..).map(|p| p.id).collect();
         for &id in &gone {
-            self.release(id);
-            if self.lost.len() == MAX_LOST {
-                self.lost.pop_front();
-            }
-            self.lost.push_back(id);
+            self.lose(id);
         }
         self.log("crash-brake", why);
         let names: Vec<String> = gone.iter().map(|id| format!("p{id}")).collect();
         format!("no new content process was started ({why}); dropped {}; the next request starts one", names.join(" "))
+    }
+
+    /// Gives back a page that could not be kept; requests on it are told
+    /// so from now on.
+    fn lose(&mut self, id: u32) {
+        self.release(id);
+        if self.lost.len() == MAX_LOST {
+            self.lost.pop_front();
+        }
+        self.lost.push_back(id);
     }
 }

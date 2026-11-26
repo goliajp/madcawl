@@ -7,13 +7,18 @@ use std::fs::{File, OpenOptions};
 use std::io::Write as _;
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The longest a name or an origin is written.
 const MAX_FIELD: usize = 120;
 
-pub struct AuditLog(Mutex<File>);
+/// The log file, or in a content process its host, which writes the
+/// lines under the session's number.
+pub enum AuditLog {
+    File(Mutex<File>),
+    Host(Arc<super::link::Link>),
+}
 
 pub struct Line<'a> {
     pub session: u32,
@@ -32,10 +37,19 @@ impl AuditLog {
             .append(true)
             .mode(0o600)
             .open(path)?;
-        Ok(AuditLog(Mutex::new(f)))
+        Ok(AuditLog::File(Mutex::new(f)))
     }
 
     pub fn write(&self, l: &Line) {
+        let f = match self {
+            AuditLog::File(f) => f,
+            AuditLog::Host(link) => {
+                if let Err(e) = link.audit([l.origin, l.action, l.role, l.name, l.result]) {
+                    eprintln!("madcawl-shell: audit line to the host: {e}");
+                }
+                return;
+            }
+        };
         let mut s = String::with_capacity(160);
         s.push_str(&utc_now());
         for (i, v) in [l.origin, l.action, l.role, l.name, l.result]
@@ -51,7 +65,7 @@ impl AuditLog {
         }
         s.push('\n');
         // one write a line, so lines from sessions never interleave
-        let mut f = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut f = f.lock().unwrap_or_else(|e| e.into_inner());
         if let Err(e) = f.write_all(s.as_bytes()) {
             eprintln!("madcawl-shell: audit log: {e}");
         }

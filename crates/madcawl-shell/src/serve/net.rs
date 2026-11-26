@@ -38,8 +38,9 @@ pub struct Net {
     pub process: Option<Process>,
 }
 
-/// The control channel is the host's own; in a content process, the
-/// host it belongs to holds it and passes its frames on.
+/// The control channel is the host's own; a content process has none and
+/// asks its host to register and release its pages' connections, which
+/// the host does only in the session's own partition.
 enum Channel {
     Own(Mutex<Control>),
     Host(Arc<Link>),
@@ -90,15 +91,6 @@ impl Net {
         Net { socket: socket.to_path_buf(), control: Channel::Host(link), replaced: Condvar::new(), downloads, process: None }
     }
 
-    /// One frame on the control channel, sent by a content process of
-    /// this host; the answer, both encoded.
-    pub fn control_encoded(&self, encoded: &[u8]) -> io::Result<Vec<u8>> {
-        let (f, _) = Frame::decode(encoded).map_err(|e| io::Error::other(format!("{e:?}")))?;
-        let mut out = Vec::new();
-        self.control(f)?.encode(&mut out);
-        Ok(out)
-    }
-
     fn own(&self) -> &Mutex<Control> {
         match &self.control {
             Channel::Own(c) => c,
@@ -146,16 +138,7 @@ impl Net {
     /// One request on the control channel. When the network process is
     /// found gone, the request waits for the next one and goes to it.
     fn control(&self, f: Frame) -> io::Result<Frame> {
-        let c = match &self.control {
-            Channel::Own(c) => c,
-            Channel::Host(link) => {
-                let mut out = Vec::new();
-                f.encode(&mut out);
-                let answer = link.net(&out)?;
-                return Frame::decode(&answer).map(|(f, _)| f).map_err(|e| io::Error::other(format!("{e:?}")));
-            }
-        };
-        let mut c = c.lock().unwrap_or_else(|e| e.into_inner());
+        let mut c = self.own().lock().unwrap_or_else(|e| e.into_inner());
         let generation = c.generation;
         match c.request(f.clone()) {
             Err(e) if self.process.is_some() && e.kind() != io::ErrorKind::TimedOut => {
@@ -170,14 +153,35 @@ impl Net {
         }
     }
 
+    /// Which network process the control channel is to, counting from 0;
+    /// a new one starts with every session's cookie jar empty.
+    pub fn generation(&self) -> u64 {
+        self.process.as_ref().map_or(0, |p| u64::from(p.restarts.load(std::sync::atomic::Ordering::SeqCst)))
+    }
+
+    /// Registers a connection of the host's own for agent session
+    /// `session`, in that session's cookie partition; its token, and the
+    /// generation of the network process it was made in.
+    pub fn register(&self, session: u32) -> io::Result<(Vec<u8>, u64)> {
+        let reg = Frame::new(kind::REGISTER).num(tag::NAVIGATION, 1).num(tag::PARTITION, partition_of(session));
+        let r = self.control(reg)?;
+        match (r.kind, r.field(tag::TOKEN)) {
+            (kind::REGISTERED, Some(t)) => Ok((t.to_vec(), self.generation())),
+            _ => Err(io::Error::other(r.get_str(tag::MESSAGE).unwrap_or("not registered").to_owned())),
+        }
+    }
+
+    /// Drops the registration `token`; whether the service knew it.
+    pub fn unregister(&self, token: &[u8]) -> io::Result<bool> {
+        Ok(self.control(Frame::new(kind::UNREGISTER).bytes(tag::TOKEN, token))?.kind == kind::REGISTERED)
+    }
+
     /// A connection of the host's own, for one page of agent session
     /// `session`, in that session's cookie partition.
     pub fn connect(&self, session: u32) -> io::Result<NetConn> {
-        let reg = Frame::new(kind::REGISTER).num(tag::NAVIGATION, 1).num(tag::PARTITION, partition_of(session));
-        let r = self.control(reg)?;
-        let token = match (r.kind, r.field(tag::TOKEN)) {
-            (kind::REGISTERED, Some(t)) => t.to_vec(),
-            _ => return Err(io::Error::other(r.get_str(tag::MESSAGE).unwrap_or("not registered").to_owned())),
+        let token = match &self.control {
+            Channel::Own(_) => self.register(session)?.0,
+            Channel::Host(link) => link.net_register()?,
         };
         let mut s = UnixStream::connect(&self.socket)?;
         s.set_write_timeout(Some(CONTROL_WAIT))?;
@@ -203,7 +207,10 @@ impl Net {
 
     /// Drops a page's registration; its connection is refused after.
     pub fn release(&self, conn: &NetConn) {
-        let _ = self.control(Frame::new(kind::UNREGISTER).bytes(tag::TOKEN, &conn.token));
+        let _ = match &self.control {
+            Channel::Own(_) => self.unregister(&conn.token).map(drop),
+            Channel::Host(link) => link.net_release(&conn.token),
+        };
     }
 
     /// Drops agent session `session`'s cookie partition and its cookies;
@@ -217,6 +224,14 @@ impl Net {
         match r.kind {
             kind::PARTITION_DROP => Ok(r.get_num(tag::OK) == Some(1)),
             _ => Err(io::Error::other(r.get_str(tag::MESSAGE).unwrap_or("not dropped").to_owned())),
+        }
+    }
+}
+
+impl Drop for Net {
+    fn drop(&mut self) {
+        if let Some(p) = &self.process {
+            p.kill();
         }
     }
 }

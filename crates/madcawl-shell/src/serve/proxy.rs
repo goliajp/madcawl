@@ -13,11 +13,21 @@
 //! to requests on them; the session's next request starts a new process.
 //! What a page held beyond its URL and scroll position (history, typed
 //! text) is not restored.
+//!
+//! A content process is not trusted with anything of the host's: it gets
+//! page numbers only up to the session's limit, its word on which pages
+//! it holds counts only for the session's own, and the network service
+//! hears from it only through registrations the host makes in the
+//! session's own cookie partition (`netreg`).
 
 mod content;
+mod netreg;
+mod pages;
 mod recover;
+#[cfg(test)]
+mod tests;
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::os::fd::AsRawFd as _;
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::Ordering;
@@ -33,7 +43,7 @@ use super::{Shared, activation, code, error_frame};
 use content::{Content, Fault};
 
 pub(crate) fn run(id: u32, shared: &Shared, agent: UnixStream) {
-    let mut p = Proxy { id, shared, child: None, pages: Vec::new(), reserved: Vec::new(), lost: VecDeque::new(), crashes: VecDeque::new(), restarts: 0 };
+    let mut p = Proxy::new(id, shared);
     p.serve(agent);
     p.end();
 }
@@ -50,9 +60,23 @@ struct Proxy<'a> {
     lost: VecDeque<u32>,
     crashes: VecDeque<Instant>,
     restarts: u32,
+    /// The session's registrations with the network service, each with
+    /// the generation of the network process it was made in
+    tokens: HashMap<Vec<u8>, u64>,
+    /// The generation of the network process holding the session's
+    /// cookies, once it has any
+    jar: Option<u64>,
+    /// The session's cookies went with a network process that ended, and
+    /// its next reply has not said so yet
+    jar_lost: bool,
 }
 
-impl Proxy<'_> {
+impl<'a> Proxy<'a> {
+    fn new(id: u32, shared: &'a Shared) -> Proxy<'a> {
+        let (pages, reserved, tokens) = (Vec::new(), Vec::new(), HashMap::new());
+        Proxy { id, shared, child: None, pages, reserved, lost: VecDeque::new(), crashes: VecDeque::new(), restarts: 0, tokens, jar: None, jar_lost: false }
+    }
+
     fn log(&self, action: &str, result: &str) {
         self.shared.log.write(&Line { session: self.id, origin: "-", action, role: "", name: "", result });
     }
@@ -98,10 +122,12 @@ impl Proxy<'_> {
     /// was open; whether the session goes on. One that ended well ended
     /// the session (idle with no pages); one that crashed is recovered.
     fn child_spoke(&mut self) -> bool {
-        let Some(c) = self.child.as_mut() else { return true };
-        let Some(how) = c.idle_read() else { return true };
-        if c.ended_well() {
-            self.child = None;
+        let Some(mut c) = self.child.take() else { return true };
+        let ended = c.idle_read(&mut |q| self.answer(q));
+        let well = ended.is_some() && c.ended_well();
+        self.child = (!well).then_some(c);
+        let Some(how) = ended else { return true };
+        if well {
             return false;
         }
         let note = self.recover(&how);
@@ -127,19 +153,31 @@ impl Proxy<'_> {
         let hang = self.shared.config.hang;
         let reply = match self.ask(f, hang) {
             Ok(r) => r,
-            Err(Fault::Ended(how)) => {
+            Err(fault) => {
+                let hung = matches!(fault, Fault::Hung);
+                let how = self.ended(fault);
                 let note = self.recover(&how);
-                error_frame(code::CRASHED, &format!("the session's content process ended while answering: {how}; {note}"))
-            }
-            Err(Fault::Hung) => {
-                let how = self.child.as_mut().map(Content::kill).unwrap_or_default();
-                let note = self.recover(&format!("it did not answer within {} s and was killed ({how})", hang.as_secs()));
-                error_frame(code::HUNG, &format!("the session's content process did not answer within {} s; {note}", hang.as_secs()))
+                match hung {
+                    true => error_frame(code::HUNG, &format!("the session's content process did not answer within {} s; {note}", hang.as_secs())),
+                    false => error_frame(code::CRASHED, &format!("the session's content process ended while answering: {how}; {note}")),
+                }
             }
         };
         let reply = if f.kind == kind::STATS && reply.kind == kind::RESULT { self.with_counters(reply) } else { reply };
         self.refresh();
-        reply
+        self.jar_note(reply)
+    }
+
+    /// How the content process ended; one that did not answer in time is
+    /// killed first, so nothing it says later is taken for an answer.
+    fn ended(&mut self, fault: Fault) -> String {
+        match fault {
+            Fault::Ended(how) => how,
+            Fault::Hung => {
+                let how = self.child.as_mut().map(Content::kill).unwrap_or_default();
+                format!("it did not answer within {} s and was killed ({how})", self.shared.config.hang.as_secs())
+            }
+        }
     }
 
     /// The refusal of a request on a page lost to the crash brake.
@@ -182,61 +220,22 @@ impl Proxy<'_> {
         r
     }
 
-    /// A question from the content process.
-    fn answer(&mut self, q: &Frame) -> Frame {
-        match q.kind {
+    /// A question from the content process, and the answer when it takes
+    /// one; any question but these few is refused.
+    fn answer(&mut self, q: &Frame) -> Option<Frame> {
+        Some(match q.kind {
             internal::NEW_PAGE => self.new_page(),
-            internal::NET => match (&self.shared.net, q.field(tag::DATA)) {
-                (Some(net), Some(d)) => match net.control_encoded(d) {
-                    Ok(a) => Frame::new(kind::RESULT).bytes(tag::DATA, &a),
-                    Err(e) => error_frame(code::IO, &format!("the network service: {e}")),
-                },
-                _ => error_frame(code::REFUSED, "this host has no network"),
-            },
-            _ => error_frame(code::UNKNOWN, "unknown question"),
-        }
-    }
-
-    /// A page number, counted against the host's page limit and owned by
-    /// this session from now on.
-    fn new_page(&mut self) -> Frame {
-        let s = self.shared;
-        if s.pages.fetch_add(1, Ordering::SeqCst) >= s.config.max_total_pages {
-            s.pages.fetch_sub(1, Ordering::SeqCst);
-            let msg = format!("the host has {} pages open across its sessions already", s.config.max_total_pages);
-            return error_frame(code::TOO_MANY_PAGES, &msg);
-        }
-        let id = s.next_page.fetch_add(1, Ordering::SeqCst);
-        s.owners.lock().unwrap_or_else(|e| e.into_inner()).insert(id, self.id);
-        self.reserved.push(id);
-        Frame::new(kind::RESULT).num(tag::PAGE, u64::from(id))
-    }
-
-    fn release(&self, page: u32) {
-        self.shared.owners.lock().unwrap_or_else(|e| e.into_inner()).remove(&page);
-        self.shared.pages.fetch_sub(1, Ordering::SeqCst);
-    }
-
-    /// Learns where the pages are now; pages gone since (closed, expired,
-    /// failed to open) are given back.
-    fn refresh(&mut self) {
-        if self.child.is_none() {
-            return;
-        }
-        let pages = match self.ask(&Frame::new(internal::STATE), self.shared.config.hang) {
-            Ok(r) => PageState::parse(r.get_str(tag::TEXT).unwrap_or("")),
-            Err(Fault::Ended(how)) => {
-                let note = self.recover(&how);
-                eprintln!("madcawl-shell: session {}: the content process ended ({how}); {note}", self.id);
-                return;
+            internal::NET_REGISTER => self.net_register(),
+            internal::NET_RELEASE => self.net_release(q),
+            internal::AUDIT => {
+                self.audit(q);
+                return None;
             }
-            Err(Fault::Hung) => return,
-        };
-        let had: Vec<u32> = self.pages.iter().map(|p| p.id).chain(self.reserved.drain(..)).collect();
-        for id in had.into_iter().filter(|id| !pages.iter().any(|p| p.id == *id)) {
-            self.release(id);
-        }
-        self.pages = pages;
+            k => {
+                self.log(&format!("question-{k}"), "error 11");
+                error_frame(code::REFUSED, "the host does not take that question from a content process")
+            }
+        })
     }
 
     /// A `STATS` answer with the host's counters for the session added.
@@ -263,6 +262,8 @@ impl Proxy<'_> {
         for id in ids {
             self.release(id);
         }
+        // dropping the partition drops its registrations with it
+        self.tokens.clear();
         if let Some(net) = &self.shared.net
             && let Err(e) = net.end_session(self.id)
         {

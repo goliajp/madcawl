@@ -2,7 +2,9 @@
 //! agent session's frames, forwarded as they come, and frames of the
 //! host's own (`internal`) that no agent may send. While it answers a
 //! request, a content process asks its host for what only the host has:
-//! a page number, or a request on the network service's control channel.
+//! a page number, or a registration with the network service, which the
+//! host makes in the session's own cookie partition. Its audit lines go
+//! to the host too, which writes them under the session's number.
 
 use std::io::{self, Read as _, Write as _};
 use std::os::unix::net::UnixStream;
@@ -18,15 +20,22 @@ pub mod internal {
     pub const RESTORE: u16 = 240;
     /// Host to content: the pages it holds, a line each
     pub const STATE: u16 = 241;
-    /// Content to host: a frame for the network service's control
-    /// channel, encoded in `DATA`; the answer comes back the same way
-    pub const NET: u16 = 242;
+    /// Content to host: register a page's connection with the network
+    /// service; the host names the session's partition and answers the
+    /// token in `DATA`
+    pub const NET_REGISTER: u16 = 242;
     /// Content to host: a number for a page it is opening, or an error
     /// when the host holds as many pages as it may
     pub const NEW_PAGE: u16 = 243;
     /// Host to content: the agent's session has ended; close its pages
     /// and exit
     pub const END: u16 = 244;
+    /// Content to host: drop the registration whose token is in `DATA`,
+    /// one the host made for this session
+    pub const NET_RELEASE: u16 = 245;
+    /// Content to host, unanswered: an audit line, its fields (origin,
+    /// action, role, name, result) as five `FIELD`s
+    pub const AUDIT: u16 = 246;
 
     /// The tag the host sets on a request naming a page another session
     /// holds, which the content process then refuses as such; the host
@@ -109,10 +118,27 @@ impl Link {
         })
     }
 
-    /// A network control frame's answer, through the host.
-    pub fn net(&self, encoded: &[u8]) -> io::Result<Vec<u8>> {
-        let r = self.ask(&Frame::new(internal::NET).bytes(tag::DATA, encoded))?;
+    /// A registration with the network service in the session's cookie
+    /// partition, made by the host; its token.
+    pub fn net_register(&self) -> io::Result<Vec<u8>> {
+        let r = self.ask(&Frame::new(internal::NET_REGISTER))?;
         r.field(tag::DATA).map(<[u8]>::to_vec).ok_or_else(|| io::Error::other(r.get_str(tag::TEXT).unwrap_or("no answer").to_owned()))
+    }
+
+    /// Drops a registration `net_register` made.
+    pub fn net_release(&self, token: &[u8]) -> io::Result<()> {
+        let r = self.ask(&Frame::new(internal::NET_RELEASE).bytes(tag::DATA, token))?;
+        match r.kind {
+            madcawl_agent::kind::RESULT => Ok(()),
+            _ => Err(io::Error::other(r.get_str(tag::TEXT).unwrap_or("not released").to_owned())),
+        }
+    }
+
+    /// Sends an audit line to the host, which answers nothing.
+    pub fn audit(&self, fields: [&str; 5]) -> io::Result<()> {
+        let f = fields.iter().fold(Frame::new(internal::AUDIT), |f, v| f.str(tag::FIELD, v));
+        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        write(&mut g.0, &f)
     }
 }
 

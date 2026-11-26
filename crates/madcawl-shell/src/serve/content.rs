@@ -5,7 +5,8 @@
 //! without `--isolate` does on a session thread; the host keeps the
 //! agent's connection, the network service and the page numbers. It has
 //! a watchdog on its request loop and a memory cap, and exits with its
-//! host.
+//! host. It holds no descriptor of its host's but the channel: not the
+//! audit log, whose lines it sends its host to write.
 
 use std::ffi::OsString;
 use std::os::fd::AsFd as _;
@@ -35,7 +36,6 @@ pub fn args(c: &Config, session: u32, run: &str) -> Vec<OsString> {
     for d in &c.allow {
         opt("--allow", d.into());
     }
-    opt("--audit", c.audit.clone().into());
     opt("--pages", c.max_pages.to_string().into());
     opt("--total-pages", c.max_total_pages.to_string().into());
     opt("--idle-ms", c.idle.as_millis().max(1).to_string().into());
@@ -66,6 +66,7 @@ pub fn args(c: &Config, session: u32, run: &str) -> Vec<OsString> {
 
 /// The content process's main.
 pub fn child_main(args: &[&str]) -> ExitCode {
+    super::orphan::close_inherited_fds();
     let [session, run, rest @ ..] = args else { return usage() };
     let (Ok(session), Some(config)) = (session.parse::<u32>(), parse_args(rest)) else { return usage() };
     super::orphan::exit_with_parent();
@@ -87,7 +88,7 @@ fn serve(session: u32, run: &str, config: Config) -> std::io::Result<()> {
     let stdin = std::io::stdin().as_fd().try_clone_to_owned()?;
     let stream = UnixStream::from(stdin);
     let link = Arc::new(Link::new(stream.try_clone()?));
-    let log = AuditLog::open(&config.audit)?;
+    let log = AuditLog::Host(link.clone());
     let net = config.net.then(|| {
         let mut sock = config.socket.clone().into_os_string();
         sock.push(".net");
