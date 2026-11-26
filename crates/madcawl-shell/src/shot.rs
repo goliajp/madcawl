@@ -1,15 +1,21 @@
 //! A styled page laid out in the viewport and painted offscreen to a PNG: the first screen, or the whole
-//! page as tall as its fragments reach.
+//! page as tall as its fragments reach. `command` is `madcawl-shell shot`: from the page's bytes to the
+//! bitmap, each stage timed, the CPU time and memory it took written beside it.
 
 use std::io;
 use std::path::Path;
 use std::time::{Duration, Instant};
+
+use madcawl_html::Encoding;
 
 use madcawl_css::style::Styles;
 use madcawl_dom::Dom;
 use madcawl_layout::Layout;
 use madcawl_paint::raster::{self, MAX_PIXELS, MAX_SIDE};
 use madcawl_paint::{Bitmap, Raster, RectF};
+
+use crate::load::{self, Sheets};
+use crate::rusage;
 
 pub const VIEWPORT: (f32, f32) = (1280.0, 800.0);
 
@@ -89,4 +95,60 @@ pub fn shot(dom: &Dom, styles: &Styles, o: Options) -> Shot {
 
 pub fn write(s: &Shot, out: &Path) -> io::Result<()> {
     raster::write_png(&s.bitmap, out)
+}
+
+fn ms(d: Duration) -> String {
+    format!("{:.2}", d.as_secs_f64() * 1e3)
+}
+
+/// Parses, styles, lays out, paints and rasters `bytes`, a page whose stylesheets are read from beside
+/// `base`, and writes the PNG to `out`. The lines it returns, `name value` each: the bitmap's size, the
+/// list's counts, each stage's milliseconds, the first frame (from the bytes to the bitmap) in wall time
+/// and in this process's CPU time, and the footprint once the bitmap is drawn.
+pub fn command(
+    bytes: &[u8],
+    base: Option<&Path>,
+    charset: Option<Encoding>,
+    out: &Path,
+    o: Options,
+) -> io::Result<String> {
+    let cpu = rusage::cpu_time();
+    let start = Instant::now();
+    let (dom, encoding) = load::parse(bytes, charset);
+    let t_parse = start.elapsed();
+    let t = Instant::now();
+    let device = madcawl_css::style::Device {
+        scale: o.scale as f64,
+        ..Default::default()
+    };
+    let styles = load::style_for(&dom, base, encoding, &mut Sheets::default(), device);
+    let t_style = t.elapsed();
+    let s = shot(&dom, &styles, o);
+    let first = start.elapsed();
+    let first_cpu = rusage::cpu_time().saturating_sub(cpu);
+    let footprint = rusage::footprint();
+    let t = Instant::now();
+    write(&s, out)?;
+    let t_png = t.elapsed();
+    let mut e = format!(
+        "size {}x{}\npage_height_px {:.0}\nentries {}\nglyphs {}\nculled {}\ndropped {}\n",
+        s.bitmap.width, s.bitmap.height, s.page_height, s.entries, s.glyphs, s.culled, s.dropped
+    );
+    let stages = [("parse", t_parse), ("style", t_style)]
+        .into_iter()
+        .chain(s.times)
+        .chain([("png", t_png)]);
+    for (k, d) in stages {
+        e.push_str(&format!("time_ms.{k} {}\n", ms(d)));
+    }
+    e.push_str(&format!(
+        "time_ms.first_paint {}\ncpu_ms.first_paint {}\n",
+        ms(first),
+        ms(first_cpu)
+    ));
+    e.push_str(&format!(
+        "footprint_bytes {footprint}\npeak_rss_bytes {}\n",
+        rusage::peak_rss()
+    ));
+    Ok(e)
 }

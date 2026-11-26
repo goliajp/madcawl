@@ -228,26 +228,13 @@ fn cmd_audit(a: &Args) -> std::io::Result<bool> {
 
 fn cmd_shot(a: &Args) -> std::io::Result<()> {
     let bytes = input(a.path)?;
-    let (dom, encoding) = load::parse(&bytes, a.charset);
     let base = (a.path != "-").then(|| Path::new(a.path).parent().unwrap_or(Path::new(".")));
-    let device = madcawl_css::style::Device {
-        scale: a.scale as f64,
-        ..Default::default()
-    };
-    let styles = load::style_for(&dom, base, encoding, &mut Sheets::default(), device);
     let o = shot::Options {
         scale: a.scale,
         full: a.full,
     };
-    let s = shot::shot(&dom, &styles, o);
-    shot::write(&s, Path::new(a.out.unwrap_or("out.png")))?;
-    let mut e = format!(
-        "size {}x{}\npage_height_px {:.0}\nentries {}\nglyphs {}\nculled {}\ndropped {}\n",
-        s.bitmap.width, s.bitmap.height, s.page_height, s.entries, s.glyphs, s.culled, s.dropped
-    );
-    for (k, d) in s.times {
-        e.push_str(&format!("time_ms.{k} {}\n", ms(d)));
-    }
+    let out = Path::new(a.out.unwrap_or("out.png"));
+    let e = shot::command(&bytes, base, a.charset, out, o)?;
     std::io::stderr().write_all(e.as_bytes())
 }
 
