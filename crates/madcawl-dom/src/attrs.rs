@@ -85,6 +85,11 @@ pub(crate) struct AttrHeap {
 }
 
 impl AttrHeap {
+    /// Gives back the units growing by doubling left unused.
+    pub(crate) fn trim(&mut self) {
+        self.units.shrink_to_fit();
+    }
+
     pub(crate) fn new() -> Self {
         AttrHeap {
             units: vec![Unit::default()],
@@ -204,6 +209,33 @@ mod tests {
         assert_eq!(again, 1, "the first block, freed when it moved");
         for u in h.attrs(b) {
             u.drop_value();
+        }
+    }
+
+    #[test]
+    fn a_trimmed_heap_keeps_its_blocks_and_grows_again() {
+        let mut h = AttrHeap::new();
+        let mut blocks = Vec::new();
+        for i in 0..300 {
+            let mut b = h.alloc(1);
+            let v = DomString::from_latin1(format!("v{i}").as_bytes());
+            b = h.push(b, Unit::attr(atom!("title"), AttrNamespace::None, None, v));
+            blocks.push(b);
+        }
+        assert!(h.units.capacity() > h.units.len());
+        h.trim();
+        assert_eq!(h.units.capacity(), h.units.len());
+        for (i, &b) in blocks.iter().enumerate() {
+            assert!(h.attrs(b)[0].value().eq_str(&format!("v{i}")));
+        }
+        let b = h.alloc(4);
+        let v = DomString::from_latin1(b"after");
+        let b = h.push(b, Unit::attr(atom!("title"), AttrNamespace::None, None, v));
+        assert!(h.attrs(b)[0].value().eq_str("after"));
+        for &b in blocks.iter().chain([&b]) {
+            for u in h.attrs(b) {
+                u.drop_value();
+            }
         }
     }
 

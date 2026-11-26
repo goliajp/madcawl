@@ -13,6 +13,14 @@ use crate::tree::Change;
 const FULL: &str = "the parser stops while there is room for its nodes";
 
 impl Dom {
+    /// Gives back what the tables' growth left unused, for a document
+    /// whose parse is done: the attribute heap grows by doubling, and a
+    /// page that fills 68 000 of its units would keep room for 131 072.
+    pub fn trim(&mut self) {
+        self.attrs.trim();
+        self.rare.shrink_to_fit();
+    }
+
     /// An element owned by `owner`; a template gets its contents.
     pub(crate) fn element(&mut self, ns: Namespace, local: Atom, owner: u32) -> Option<u32> {
         let template = ns == Namespace::Html && local == atom!("template");
