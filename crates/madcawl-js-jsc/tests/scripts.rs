@@ -148,15 +148,18 @@ var i = document.createElement('script'); i.textContent = \"log.push('inline:' +
 document.querySelector('body').appendChild(i);
 log.push(String(document.createElement('script').async) + i.async);
 add('o1.js', true); add('o2.js', true); add('f1.js', false);
-var late = document.createElement('script'); document.querySelector('body').appendChild(late); late.src = 'late.js'; 'ok'";
+var late = document.createElement('script'); document.querySelector('body').appendChild(late); late.src = 'late.js';
+var byNode = document.createElement('script'); document.querySelector('body').appendChild(byNode);
+var a = document.createAttribute('src'); a.value = 'node.js'; byNode.setAttributeNode(a); 'ok'";
     assert_eq!(p.eval(setup), "ok");
     p.take();
-    assert_eq!(p.asked(), ["o1.js", "o2.js", "f1.js", "late.js"]);
+    assert_eq!(p.asked(), ["o1.js", "o2.js", "f1.js", "late.js", "node.js"]);
     p.arrive("o2.js", Some("log.push('o2')"));
     p.arrive("f1.js", Some("log.push('f1')"));
     p.arrive("o1.js", Some("log.push('o1')"));
     p.arrive("late.js", Some("log.push('late')"));
-    assert_eq!(p.log(), "inline:true truetrue f1 L:f1.js o1 L:o1.js o2 L:o2.js late");
+    p.arrive("node.js", Some("log.push('node')"));
+    assert_eq!(p.log(), "inline:true truetrue f1 L:f1.js o1 L:o1.js o2 L:o2.js late node");
     p.close();
 }
 

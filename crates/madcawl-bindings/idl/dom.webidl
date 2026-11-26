@@ -4,9 +4,10 @@
 // [HostOps] marks the class whose table carries the host object
 // callbacks; its subclasses inherit them
 //
-// [RunsScript] and [Throws] (not in the standard) mark an operation
-// that calls script itself (event listeners) or that may throw where
-// nothing else in its declaration says so
+// [RunsScript] and [Throws] (not in the standard) mark a member that
+// calls script itself (event listeners, a script element it connects or
+// gives a src, a parser it writes to) or that may throw where nothing
+// else in its declaration says so
 
 // [Targets] (not in the standard): its own objects are side objects,
 // and its members take nodes and those as `this`
@@ -149,12 +150,12 @@ interface Node : EventTarget {
   readonly attribute Node? previousSibling;
   readonly attribute Node? nextSibling;
 
-  [CEReactions] attribute DOMString? textContent;
+  [CEReactions, RunsScript] attribute DOMString? textContent;
 
   boolean contains(Node? other);
 
-  [CEReactions] Node insertBefore(Node node, Node? child);
-  [CEReactions] Node appendChild(Node node);
+  [CEReactions, RunsScript] Node insertBefore(Node node, Node? child);
+  [CEReactions, RunsScript] Node appendChild(Node node);
   [CEReactions] Node removeChild(Node child);
 };
 
@@ -170,16 +171,16 @@ interface Element : Node {
   [SameObject] readonly attribute NamedNodeMap attributes;
   sequence<DOMString> getAttributeNames();
   DOMString? getAttribute(DOMString qualifiedName);
-  [CEReactions] undefined setAttribute(DOMString qualifiedName, DOMString value);
+  [CEReactions, RunsScript] undefined setAttribute(DOMString qualifiedName, DOMString value);
   [CEReactions] undefined removeAttribute(DOMString qualifiedName);
   // the optional boolean is read as any, to tell a missing one from false
-  [CEReactions] boolean toggleAttribute(DOMString qualifiedName, optional any force);
+  [CEReactions, RunsScript] boolean toggleAttribute(DOMString qualifiedName, optional any force);
   boolean hasAttribute(DOMString qualifiedName);
 
   Attr? getAttributeNode(DOMString qualifiedName);
   Attr? getAttributeNodeNS(DOMString? namespace, DOMString localName);
-  [CEReactions] Attr? setAttributeNode(Attr attr);
-  [CEReactions] Attr? setAttributeNodeNS(Attr attr);
+  [CEReactions, RunsScript] Attr? setAttributeNode(Attr attr);
+  [CEReactions, RunsScript] Attr? setAttributeNodeNS(Attr attr);
   [CEReactions] Attr removeAttributeNode(Attr attr);
 
   HTMLCollection getElementsByTagName(DOMString qualifiedName);
@@ -229,7 +230,7 @@ interface Document : Node {
 
   // one string, not the standard's variadic list, until variadic
   // arguments are bound
-  [CEReactions] undefined write(DOMString text);
+  [CEReactions, RunsScript] undefined write(DOMString text);
 };
 
 [Exposed=Window]

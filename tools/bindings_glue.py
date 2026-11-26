@@ -78,7 +78,7 @@ def effects(bits):
 
 def setter_effects(a):
     bits = ['THROWS', 'WRITES']
-    if a['type'] in STRINGS or 'CEReactions' in a['flags']:
+    if a['type'] in STRINGS or a['flags'] & {'CEReactions', 'RunsScript'}:
         bits.insert(0, 'RUNS_SCRIPT')
     return effects(bits)
 

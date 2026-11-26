@@ -214,7 +214,13 @@ pub(crate) fn set_node<E: Engine>(e: &mut E, h: &mut DomHost<E>, el: NodeId, att
     if h.place_of(el, attr).is_some() {
         h.attach_attr(e, attr, el);
     }
-    if done { Ok(old) } else { Err(full(e, h)) }
+    if !done {
+        return Err(full(e, h));
+    }
+    if at.is_none() && ns == AttrNamespace::None && local == atom!("src") {
+        h.script_src_added(e, el);
+    }
+    Ok(old)
 }
 
 pub(crate) fn attributes<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<SideRef, Thrown> {
