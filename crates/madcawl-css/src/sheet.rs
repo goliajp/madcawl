@@ -14,10 +14,12 @@
 
 use std::sync::OnceLock;
 
+mod bodies;
+
 use crate::Span;
 use crate::names::{Name, Names};
 use crate::parser::{BlockItem, Declaration, ParsedRule, Parser};
-use crate::selector::{Context, SelectorList, parse_nested_selector_list, parse_selector_list};
+use crate::selector::{Context, SelectorError, SelectorList, parse_nested_selector_list, parse_selector_list};
 use crate::tokenizer::{Kind, Token, Tokenizer};
 
 /// Style rules nested deeper than this are dropped: each level parses
@@ -397,6 +399,19 @@ impl Stylesheet {
         })
     }
 
+    /// A sheet of one style rule, with no declarations, whose selectors
+    /// are the whole of `source`: a selector list on its own, as the
+    /// selector queries take one, braces and semicolons in its strings
+    /// included.
+    pub(crate) fn of_selectors(source: String) -> Result<Stylesheet, SelectorError> {
+        let mut names = Names::new();
+        let end = source.len();
+        let selectors = parse_selector_list(&source, Span::new(0, end), &mut names, &Context::default())?;
+        let body = Body::parsed(Span::new(end, end), Vec::new());
+        let rules = vec![Rule::Style(StyleRule { selectors, body, rules: Vec::new() })];
+        Ok(Stylesheet { source: source.into(), names, rules })
+    }
+
     pub fn source(&self) -> &str {
         &self.source
     }
@@ -413,32 +428,5 @@ impl Stylesheet {
     pub fn declarations<'a>(&'a self, body: &'a Body) -> &'a [Declaration] {
         body.decls
             .get_or_init(|| declarations(&self.source, body.span).into())
-    }
-
-    /// How many declaration blocks the sheet has, and how many of them
-    /// have been parsed.
-    pub fn bodies(&self) -> (usize, usize) {
-        let mut n = (0, 0);
-        count(&self.rules, &mut n);
-        n
-    }
-}
-
-fn count(rules: &[Rule], n: &mut (usize, usize)) {
-    fn body(b: &Body, n: &mut (usize, usize)) {
-        n.0 += 1;
-        n.1 += b.is_parsed() as usize;
-    }
-    for r in rules {
-        match r {
-            Rule::Style(s) => {
-                body(&s.body, n);
-                count(&s.rules, n);
-            }
-            Rule::FontFace(b) | Rule::Page { body: b, .. } => body(b, n),
-            Rule::Media { rules, .. } | Rule::Supports { rules, .. } => count(rules, n),
-            Rule::Layer { rules: Some(r), .. } => count(r, n),
-            _ => {}
-        }
     }
 }

@@ -1,16 +1,14 @@
 //! `querySelector` and `querySelectorAll`: the elements under a node
 //! that a selector list matches, by the same matcher the cascade uses.
-//! The list is parsed on its own first, so that text a selector list
-//! cannot hold (a brace, an unbalanced bracket) is refused rather than
-//! read as more rules.
+//! The list is parsed on its own, as the whole of a one-rule sheet, so
+//! text a selector list cannot hold is refused rather than read as more
+//! rules.
 
 use madcawl_dom::{Dom, NodeId, NodeKind};
 use madcawl_html::QuirksMode;
 use madcawl_str::HeldAtoms;
 
-use crate::Span;
-use crate::names::Names;
-use crate::selector::{Context, SelectorError, parse_selector_list};
+use crate::selector::SelectorError;
 use crate::sheet::Stylesheet;
 
 use super::device::Device;
@@ -22,12 +20,7 @@ use super::states::ElementStates;
 /// `selectors` matches, at most `limit` of them; an error when it is
 /// not a selector list.
 pub fn query(dom: &Dom, scope: NodeId, selectors: &str, limit: usize) -> Result<Vec<NodeId>, SelectorError> {
-    let span = Span::new(0, selectors.len());
-    parse_selector_list(selectors, span, &mut Names::new(), &Context::default())?;
-    if selectors.contains(['{', '}', ';']) {
-        return Err(SelectorError);
-    }
-    let sheet = Stylesheet::parse(format!("{selectors}{{}}")).map_err(|_| SelectorError)?;
+    let sheet = Stylesheet::of_selectors(selectors.to_owned())?;
     let held = HeldAtoms::new();
     let mut rules = Rules::new();
     rules.add(&sheet, Origin::Author, &held, &Device::default());
