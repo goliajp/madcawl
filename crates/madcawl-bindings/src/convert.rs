@@ -7,6 +7,7 @@ use madcawl_js::{ClassDef, Engine, ErrorKind, Key, Owned, ValueKind};
 use madcawl_str::{Atom, DomString};
 
 use crate::host::DomHost;
+use crate::side::SideRef;
 
 /// An exception is registered in the engine.
 #[derive(Debug)]
@@ -43,6 +44,8 @@ fn legacy_code(name: &str) -> u16 {
         "HierarchyRequestError" => 3,
         "InvalidCharacterError" => 5,
         "NotFoundError" => 8,
+        "NotSupportedError" => 9,
+        "InvalidStateError" => 11,
         "SyntaxError" => 12,
         "QuotaExceededError" => 22,
         _ => 0,
@@ -110,16 +113,22 @@ pub(crate) struct StaticList(pub Vec<NodeId>);
 impl<E: Engine> IntoJs<E> for StaticList {
     fn into_js(self, e: &mut E, h: &mut DomHost<E>) -> Owned<E::Value> {
         let items: Vec<Owned<E::Value>> = self.0.into_iter().map(|n| h.wrap(e, n)).collect();
-        let global = e.global(h.realm);
-        let array = e.get(h, global.get(), Key::Str(&DomString::from_wtf8(b"Array")));
-        let of = e.get(h, array.get(), Key::Str(&DomString::from_wtf8(b"of")));
-        let values: Vec<E::Value> = items.iter().map(Owned::get).collect();
-        let r = e.call(h, of.get(), array.get(), &values);
-        for v in items.into_iter().chain([of, array, global]) {
-            e.release(v);
-        }
-        r
+        array_of(e, h, items)
     }
+}
+
+/// An array of `items`, made by the realm's `Array.of`; their counts are
+/// given back.
+pub(crate) fn array_of<E: Engine>(e: &mut E, h: &mut DomHost<E>, items: Vec<Owned<E::Value>>) -> Owned<E::Value> {
+    let global = e.global(h.realm);
+    let array = e.get(h, global.get(), Key::Str(&DomString::from_wtf8(b"Array")));
+    let of = e.get(h, array.get(), Key::Str(&DomString::from_wtf8(b"of")));
+    let values: Vec<E::Value> = items.iter().map(Owned::get).collect();
+    let r = e.call(h, of.get(), array.get(), &values);
+    for v in items.into_iter().chain([of, array, global]) {
+        e.release(v);
+    }
+    r
 }
 
 pub(crate) fn run<E: Engine, T: IntoJs<E>>(
@@ -164,6 +173,31 @@ pub(crate) fn this_node<E: Engine>(
     match e.host_of(this, class) {
         Some(obj) => Ok(h.node(obj)),
         None => Err(throw(e, ErrorKind::Type, "illegal invocation")),
+    }
+}
+
+/// `this` as a side object of `class`.
+pub(crate) fn this_side<E: Engine>(
+    e: &mut E,
+    h: &DomHost<E>,
+    this: E::Value,
+    class: &'static ClassDef<E, DomHost<E>>,
+) -> Result<SideRef, Thrown> {
+    match e.host_of(this, class).and_then(|obj| h.sides.of(obj)) {
+        Some(r) => Ok(r),
+        None => Err(throw(e, ErrorKind::Type, "illegal invocation")),
+    }
+}
+
+pub(crate) fn side<E: Engine>(
+    e: &mut E,
+    h: &DomHost<E>,
+    v: E::Value,
+    class: &'static ClassDef<E, DomHost<E>>,
+) -> Result<SideRef, Thrown> {
+    match e.host_of(v, class).and_then(|obj| h.sides.of(obj)) {
+        Some(r) => Ok(r),
+        None => Err(throw(e, ErrorKind::Type, "the argument is not an object of that interface")),
     }
 }
 

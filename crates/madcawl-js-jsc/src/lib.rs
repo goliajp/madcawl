@@ -34,6 +34,7 @@ mod frame;
 mod groups;
 mod halt;
 mod helpers;
+mod iface;
 mod isolate;
 mod micro;
 mod objects;

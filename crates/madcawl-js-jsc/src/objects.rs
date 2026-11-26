@@ -87,8 +87,10 @@ impl Classes {
                 d.finalize = Some(finalize_fn);
             }),
             iface: make(c"Function", |d| {
-                d.call_as_function = Some(call_iface);
-                d.call_as_constructor = Some(construct_iface);
+                d.call_as_function = Some(crate::iface::call);
+                d.call_as_constructor = Some(crate::iface::construct);
+                d.has_instance = Some(crate::iface::has_instance);
+                d.finalize = Some(finalize_fn);
             }),
             wrapper: make(c"Object", |d| d.finalize = Some(finalize_wrapper)),
         }
@@ -176,15 +178,20 @@ unsafe extern "C" fn call_fn(
 /// so that script that ignores the result cannot go on as if the call
 /// had worked. Script may catch it; the watchdog, armed again, ends that
 /// script at its next look.
-fn halted(exception: *mut JSValueRef) -> JSValueRef {
+pub(crate) fn halted(exception: *mut JSValueRef) -> JSValueRef {
     // SAFETY: the framework's exception slot
     unsafe { *exception = UNDEFINED.raw() };
     std::ptr::null()
 }
 
 unsafe extern "C" fn finalize_fn(obj: JSObjectRef) {
-    // SAFETY: the record made with the object, freed only here
-    drop(unsafe { Box::from_raw(ffi::JSObjectGetPrivate(obj).cast::<FnRec>()) });
+    // SAFETY: the record made with the object, or none (an interface
+    // object without a constructor); freed only here
+    let rec = unsafe { ffi::JSObjectGetPrivate(obj).cast::<FnRec>() };
+    if !rec.is_null() {
+        // SAFETY: as above
+        drop(unsafe { Box::from_raw(rec) });
+    }
 }
 
 unsafe extern "C" fn finalize_wrapper(obj: JSObjectRef) {
@@ -194,39 +201,6 @@ unsafe extern "C" fn finalize_wrapper(obj: JSObjectRef) {
     rec.dead = true;
     // SAFETY: the isolate's shared state outlives its heap
     unsafe { &*rec.shared }.notices.borrow_mut().push(rec);
-}
-
-fn illegal(ctx: JSContextRef, exception: *mut JSValueRef) {
-    let src = c"new TypeError('Illegal constructor')";
-    // SAFETY: a live context inside its own callback
-    unsafe {
-        let s = ffi::JSStringCreateWithUTF8CString(src.as_ptr());
-        *exception = ffi::JSEvaluateScript(ctx, s, std::ptr::null_mut(), std::ptr::null_mut(), 1, std::ptr::null_mut());
-        ffi::JSStringRelease(s);
-    }
-}
-
-unsafe extern "C" fn call_iface(
-    ctx: JSContextRef,
-    _: JSObjectRef,
-    _: JSObjectRef,
-    _: usize,
-    _: *const JSValueRef,
-    exception: *mut JSValueRef,
-) -> JSValueRef {
-    illegal(ctx, exception);
-    std::ptr::null()
-}
-
-unsafe extern "C" fn construct_iface(
-    ctx: JSContextRef,
-    _: JSObjectRef,
-    _: usize,
-    _: *const JSValueRef,
-    exception: *mut JSValueRef,
-) -> JSObjectRef {
-    illegal(ctx, exception);
-    std::ptr::null_mut()
 }
 
 /// A function object for `rec` in the context `ctx`, whose prototype

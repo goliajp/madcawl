@@ -54,6 +54,7 @@ pub type GetPropertyCallback =
 pub type CallAsFunctionCallback = Option<
     unsafe extern "C" fn(JSContextRef, JSObjectRef, JSObjectRef, usize, *const JSValueRef, *mut JSValueRef) -> JSValueRef,
 >;
+pub type HasInstanceCallback = Option<unsafe extern "C" fn(JSContextRef, JSObjectRef, JSValueRef, *mut JSValueRef) -> bool>;
 pub type CallAsConstructorCallback =
     Option<unsafe extern "C" fn(JSContextRef, JSObjectRef, usize, *const JSValueRef, *mut JSValueRef) -> JSObjectRef>;
 
@@ -74,7 +75,7 @@ pub struct JSClassDefinition {
     pub get_property_names: *const c_void,
     pub call_as_function: CallAsFunctionCallback,
     pub call_as_constructor: CallAsConstructorCallback,
-    pub has_instance: *const c_void,
+    pub has_instance: HasInstanceCallback,
     pub convert_to_type: *const c_void,
 }
 
@@ -95,7 +96,7 @@ impl JSClassDefinition {
         get_property_names: std::ptr::null(),
         call_as_function: None,
         call_as_constructor: None,
-        has_instance: std::ptr::null(),
+        has_instance: None,
         convert_to_type: std::ptr::null(),
     };
 }

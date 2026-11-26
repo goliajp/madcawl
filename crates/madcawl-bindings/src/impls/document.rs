@@ -66,3 +66,16 @@ pub(crate) fn write<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: NodeId, tex
     h.document_write(e, &text);
     Ok(())
 }
+
+/// An uninitialized event: `initEvent` must run before it is dispatched.
+pub(crate) fn create_event<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: NodeId, interface: DomString) -> Result<crate::side::SideRef, Thrown> {
+    let mut b = Vec::new();
+    interface.write_wtf8(&mut b);
+    b.make_ascii_lowercase();
+    if !matches!(&b[..], b"event" | b"events" | b"htmlevents" | b"svgevents") {
+        return Err(crate::convert::throw_dom(e, h, "NotSupportedError", "no event interface of that name"));
+    }
+    let mut ev = crate::event::EventState::new(h.names.hold(b""), h.now_ms());
+    ev.initialized = false;
+    Ok(h.sides.add(crate::side::SideData::Event(ev)))
+}

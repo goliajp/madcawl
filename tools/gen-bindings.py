@@ -16,11 +16,12 @@ converts the result. The table holds a C-ABI shell per member
 glue (`shell.rs`).
 
 The parser reads the subset of Web IDL the files use: interfaces with
-a parent, constants, attributes, operations with optional arguments and
-defaults, nullable types, and extended attribute lists (only
-`[HostOps]` on an interface, `[Atom]` on an argument, and
-`[CEReactions]` and `[NewObject]` on a member are acted on;
-`[StaticList]` documents a list result).
+a parent, a constructor, constants, attributes, operations with
+optional arguments and defaults, nullable types, and extended attribute
+lists (only `[HostOps]` and `[Side]` (its objects are not nodes) on an
+interface, `[Atom]` on an argument, and `[CEReactions]` and
+`[NewObject]` on a member are acted on; `[StaticList]` documents a list
+result).
 A `[Atom] DOMString` argument is a name, such as an event type: the
 implementation gets an atom made from the value, with no string block
 for a short string.
@@ -44,12 +45,20 @@ TYPES = {
     'DOMString?': 'cv::dom_string_or_null(e, h, {v})?',
     '[Atom] DOMString': 'cv::atom(e, h, {v})?',
     'EventListener?': 'cv::callback_or_null(e, {v})?',
+    'boolean': 'e.to_boolean({v})',
     'any': '{v}',
 }
+
+KEYWORDS = {'type', 'match', 'move', 'ref', 'loop', 'fn', 'use', 'mod', 'impl', 'self', 'super', 'where', 'as'}
 
 
 def snake(name):
     return re.sub(r'(?<=[a-z0-9])([A-Z])', r'_\1', name).lower()
+
+
+def ident(name):
+    s = snake(name)
+    return 'r#' + s if s in KEYWORDS else s
 
 
 def strip(text):
@@ -62,7 +71,8 @@ def parse(text):
     for m in re.finditer(r'(\[[^\]]*\])?\s*interface\s+(\w+)\s*(?::\s*(\w+))?\s*\{(.*?)\}\s*;', strip(text), re.S):
         ext, name, parent, body = m.groups()
         iface = {'name': name, 'parent': parent, 'host_ops': bool(ext and re.search(r'\bHostOps\b', ext)),
-                 'consts': [], 'attrs': [], 'ops': []}
+                 'side': bool(ext and re.search(r'\bSide\b', ext)), 'consts': [], 'attrs': [], 'ops': [],
+                 'ctor': None}
         for member in body.split(';'):
             ext = re.match(r'^\s*\[([^\]]*)\]', member)
             flags = set(re.findall(r'\w+', ext.group(1))) if ext else set()
@@ -77,13 +87,18 @@ def parse(text):
                 iface['attrs'].append({'name': a.group(3), 'type': a.group(2), 'readonly': bool(a.group(1)),
                                        'flags': flags})
             else:
-                o = re.fullmatch(r'(.+?)\s+(\w+)\s*\((.*)\)', member, re.S)
+                ctor = member.startswith('constructor')
+                o = re.fullmatch(r'(.+?)\s+(\w+)\s*\((.*)\)', 'undefined ' * ctor + member, re.S)
                 args = []
                 for arg in filter(None, (x.strip() for x in o.group(3).split(','))):
                     a = re.fullmatch(r'(\[\s*Atom\s*\]\s*)?(optional\s+)?(.+?)\s+(\w+)(?:\s*=\s*(\S+))?', arg)
                     args.append({'type': ('[Atom] ' if a.group(1) else '') + a.group(3), 'name': a.group(4),
                                  'optional': bool(a.group(2)), 'default': a.group(5)})
-                iface['ops'].append({'name': o.group(2), 'ret': o.group(1), 'args': args, 'flags': flags})
+                op = {'name': o.group(2), 'ret': o.group(1), 'args': args, 'flags': flags}
+                if ctor:
+                    iface['ctor'] = op
+                else:
+                    iface['ops'].append(op)
         out.append(iface)
     return out
 
@@ -109,10 +124,12 @@ def number(ifaces):
     return names
 
 
-def convert(t, v, names):
+def convert(t, v, names, sides=()):
     if t in TYPES:
         return TYPES[t].format(v=v)
     base = t.rstrip('?')
+    if base in sides and not t.endswith('?'):
+        return f'cv::side(e, h, {v}, &{base}Class::<E>::DEF)?'
     if base in names:
         f = 'cv::node_or_null' if t.endswith('?') else 'cv::node'
         return f'{f}(e, h, {v}, &{base}Class::<E>::DEF)?'
@@ -122,7 +139,7 @@ def convert(t, v, names):
 STRINGS = ('DOMString', 'DOMString?', '[Atom] DOMString')
 # list types a [StaticList] operation returns: the implementation gives a
 # `cv::StaticList`, made an array of wrappers
-LISTS = ('NodeList', 'HTMLCollection')
+LISTS = ('NodeList', 'HTMLCollection', 'sequence<EventTarget>')
 
 
 def idl_type(t, names):
@@ -130,7 +147,7 @@ def idl_type(t, names):
         return 'NullableString' if t.endswith('?') else 'String'
     if t in ('undefined', 'boolean', 'any'):
         return t.capitalize()
-    if t in ('unsigned short', 'short', 'unsigned long', 'long', 'double'):
+    if t in ('unsigned short', 'short', 'unsigned long', 'long', 'double', 'DOMHighResTimeStamp'):
         return 'Number'
     if t == 'EventListener?':
         return 'Callback'
@@ -174,16 +191,18 @@ def op_sig(o, names):
 
 def glue(fn, iface, body, kind, uses_args=True):
     head = {
+        'ctor': f'fn {fn}<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::Value, {"args" if uses_args else "_args"}: &[E::Value]) -> Owned<E::Value> {{',
         'op': f'fn {fn}<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, {"args" if uses_args else "_args"}: &[E::Value]) -> Owned<E::Value> {{',
         'get': f'fn {fn}<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {{',
         'set': f'fn {fn}<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {{',
     }[kind]
-    lines = [head, '    cv::run(e, h, |e, h| {',
-             f"        let this = cv::this_node(e, h, this, &{iface['name']}Class::<E>::DEF)?;"]
+    lines = [head, '    cv::run(e, h, |e, h| {']
+    if kind != 'ctor':
+        lines.append(f"        let this = cv::this_{'side' if iface['side'] else 'node'}(e, h, this, &{iface['name']}Class::<E>::DEF)?;")
     lines += ['        ' + b for b in body]
     lines += ['    })', '}', '']
     call = {
-        'op': f'shell::op(ctx, this, argv, argc, {fn}::<E>)',
+        'ctor': f'shell::op(ctx, this, argv, argc, {fn}::<E>)', 'op': f'shell::op(ctx, this, argv, argc, {fn}::<E>)',
         'get': f'shell::get(ctx, this, {fn}::<E>)',
         'set': f'shell::set(ctx, this, argv, argc, {fn}::<E>)',
     }[kind]
@@ -196,6 +215,7 @@ def glue(fn, iface, body, kind, uses_args=True):
 
 def emit(ifaces, sources):
     names = number(ifaces)
+    sides = {i['name'] for i in ifaces if i['side']}
     out = [f"// CODEGEN: tools/gen-bindings.py from {', '.join(sources)}",
            '//! The class tables of the bound interfaces, and the glue between',
            '//! script values and the implementations in `impls`.', '',
@@ -203,7 +223,7 @@ def emit(ifaces, sources):
            'use madcawl_js::{', '    Attribute, AttributeSig, Bound, ClassDef, ClassId, Constant, Ctx, Effects, Engine, IdlType, Operation, Owned,',
            '    Signature,', '};', '',
            'use crate::convert as cv;', 'use crate::gc::NodeOps;', 'use crate::host::DomHost;', 'use crate::impls;',
-           'use crate::shell;', '']
+           'use crate::shell;', 'use crate::side::SideOps;', '']
     for i in sorted(ifaces, key=lambda i: i['id']):
         n, m = i['name'], snake(i['name'])
         out += [f'pub struct {n}Class<E>(PhantomData<E>);', '',
@@ -228,16 +248,18 @@ def emit(ifaces, sources):
                 out += [f'        {field}: &['] + ['            ' + x for x in items] + ['        ],']
             else:
                 out.append(f'        {field}: &[],')
-        out += ['        interceptors: None,',
-                f"        ops: {'Some(&NodeOps::<E>::OPS)' if i['host_ops'] else 'None'},", '    };', '}', '']
+        ops_of = 'Some(&SideOps::<E>::OPS)' if i['side'] else 'Some(&NodeOps::<E>::OPS)' if i['host_ops'] else 'None'
+        ctor = f"Some(unsafe {{ Bound::host_fn({m}_constructor_abi::<E>) }})" if i['ctor'] else 'None'
+        out += ['        interceptors: None,', f"        ops: {ops_of},", f'        constructor: {ctor},', '    };', '}', '']
         for a in i['attrs']:
             out += glue(f"{m}_get_{snake(a['name'])}", i,
-                        [f"impls::{m}::{snake(a['name'])}(e, h, this)"], 'get')
+                        [f"impls::{m}::{ident(a['name'])}(e, h, this)"], 'get')
             if not a['readonly']:
                 out += glue(f"{m}_set_{snake(a['name'])}", i,
-                            [f"let value = {convert(a['type'], 'value', names)};",
+                            [f"let value = {convert(a['type'], 'value', names, sides)};",
                              f"impls::{m}::set_{snake(a['name'])}(e, h, this, value)"], 'set')
-        for o in i['ops']:
+        members = [(o, 'op') for o in i['ops']] + ([(i['ctor'], 'ctor')] if i['ctor'] else [])
+        for o, kind in members:
             body = []
             required = sum(1 for a in o['args'] if not a['optional'])
             if required:
@@ -249,10 +271,11 @@ def emit(ifaces, sources):
                         sys.exit(f"unsupported default: {a['type']} = {a['default']}")
                     body.append(f"let a{k} = cv::boolean_or(e, {v}, {a['default']});")
                 else:
-                    body.append(f"let a{k} = {convert(a['type'], v, names)};")
+                    body.append(f"let a{k} = {convert(a['type'], v, names, sides)};")
             call_args = ''.join(f', a{k}' for k in range(len(o['args'])))
-            body.append(f"impls::{m}::{snake(o['name'])}(e, h, this{call_args})")
-            out += glue(f"{m}_{snake(o['name'])}", i, body, 'op', bool(o['args']))
+            this = '' if kind == 'ctor' else ', this'
+            body.append(f"impls::{m}::{ident(o['name'])}(e, h{this}{call_args})")
+            out += glue(f"{m}_{snake(o['name'])}", i, body, kind, bool(o['args']))
     return '\n'.join(out).rstrip('\n') + '\n'
 
 

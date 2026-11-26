@@ -14,6 +14,7 @@ use crate::gc::NodeOps;
 use crate::host::DomHost;
 use crate::impls;
 use crate::shell;
+use crate::side::SideOps;
 
 pub struct EventTargetClass<E>(PhantomData<E>);
 
@@ -26,12 +27,14 @@ impl<E: Engine> EventTargetClass<E> {
         parent: None,
         attributes: &[],
         operations: &[
-            Operation { name: "addEventListener", length: 2, call: unsafe { Bound::host_fn(event_target_add_event_listener_abi::<E>) }, sig: Signature { args: &[IdlType::String, IdlType::Callback, IdlType::Boolean], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
-            Operation { name: "removeEventListener", length: 2, call: unsafe { Bound::host_fn(event_target_remove_event_listener_abi::<E>) }, sig: Signature { args: &[IdlType::String, IdlType::Callback, IdlType::Boolean], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "addEventListener", length: 2, call: unsafe { Bound::host_fn(event_target_add_event_listener_abi::<E>) }, sig: Signature { args: &[IdlType::String, IdlType::Callback, IdlType::Any], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "removeEventListener", length: 2, call: unsafe { Bound::host_fn(event_target_remove_event_listener_abi::<E>) }, sig: Signature { args: &[IdlType::String, IdlType::Callback, IdlType::Any], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "dispatchEvent", length: 1, call: unsafe { Bound::host_fn(event_target_dispatch_event_abi::<E>) }, sig: Signature { args: &[IdlType::Object], result: IdlType::Boolean, effects: Effects::THROWS } },
         ],
         constants: &[],
         interceptors: None,
         ops: None,
+        constructor: None,
     };
 }
 
@@ -41,7 +44,7 @@ fn event_target_add_event_listener<E: Engine>(e: &mut E, h: &mut DomHost<E>, thi
         cv::need(e, args, 2)?;
         let a0 = cv::atom(e, h, cv::arg::<E>(args, 0))?;
         let a1 = cv::callback_or_null(e, cv::arg::<E>(args, 1))?;
-        let a2 = cv::boolean_or(e, cv::arg::<E>(args, 2), false);
+        let a2 = cv::arg::<E>(args, 2);
         impls::event_target::add_event_listener(e, h, this, a0, a1, a2)
     })
 }
@@ -55,13 +58,25 @@ fn event_target_remove_event_listener<E: Engine>(e: &mut E, h: &mut DomHost<E>, 
         cv::need(e, args, 2)?;
         let a0 = cv::atom(e, h, cv::arg::<E>(args, 0))?;
         let a1 = cv::callback_or_null(e, cv::arg::<E>(args, 1))?;
-        let a2 = cv::boolean_or(e, cv::arg::<E>(args, 2), false);
+        let a2 = cv::arg::<E>(args, 2);
         impls::event_target::remove_event_listener(e, h, this, a0, a1, a2)
     })
 }
 
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn event_target_remove_event_listener_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, event_target_remove_event_listener::<E>) } }
+
+fn event_target_dispatch_event<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &EventTargetClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::side(e, h, cv::arg::<E>(args, 0), &EventClass::<E>::DEF)?;
+        impls::event_target::dispatch_event(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_target_dispatch_event_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, event_target_dispatch_event::<E>) } }
 
 pub struct NodeClass<E>(PhantomData<E>);
 
@@ -103,6 +118,7 @@ impl<E: Engine> NodeClass<E> {
         ],
         interceptors: None,
         ops: Some(&NodeOps::<E>::OPS),
+        constructor: None,
     };
 }
 
@@ -313,6 +329,7 @@ impl<E: Engine> ElementClass<E> {
         constants: &[],
         interceptors: None,
         ops: None,
+        constructor: None,
     };
 }
 
@@ -467,6 +484,7 @@ impl<E: Engine> DocumentClass<E> {
             Operation { name: "createTextNode", length: 1, call: unsafe { Bound::host_fn(document_create_text_node_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::NEW_OBJECT) } },
             Operation { name: "createComment", length: 1, call: unsafe { Bound::host_fn(document_create_comment_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::NEW_OBJECT) } },
             Operation { name: "getElementById", length: 1, call: unsafe { Bound::host_fn(document_get_element_by_id_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::NullableObject, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "createEvent", length: 1, call: unsafe { Bound::host_fn(document_create_event_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::NEW_OBJECT) } },
             Operation { name: "querySelector", length: 1, call: unsafe { Bound::host_fn(document_query_selector_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::NullableObject, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
             Operation { name: "querySelectorAll", length: 1, call: unsafe { Bound::host_fn(document_query_selector_all_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
             Operation { name: "getElementsByTagName", length: 1, call: unsafe { Bound::host_fn(document_get_elements_by_tag_name_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Object, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
@@ -475,6 +493,7 @@ impl<E: Engine> DocumentClass<E> {
         constants: &[],
         interceptors: None,
         ops: None,
+        constructor: None,
     };
 }
 
@@ -536,6 +555,18 @@ fn document_get_element_by_id<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E:
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn document_get_element_by_id_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, document_get_element_by_id::<E>) } }
 
+fn document_create_event<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        impls::document::create_event(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_create_event_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, document_create_event::<E>) } }
+
 fn document_query_selector<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
         let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
@@ -583,3 +614,264 @@ fn document_write<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args
 
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn document_write_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, document_write::<E>) } }
+
+pub struct EventClass<E>(PhantomData<E>);
+
+impl<E: Engine> EventClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "Event",
+        id: ClassId(5),
+        last: ClassId(5),
+        parent: None,
+        attributes: &[
+            Attribute { name: "type", get: unsafe { Bound::host_fn(event_get_type_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "target", get: unsafe { Bound::host_fn(event_get_target_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "srcElement", get: unsafe { Bound::host_fn(event_get_src_element_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "currentTarget", get: unsafe { Bound::host_fn(event_get_current_target_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "eventPhase", get: unsafe { Bound::host_fn(event_get_event_phase_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "cancelBubble", get: unsafe { Bound::host_fn(event_get_cancel_bubble_abi::<E>) }, set: Some(unsafe { Bound::host_fn(event_set_cancel_bubble_abi::<E>) }), sig: AttributeSig { ty: IdlType::Boolean, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+            Attribute { name: "bubbles", get: unsafe { Bound::host_fn(event_get_bubbles_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Boolean, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "cancelable", get: unsafe { Bound::host_fn(event_get_cancelable_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Boolean, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "returnValue", get: unsafe { Bound::host_fn(event_get_return_value_abi::<E>) }, set: Some(unsafe { Bound::host_fn(event_set_return_value_abi::<E>) }), sig: AttributeSig { ty: IdlType::Boolean, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+            Attribute { name: "defaultPrevented", get: unsafe { Bound::host_fn(event_get_default_prevented_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Boolean, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "composed", get: unsafe { Bound::host_fn(event_get_composed_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Boolean, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "isTrusted", get: unsafe { Bound::host_fn(event_get_is_trusted_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Boolean, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "timeStamp", get: unsafe { Bound::host_fn(event_get_time_stamp_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
+        ],
+        operations: &[
+            Operation { name: "composedPath", length: 0, call: unsafe { Bound::host_fn(event_composed_path_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Object, effects: Effects::NONE } },
+            Operation { name: "stopPropagation", length: 0, call: unsafe { Bound::host_fn(event_stop_propagation_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Undefined, effects: Effects::NONE } },
+            Operation { name: "stopImmediatePropagation", length: 0, call: unsafe { Bound::host_fn(event_stop_immediate_propagation_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Undefined, effects: Effects::NONE } },
+            Operation { name: "preventDefault", length: 0, call: unsafe { Bound::host_fn(event_prevent_default_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Undefined, effects: Effects::NONE } },
+            Operation { name: "initEvent", length: 1, call: unsafe { Bound::host_fn(event_init_event_abi::<E>) }, sig: Signature { args: &[IdlType::String, IdlType::Boolean, IdlType::Boolean], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+        ],
+        constants: &[
+            Constant { name: "NONE", value: 0.0 },
+            Constant { name: "CAPTURING_PHASE", value: 1.0 },
+            Constant { name: "AT_TARGET", value: 2.0 },
+            Constant { name: "BUBBLING_PHASE", value: 3.0 },
+        ],
+        interceptors: None,
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: Some(unsafe { Bound::host_fn(event_constructor_abi::<E>) }),
+    };
+}
+
+fn event_get_type<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::r#type(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_get_type_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, event_get_type::<E>) } }
+
+fn event_get_target<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::target(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_get_target_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, event_get_target::<E>) } }
+
+fn event_get_src_element<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::src_element(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_get_src_element_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, event_get_src_element::<E>) } }
+
+fn event_get_current_target<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::current_target(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_get_current_target_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, event_get_current_target::<E>) } }
+
+fn event_get_event_phase<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::event_phase(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_get_event_phase_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, event_get_event_phase::<E>) } }
+
+fn event_get_cancel_bubble<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::cancel_bubble(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_get_cancel_bubble_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, event_get_cancel_bubble::<E>) } }
+
+fn event_set_cancel_bubble<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        let value = e.to_boolean(value);
+        impls::event::set_cancel_bubble(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_set_cancel_bubble_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, event_set_cancel_bubble::<E>) } }
+
+fn event_get_bubbles<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::bubbles(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_get_bubbles_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, event_get_bubbles::<E>) } }
+
+fn event_get_cancelable<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::cancelable(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_get_cancelable_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, event_get_cancelable::<E>) } }
+
+fn event_get_return_value<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::return_value(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_get_return_value_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, event_get_return_value::<E>) } }
+
+fn event_set_return_value<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        let value = e.to_boolean(value);
+        impls::event::set_return_value(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_set_return_value_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, event_set_return_value::<E>) } }
+
+fn event_get_default_prevented<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::default_prevented(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_get_default_prevented_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, event_get_default_prevented::<E>) } }
+
+fn event_get_composed<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::composed(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_get_composed_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, event_get_composed::<E>) } }
+
+fn event_get_is_trusted<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::is_trusted(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_get_is_trusted_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, event_get_is_trusted::<E>) } }
+
+fn event_get_time_stamp<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::time_stamp(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_get_time_stamp_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, event_get_time_stamp::<E>) } }
+
+fn event_composed_path<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::composed_path(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_composed_path_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, event_composed_path::<E>) } }
+
+fn event_stop_propagation<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::stop_propagation(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_stop_propagation_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, event_stop_propagation::<E>) } }
+
+fn event_stop_immediate_propagation<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::stop_immediate_propagation(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_stop_immediate_propagation_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, event_stop_immediate_propagation::<E>) } }
+
+fn event_prevent_default<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        impls::event::prevent_default(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_prevent_default_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, event_prevent_default::<E>) } }
+
+fn event_init_event<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &EventClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        let a1 = cv::boolean_or(e, cv::arg::<E>(args, 1), false);
+        let a2 = cv::boolean_or(e, cv::arg::<E>(args, 2), false);
+        impls::event::init_event(e, h, this, a0, a1, a2)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_init_event_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, event_init_event::<E>) } }
+
+fn event_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        let a1 = cv::arg::<E>(args, 1);
+        impls::event::constructor(e, h, a0, a1)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn event_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, event_constructor::<E>) } }

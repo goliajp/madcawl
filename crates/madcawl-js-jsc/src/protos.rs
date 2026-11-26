@@ -81,9 +81,14 @@ impl Jsc {
             Some(p) => self.class_objects(realm, p),
             None => (self.helper(realm, Helper::FunctionProto), self.helper(realm, Helper::ObjectProto)),
         };
-        // SAFETY: plain objects of a live realm
+        let ctor = class.constructor.map_or(std::ptr::null_mut(), |c| {
+            let kind = FnKind::Host { f: c.get(), data: 0, thunk: thunk::<H> };
+            Box::into_raw(Box::new(FnRec { kind, host_type: std::any::TypeId::of::<H>() })).cast()
+        });
+        // SAFETY: plain objects of a live realm; the record is freed by the
+        // interface class's finalizer
         let (iface, proto) = unsafe {
-            let i = Value(ffi::JSObjectMake(ctx, self.classes.iface, std::ptr::null_mut()) as u64);
+            let i = Value(ffi::JSObjectMake(ctx, self.classes.iface, ctor) as u64);
             let p = Value(ffi::JSObjectMake(ctx, std::ptr::null_mut(), std::ptr::null_mut()) as u64);
             self.protect(i);
             self.protect(p);

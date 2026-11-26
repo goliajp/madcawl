@@ -252,6 +252,10 @@ pub struct ClassDef<E: Engine, H: 'static> {
     /// The host object callbacks; a class without them uses its
     /// parent's.
     pub ops: Option<&'static HostOps<E, H>>,
+    /// What `new` on the interface object calls, with undefined as
+    /// `this`; it returns the new wrapper. `None`: constructing throws a
+    /// TypeError, as calling the interface object always does.
+    pub constructor: Option<Bound<HostFn, E, H>>,
 }
 
 impl<E: Engine, H: 'static> ClassDef<E, H> {

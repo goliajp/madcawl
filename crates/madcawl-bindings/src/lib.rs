@@ -11,12 +11,14 @@
 //! [`DomHost::collect`] runs the engine's cycle collector by deadline.
 
 mod convert;
+mod event;
 mod event_loop;
 mod gc;
 mod host;
 mod impls;
 mod parse;
 mod shell;
+mod side;
 mod trees;
 mod window;
 
@@ -26,6 +28,7 @@ mod generated;
 pub use convert::Thrown;
 pub use event_loop::{Clock, EventLoop};
 pub use gc::NodeOps;
-pub use generated::{DocumentClass, ElementClass, EventTargetClass, NodeClass};
+pub use generated::{DocumentClass, ElementClass, EventClass, EventTargetClass, NodeClass};
+pub use side::{SideOps, SideRef};
 pub use host::DomHost;
 pub use parse::Loader;

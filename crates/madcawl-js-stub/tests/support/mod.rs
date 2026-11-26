@@ -47,6 +47,7 @@ pub static CLASS: ClassDef<Stub, Log> = ClassDef {
     constants: &[],
     interceptors: Some(&INTERCEPTORS),
     ops: Some(&OPS),
+    constructor: None,
 };
 
 impl Host<Stub> for Log {

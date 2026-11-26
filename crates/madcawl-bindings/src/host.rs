@@ -15,6 +15,8 @@ use crate::generated::{DocumentClass, ElementClass, NodeClass};
 pub(crate) struct Listener<E: Engine> {
     pub ty: Atom,
     pub capture: bool,
+    /// Removed before its first call.
+    pub once: bool,
     pub callback: Member<E>,
 }
 
@@ -40,6 +42,8 @@ pub struct DomHost<E: Engine> {
     pub(crate) moved: Vec<NodeId>,
     /// Suspects went to the engine since its last collection finished.
     pub(crate) collect_due: bool,
+    /// The host objects that are not nodes (`side.rs`).
+    pub(crate) sides: crate::side::Sides,
 }
 
 impl<E: Engine> DomHost<E> {
@@ -64,6 +68,7 @@ impl<E: Engine> DomHost<E> {
             window_listeners: Vec::new(),
             moved: Vec::new(),
             collect_due: false,
+            sides: Default::default(),
         };
         if E::PLACES_WRAPPERS {
             h.dom.track_moves();
@@ -119,7 +124,8 @@ impl<E: Engine> DomHost<E> {
             for n in std::mem::take(&mut self.suspects) {
                 e.suspect(self.host_ref(n));
             }
-            if delivered == 0 && freed.is_empty() {
+            let sides = self.settle_sides(e);
+            if delivered == 0 && freed.is_empty() && !sides {
                 break;
             }
             self.freed = freed;
@@ -140,8 +146,9 @@ impl<E: Engine> DomHost<E> {
     /// handle for the call, with a microtask checkpoint after each when
     /// no script is on the stack (a dispatch the user started, not one
     /// script started). The dispatch stops when script is being ended.
-    /// The stand-in for event dispatch until events are bound: the
-    /// listener gets the type as its argument.
+    /// The host's own firing, not yet an Event dispatch (that is
+    /// `dispatchEvent`'s, `event.rs`): the listener gets the type as its
+    /// argument.
     pub fn fire(&mut self, e: &mut E, target: NodeId, ty: Atom) -> usize {
         let roots: Vec<Root<E>> = self
             .listeners_of(target)
@@ -208,6 +215,7 @@ impl<E: Engine> DomHost<E> {
         }
         // wrappers made since the last settle are preserved by it
         self.settle(e);
+        self.close_sides(e);
         for n in self.dom.wrapped() {
             let w = self.dom.wrapper(n);
             if w & 1 != 0 {
@@ -223,6 +231,9 @@ impl<E: Engine> DomHost<E> {
 
 impl<E: Engine> Host<E> for DomHost<E> {
     fn class_of(&self, obj: HostRef) -> &'static ClassDef<E, Self> {
+        if let Some(r) = self.sides.of(obj) {
+            return side_class::<E>(&self.sides.get(r).data);
+        }
         match self.dom.kind(self.node(obj)) {
             NodeKind::Document => &DocumentClass::<E>::DEF,
             NodeKind::Element => &ElementClass::<E>::DEF,
@@ -240,5 +251,12 @@ impl<E: Engine> Host<E> for DomHost<E> {
         let _sentinel = err.into_raw();
         let ex = e.take_exception().expect("just thrown");
         e.finish_loading_module(self, payload, ex);
+    }
+}
+
+/// The class of a side object.
+pub(crate) fn side_class<E: Engine>(data: &crate::side::SideData) -> &'static ClassDef<E, DomHost<E>> {
+    match data {
+        crate::side::SideData::Event(_) => &crate::generated::EventClass::<E>::DEF,
     }
 }

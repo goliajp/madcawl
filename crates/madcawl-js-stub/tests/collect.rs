@@ -99,6 +99,7 @@ static CLASS: ClassDef<Stub, Objs> = ClassDef {
     constants: &[],
     interceptors: None,
     ops: Some(&OPS),
+    constructor: None,
 };
 
 impl Host<Stub> for Objs {
