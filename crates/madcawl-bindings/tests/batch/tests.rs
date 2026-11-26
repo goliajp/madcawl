@@ -1,0 +1,52 @@
+// the batch's tests, one per function of `mod.rs`; the including file
+// names its engine `E` and implements `batch::Driver` for it
+
+#[test]
+fn elements_are_made_moved_and_read_back_as_the_same_wrappers() {
+    batch::elements_are_made_moved_and_read_back_as_the_same_wrappers::<E>();
+}
+
+#[test]
+fn text_content_reads_and_replaces_children() {
+    batch::text_content_reads_and_replaces_children::<E>();
+}
+
+#[test]
+fn wrong_receivers_and_wrong_trees_throw_the_right_errors() {
+    batch::wrong_receivers_and_wrong_trees_throw_the_right_errors::<E>();
+}
+
+#[test]
+fn methods_constants_and_readonly_attributes_behave_as_members() {
+    batch::methods_constants_and_readonly_attributes_behave_as_members::<E>();
+}
+
+#[test]
+fn interface_objects_hold_the_prototype_chain() {
+    batch::interface_objects_hold_the_prototype_chain::<E>();
+}
+
+#[test]
+fn attributes_and_ids_of_a_parsed_document() {
+    batch::attributes_and_ids_of_a_parsed_document::<E>();
+}
+
+#[test]
+fn listeners_are_added_once_called_and_removed() {
+    batch::listeners_are_added_once_called_and_removed::<E>();
+}
+
+#[test]
+fn an_event_type_is_one_name_however_it_is_spelled() {
+    batch::an_event_type_is_one_name_however_it_is_spelled::<E>();
+}
+
+#[test]
+fn a_dom_exception_carries_name_message_and_code() {
+    batch::a_dom_exception_carries_name_message_and_code::<E>();
+}
+
+#[test]
+fn a_closed_host_leaves_a_sound_dom() {
+    batch::a_closed_host_leaves_a_sound_dom::<E>();
+}

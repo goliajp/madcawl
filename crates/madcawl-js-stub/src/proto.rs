@@ -85,6 +85,12 @@ impl Stub {
                 let (_, p) = self.class_objects(realm, class_as::<H>(class));
                 Some(self.retain(p))
             }
+            // constants are on the interface object too, and an interface
+            // object inherits its parent's
+            (Body::Function { call: Call::Interface { class }, .. }, _) => {
+                let k = class_as::<H>(class).chain().flat_map(|c| c.constants).find(|k| k.name.as_bytes() == name)?;
+                Some(Stub::owned(Value::number(k.value)))
+            }
             (Body::Prototype { class }, b"constructor") => {
                 let (i, _) = self.class_objects(realm, class_as::<H>(class));
                 Some(self.retain(i))

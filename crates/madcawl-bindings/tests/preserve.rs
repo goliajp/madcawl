@@ -146,11 +146,13 @@ fn a_weak_handle_of_the_host_does_not_preserve_the_wrapper() {
     let div = js.element("div");
     js.run(html.get(), "appendChild", &[div.get()]);
     let weak = js.e.weak(div.get());
-    let word = Stub::wrapper_word(div.get());
     js.drop(div);
     assert!(js.gone(&weak), "the wrapper died with the node alive");
     let again = js.get(html.get(), "firstChild");
-    assert_ne!(Stub::wrapper_word(again.get()), word);
+    // the new wrapper may take the old one's memory, so its word may
+    // repeat: the old one's weak handle still reads as gone
+    assert!(js.gone(&weak), "reading the node again made a new wrapper");
+    assert_eq!(js.read(again.get(), "tagName"), "DIV");
     js.e.weak_drop(weak);
     for v in [again, html] {
         js.drop(v);
