@@ -10,6 +10,7 @@ mod script;
 mod state;
 mod tag;
 mod text;
+mod write;
 
 use crate::error::ParseError;
 use crate::input::{Input, encode_char};
@@ -155,44 +156,6 @@ impl Tokenizer {
     pub fn set_last_start_tag(&mut self, name: &[u8]) {
         self.last_start_tag.clear();
         self.last_start_tag.extend_from_slice(name);
-    }
-
-    /// A script the parser stopped for starts running: what it writes
-    /// goes just before the next code point.
-    pub fn begin_script(&mut self) {
-        self.input.push_point();
-    }
-
-    /// The script is done: the insertion point it had goes away.
-    pub fn end_script(&mut self) {
-        self.input.pop_point();
-    }
-
-    /// Whether `document.write` has somewhere to put its text: a script
-    /// the parser stopped for is running.
-    pub fn has_insertion_point(&self) -> bool {
-        self.input.has_point()
-    }
-
-    /// `document.write`: WTF-8 bytes at the insertion point. Tokenize
-    /// them with [`Tokenizer::run_inserted`].
-    pub fn insert(&mut self, bytes: &[u8]) {
-        self.input.insert(bytes);
-    }
-
-    /// Tokenize up to the insertion point, as `document.write` does
-    /// after inserting: `NeedInput` once the inserted text is read,
-    /// `Paused` at a script inside it.
-    pub fn run_inserted<S: Sink>(&mut self, sink: &mut S) -> Step {
-        let mut input = std::mem::take(&mut self.input);
-        let step = input.up_to_point(|i| {
-            std::mem::swap(&mut self.input, i);
-            let step = self.run(sink);
-            std::mem::swap(&mut self.input, i);
-            step
-        });
-        self.input = input;
-        step
     }
 
     /// Tokenize what has arrived.
@@ -402,11 +365,7 @@ pub(crate) fn is_alpha(c: u32) -> bool {
 }
 
 pub(crate) fn lower(c: u32) -> u32 {
-    if matches!(c, 0x41..=0x5A) {
-        c + 0x20
-    } else {
-        c
-    }
+    c + 0x20 * u32::from(matches!(c, 0x41..=0x5A))
 }
 
 pub(crate) const NUL: u32 = 0;

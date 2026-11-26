@@ -8,6 +8,11 @@
 
 use crate::error::ParseError;
 
+mod encode;
+mod points;
+
+pub(crate) use encode::{encode_char, push_char};
+
 /// The end of the input, read after the last code point.
 pub(crate) const EOF: u32 = u32::MAX;
 /// Not enough input to say what comes next; the caller waits for more.
@@ -44,46 +49,6 @@ impl Input {
             }
         }
         self.buf.extend_from_slice(bytes);
-    }
-
-    /// A new insertion point just before the next code point.
-    pub(crate) fn push_point(&mut self) {
-        self.points.push(self.pos);
-    }
-
-    pub(crate) fn pop_point(&mut self) {
-        self.points.pop();
-    }
-
-    pub(crate) fn has_point(&self) -> bool {
-        !self.points.is_empty()
-    }
-
-    /// `bytes` at the innermost insertion point, which moves past them;
-    /// the outer points after it move with the text.
-    pub(crate) fn insert(&mut self, bytes: &[u8]) {
-        let at = *self.points.last().expect("an insertion point");
-        self.buf.splice(at..at, bytes.iter().copied());
-        for p in &mut self.points {
-            if *p >= at {
-                *p += bytes.len();
-            }
-        }
-    }
-
-    /// Run `f` with the input ending at the innermost insertion point,
-    /// as the tokenizer runs for `document.write`: what follows it is
-    /// set aside and has not arrived.
-    pub(crate) fn up_to_point<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
-        let at = *self.points.last().expect("an insertion point");
-        let tail = self.buf.split_off(at);
-        let done = std::mem::replace(&mut self.done, false);
-        let r = f(self);
-        self.done = done;
-        let cut = self.buf.len() - at;
-        self.buf.extend_from_slice(&tail);
-        debug_assert_eq!(cut, 0, "nothing arrives while the rest is set aside");
-        r
     }
 
     pub(crate) fn finish(&mut self) {
@@ -356,43 +321,4 @@ pub(crate) const fn stops(extra: &[u8]) -> Stops {
         i += 1;
     }
     t
-}
-
-/// A code point as WTF-8.
-#[inline]
-pub(crate) fn encode_char(c: u32) -> ([u8; 4], usize) {
-    let c = visible(c);
-    match c {
-        0..=0x7F => ([c as u8, 0, 0, 0], 1),
-        0x80..=0x7FF => ([0xC0 | (c >> 6) as u8, 0x80 | (c & 0x3F) as u8, 0, 0], 2),
-        0x800..=0xFFFF => (
-            [
-                0xE0 | (c >> 12) as u8,
-                0x80 | ((c >> 6) & 0x3F) as u8,
-                0x80 | (c & 0x3F) as u8,
-                0,
-            ],
-            3,
-        ),
-        _ => (
-            [
-                0xF0 | (c >> 18) as u8,
-                0x80 | ((c >> 12) & 0x3F) as u8,
-                0x80 | ((c >> 6) & 0x3F) as u8,
-                0x80 | (c & 0x3F) as u8,
-            ],
-            4,
-        ),
-    }
-}
-
-/// Append a code point as WTF-8.
-#[inline]
-pub(crate) fn push_char(out: &mut Vec<u8>, c: u32) {
-    if c < 0x80 {
-        out.push(c as u8);
-    } else {
-        let (b, n) = encode_char(c);
-        out.extend_from_slice(&b[..n]);
-    }
 }

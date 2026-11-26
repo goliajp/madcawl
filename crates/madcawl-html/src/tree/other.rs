@@ -148,4 +148,30 @@ impl<S: TreeSink> TreeBuilder<S> {
         }
         Step::Done
     }
+
+    /// The sink, for a script that runs while the parser waits.
+    pub fn sink_mut(&mut self) -> &mut S {
+        &mut self.sink
+    }
+
+    /// Have the tokenizer stop (`Step::Paused`) after each script
+    /// element's end tag, as when scripting runs: the element is then
+    /// [`TreeBuilder::take_script`]'s.
+    pub fn pause_for_scripts(&mut self, on: bool) {
+        self.pause_scripts = on;
+    }
+
+    /// The script element the parser stopped after, once.
+    pub fn take_script(&mut self) -> Option<S::Handle> {
+        self.script.take()
+    }
+
+    /// Stop parsing: every open element is done.
+    pub(super) fn stop(&mut self) {
+        self.flush_text();
+        while !self.open.is_empty() {
+            self.pop();
+        }
+        self.stopped = true;
+    }
 }
