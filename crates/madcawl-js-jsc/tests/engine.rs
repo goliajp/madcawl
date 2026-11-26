@@ -204,3 +204,44 @@ fn handlers_see_their_scopes_and_weak_handles_read_their_targets() {
     }
     e.weak_drop(w);
 }
+
+fn function(e: &mut Jsc, h: &mut Log, realm: madcawl_js_jsc::Realm, src: &str) -> Owned<Value> {
+    let url = DomString::from_wtf8(b"test.js");
+    let f = e.evaluate(h, realm, &DomString::from_wtf8(src.as_bytes()), &ScriptOrigin { url: &url, line: 1, column: 0 });
+    assert!(e.is_callable(f.get()));
+    f
+}
+
+#[test]
+fn a_primitive_this_reaches_the_function_as_it_is() {
+    let (mut e, mut h, realm) = setup();
+    let f = function(&mut e, &mut h, realm, "(function (x) { 'use strict'; return typeof this + ' ' + this + ' ' + x; })");
+    let s = e.string(DomString::from_wtf8(b"s"));
+    for (this, want) in [(Jsc::number(5.0), "number 5 1"), (Jsc::null(), "object null 1"), (Jsc::undefined(), "undefined undefined 1"), (s.get(), "string s 1")] {
+        let r = e.call(&mut h, f.get(), this, &[Jsc::number(1.0)]);
+        assert_eq!(text(&e.as_string(r.get()).unwrap()), want);
+        e.release(r);
+    }
+    e.release(s);
+    e.release(f);
+}
+
+#[test]
+fn a_detached_realms_waiting_microtasks_are_dropped_unrun() {
+    let (mut e, mut h, realm) = setup();
+    let other = e.new_realm();
+    let g = e.global(realm);
+    let log = e.get(&mut h, g.get(), Key::Str(&DomString::from_wtf8(b"log")));
+    e.release(g);
+    let arg = e.string(DomString::from_wtf8(b"late"));
+    e.enqueue_microtask(log, arg);
+    e.detach_realm(realm);
+    e.run_microtasks(&mut h);
+    assert!(h.reported.is_empty(), "the detached realm's job ran: {:?}", h.reported);
+    // the other realm's microtasks still run at a checkpoint
+    let f = function(&mut e, &mut h, other, "(function (x) { globalThis.got = x; })");
+    let arg = e.string(DomString::from_wtf8(b"ok"));
+    e.enqueue_microtask(f, arg);
+    e.run_microtasks(&mut h);
+    assert_eq!(eval(&mut e, &mut h, other, "got"), "ok");
+}

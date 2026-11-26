@@ -14,13 +14,21 @@ impl Jsc {
     pub(crate) fn weak_slot(&mut self, v: Value) -> u32 {
         // SAFETY: a type check on a live value
         let object = v.is_cell() && unsafe { ffi::JSValueGetType(self.base, v.raw()) } == ffi::kJSTypeObject;
-        let slot = if object {
-            let w = self.call_helper(self.current, Helper::WeakRef, &[v]).expect("making a WeakRef");
-            self.protect(w);
-            WeakSlot::Ref(w)
-        } else {
-            self.protect(v);
-            WeakSlot::Strong(v)
+        let made = if object { self.call_helper(self.current, Helper::WeakRef, &[v]) } else { Ok(UNDEFINED) };
+        let slot = match made {
+            Ok(w) if object => {
+                self.protect(w);
+                WeakSlot::Ref(w)
+            }
+            // a primitive; or script was being stopped as the `WeakRef`
+            // was made, and the handle holds its object until dropped
+            r => {
+                if r.is_err() {
+                    self.after_stop();
+                }
+                self.protect(v);
+                WeakSlot::Strong(v)
+            }
         };
         match self.weak_free.pop() {
             Some(i) => {
@@ -37,10 +45,14 @@ impl Jsc {
     pub(crate) fn weak_read(&mut self, w: u32) -> Option<Owned<Value>> {
         match *self.weak[w as usize].as_ref().expect("a live weak handle") {
             WeakSlot::Strong(v) => Some(self.take(v)),
-            WeakSlot::Ref(r) => {
-                let v = self.call_helper(self.current, Helper::Deref, &[r]).expect("reading a WeakRef");
-                (v != UNDEFINED).then(|| self.take(v))
-            }
+            WeakSlot::Ref(r) => match self.call_helper(self.current, Helper::Deref, &[r]) {
+                Ok(v) => (v != UNDEFINED).then(|| self.take(v)),
+                // script was being stopped: read as gone
+                Err(_) => {
+                    self.after_stop();
+                    None
+                }
+            },
         }
     }
 

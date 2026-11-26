@@ -68,7 +68,11 @@ impl Control for Jsc {
 impl Jsc {
     /// What an entry does first: see the requests sent since the last
     /// one. A termination is final; an abort sent while no script runs
-    /// is dropped; a callback request is delivered here.
+    /// is dropped; a callback request is delivered here and only here,
+    /// so one made while script runs waits for the next entry (a call
+    /// into the isolate, a host function calling back in): the watchdog
+    /// does not call the host from inside the framework's interrupt
+    /// check.
     pub(crate) fn poll<H: Host<Jsc>>(&mut self, host: &mut H) {
         let bits = self.flags.bits.load(Ordering::Acquire);
         if bits == 0 {
@@ -89,24 +93,26 @@ impl Jsc {
     }
 
     /// After a call into the framework came back with an exception: was
-    /// it the watchdog ending script?
+    /// it the watchdog ending script? An abort's request stays until no
+    /// script is on the stack, so the watchdog ends the script that made
+    /// the nested call too.
     pub(crate) fn after_stop(&mut self) {
         let bits = self.flags.bits.load(Ordering::Acquire);
         if bits & TERMINATE != 0 {
             self.terminated();
         } else if bits & ABORT != 0 {
-            self.flags.bits.fetch_and(!ABORT, Ordering::AcqRel);
             if self.halt == Halt::Running {
                 self.halt = Halt::Aborted;
+            }
+            if self.depth == 0 {
+                self.flags.bits.fetch_and(!ABORT, Ordering::AcqRel);
             }
         }
     }
 
     fn terminated(&mut self) {
         self.halt = Halt::Terminated;
-        for v in std::mem::take(&mut self.pending) {
-            self.unprotect(v);
-        }
+        self.drop_pending();
     }
 
     fn memory_check<H: Host<Jsc>>(&mut self, host: &mut H) {

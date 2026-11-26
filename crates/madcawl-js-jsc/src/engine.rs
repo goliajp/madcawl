@@ -190,8 +190,10 @@ impl Engine for Jsc {
         let kind = FnKind::Host { f: f.get(), data, thunk: thunk::<H> };
         let v = make_function(self, ctx, FnRec { kind, host_type: std::any::TypeId::of::<H>() }, fproto);
         let n = self.string_of(&DomString::from_wtf8(name.as_bytes()));
-        let r = self.call_helper(realm.0, Helper::Named, &[v, n, Value::number(f64::from(length))]);
-        assert!(r.is_ok(), "naming a host function");
+        // stopped while naming it, the function stays usable, unnamed
+        if self.call_helper(realm.0, Helper::Named, &[v, n, Value::number(f64::from(length))]).is_err() {
+            self.after_stop();
+        }
         self.unprotect(n);
         Jsc::owned(v)
     }
@@ -212,8 +214,7 @@ impl Engine for Jsc {
     }
 
     fn throw_error(&mut self, kind: ErrorKind, message: &str) -> Owned<Value> {
-        let e = self.make_error(kind, message);
-        self.throw(Jsc::owned(e))
+        self.throw_new(kind, message)
     }
 
     fn take_exception(&mut self) -> Option<Owned<Value>> {
@@ -299,9 +300,7 @@ impl Engine for Jsc {
     }
 
     fn discard_microtasks(&mut self) -> Result<(), Unsupported> {
-        for v in std::mem::take(&mut self.pending) {
-            self.unprotect(v);
-        }
+        self.drop_pending();
         Ok(())
     }
 

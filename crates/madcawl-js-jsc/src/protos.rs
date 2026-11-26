@@ -28,6 +28,7 @@ pub(crate) enum Helper {
     Named = 10,
     FunctionProto = 11,
     ObjectProto = 12,
+    Call = 13,
 }
 
 const HELPERS: &str = r#"(function () {
@@ -88,6 +89,7 @@ const HELPERS: &str = r#"(function () {
     named,
     Function.prototype,
     Object.prototype,
+    Function.prototype.call,
   ];
 })()"#;
 
@@ -109,7 +111,7 @@ impl Jsc {
         // SAFETY: the helper script on a live context
         let arr = unsafe { ffi::JSEvaluateScript(ctx, src.s, std::ptr::null_mut(), std::ptr::null_mut(), 1, &mut exc) };
         assert!(exc.is_null(), "the realm helpers compile");
-        let helpers = (0..=Helper::ObjectProto as u32)
+        let helpers = (0..=Helper::Call as u32)
             .map(|i| {
                 // SAFETY: the array the script returned
                 let v = Value::from_ref(unsafe {
@@ -201,8 +203,13 @@ impl Jsc {
         }
     }
 
+    /// Stopped midway (the watchdog ends helpers too), the class keeps
+    /// the members defined so far; after an abort, later tasks see the
+    /// class so.
     fn define(&mut self, realm: u32, h: Helper, args: &[Value]) {
-        assert!(self.call_helper(realm, h, args).is_ok(), "defining a host class member");
+        if self.call_helper(realm, h, args).is_err() {
+            self.after_stop();
+        }
     }
 }
 
@@ -221,4 +228,8 @@ pub(crate) fn detach(e: &mut Jsc, r: u32) {
     }
     // SAFETY: made in make_realm; objects other realms hold stay in the group
     unsafe { ffi::JSGlobalContextRelease(ctx) };
+    e.drop_pending_of(r);
+    if let Some(live) = e.live_realm() {
+        e.current = live;
+    }
 }

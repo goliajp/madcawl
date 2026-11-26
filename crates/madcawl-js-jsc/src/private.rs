@@ -43,16 +43,15 @@ pub fn check() -> Vec<&'static str> {
         .collect()
 }
 
-// the framework arms its timer once per entry: a callback that lets
-// script go on arms it again, or it would never be asked a second time
+// the framework arms its timer once per entry and asks once: armed
+// again either way, so that script a stop did not end (script that
+// caught the exception a host function threw while halted, the script
+// a nested call returned to) is asked again
 unsafe extern "C" fn should_terminate(_: JSContextRef, data: *mut c_void) -> bool {
     // SAFETY: the flags the isolate keeps alive while its group lives
     let flags = unsafe { &*data.cast::<Flags>() };
-    if flags.bits.load(Ordering::Acquire) & (TERMINATE | ABORT) != 0 {
-        return true;
-    }
     arm(flags.group.load(Ordering::Relaxed) as JSContextGroupRef, data.cast());
-    false
+    flags.bits.load(Ordering::Acquire) & (TERMINATE | ABORT) != 0
 }
 
 fn arm(group: JSContextGroupRef, flags: *const Flags) {

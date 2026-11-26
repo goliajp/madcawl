@@ -119,15 +119,26 @@ impl Jsc {
 
     pub(crate) fn call_value<H: Host<Jsc>>(&mut self, host: &mut H, f: Value, this: Value, args: &[Value]) -> Owned<Value> {
         if !self.callable(f) {
-            let e = self.make_error(madcawl_js::ErrorKind::Type, "not a function");
-            self.register(e);
-            self.unprotect(e);
-            return Jsc::owned(THROWN);
+            return self.throw_new(madcawl_js::ErrorKind::Type, "not a function");
         }
-        let this = if this.is_cell() { this.0 as JSObjectRef } else { std::ptr::null_mut() };
+        // SAFETY: a type check on a live value
+        if this.is_cell() && unsafe { ffi::JSValueGetType(self.base, this.raw()) } == ffi::kJSTypeObject {
+            let this = this.0 as JSObjectRef;
+            return self.run_value(host, |e, exc| {
+                // SAFETY: a live function and arguments; `Value` is the word
+                unsafe { ffi::JSObjectCallAsFunction(e.ctx(), f.0 as _, this, args.len(), args.as_ptr().cast(), exc) }
+            });
+        }
+        // the framework takes only an object as `this`, and passes the
+        // global for none: anything else goes through
+        // `Function.prototype.call`, which passes it as it is
+        let call = self.helper(self.current, Helper::Call);
+        let mut all = Vec::with_capacity(args.len() + 1);
+        all.push(this);
+        all.extend_from_slice(args);
         self.run_value(host, |e, exc| {
-            // SAFETY: a live function and arguments; `Value` is the word
-            unsafe { ffi::JSObjectCallAsFunction(e.ctx(), f.0 as _, this, args.len(), args.as_ptr().cast(), exc) }
+            // SAFETY: as above, with `f` as the `this` of `call`
+            unsafe { ffi::JSObjectCallAsFunction(e.ctx(), call.0 as _, f.0 as _, all.len(), all.as_ptr().cast(), exc) }
         })
     }
 
@@ -187,8 +198,10 @@ impl Jsc {
         })
     }
 
-    /// A new error of `kind` in the current realm, counted.
-    pub(crate) fn make_error(&mut self, kind: madcawl_js::ErrorKind, message: &str) -> Value {
+    /// Throw a new error of `kind` made in the current realm. Making it
+    /// runs script, so it can itself be stopped: then nothing is
+    /// registered, as for any call script was being ended in.
+    pub(crate) fn throw_new(&mut self, kind: madcawl_js::ErrorKind, message: &str) -> Owned<Value> {
         use madcawl_js::ErrorKind::*;
         let k = match kind {
             Type => 0.0,
@@ -199,8 +212,16 @@ impl Jsc {
         let msg = self.string_of(&DomString::from_wtf8(message.as_bytes()));
         let r = self.call_helper(self.current, Helper::Error, &[Value::number(k), msg]);
         self.unprotect(msg);
-        let e = r.expect("making an error throws nothing");
-        self.protect(e);
-        e
+        match r {
+            Ok(e) if !self.halted() => self.register(e),
+            Ok(_) => {}
+            Err(x) => {
+                self.after_stop();
+                if !self.halted() {
+                    self.register(x);
+                }
+            }
+        }
+        Jsc::owned(THROWN)
     }
 }

@@ -28,6 +28,7 @@ impl Jsc {
             id: class.id,
             host_type: TypeId::of::<H>(),
             js: Value(0),
+            realm: realm.0,
             dead: false,
             orphan: false,
             shared: self.shared,
@@ -70,15 +71,22 @@ impl Jsc {
         }
         // SAFETY: a wrapper's private data is its record
         let rec = unsafe { &*ffi::JSObjectGetPrivate(v.0 as _).cast::<WrapRec>() };
-        (rec.host_type == TypeId::of::<H>() && class.contains(rec.id)).then_some(rec.obj)
+        let live = !self.realms[rec.realm as usize].detached;
+        (live && rec.host_type == TypeId::of::<H>() && class.contains(rec.id)).then_some(rec.obj)
     }
 
     /// Tell the host which new wrappers are preserved and which died;
-    /// free the records of the dead.
+    /// free the records of the dead. The wrappers of a detached realm
+    /// belonged to a host that is gone, which is not this one: a new one
+    /// loses its preserved count here, a dead one is freed untold.
     pub(crate) fn drain<H: Host<Jsc>>(&mut self, host: &mut H) -> usize {
         for rec in std::mem::take(&mut self.unannounced) {
             // SAFETY: a record whose wrapper is preserved, so alive
             let rec = unsafe { &*rec };
+            if self.realms[rec.realm as usize].detached {
+                self.unprotect(rec.js);
+                continue;
+            }
             (class_of::<H>(rec).host_ops().wrapper_needs_preserve)(host, rec.obj);
         }
         let dead = self.shared().notices.take();
@@ -86,7 +94,7 @@ impl Jsc {
         for rec in dead {
             // SAFETY: a finalized wrapper's record, freed only here
             let r = unsafe { Box::from_raw(rec) };
-            if !r.orphan {
+            if !r.orphan && !self.realms[r.realm as usize].detached {
                 (class_of::<H>(&r).host_ops().wrapper_died)(host, r.obj);
                 n += 1;
             }

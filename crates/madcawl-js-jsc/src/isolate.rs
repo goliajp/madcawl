@@ -140,6 +140,15 @@ impl Jsc {
         }
     }
 
+    /// The current realm when it is live, or else the first live one.
+    pub(crate) fn live_realm(&self) -> Option<u32> {
+        let live = |i: u32| self.realms.get(i as usize).is_some_and(|r| !r.detached);
+        if live(self.current) {
+            return Some(self.current);
+        }
+        (0..self.realms.len() as u32).find(|&i| live(i))
+    }
+
     pub(crate) fn realm_ctx(&mut self, r: Realm) -> JSContextRef {
         let i = self.index(r);
         self.current = i;
@@ -200,9 +209,7 @@ impl Drop for Jsc {
         if let Some(e) = self.exception.take() {
             self.unprotect(e);
         }
-        for v in std::mem::take(&mut self.pending) {
-            self.unprotect(v);
-        }
+        self.drop_pending();
         for (p, (f, _)) in std::mem::take(&mut self.proxies) {
             self.unprotect(Value(p));
             self.unprotect(f);

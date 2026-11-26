@@ -45,6 +45,9 @@ pub(crate) struct WrapRec {
     pub id: ClassId,
     pub host_type: TypeId,
     pub js: Value,
+    /// The realm it was made in: once that realm is detached its host
+    /// is gone, and nothing about the wrapper reaches a host again.
+    pub realm: u32,
     /// Finalized: its notice is queued.
     pub dead: bool,
     /// Refused by `wrapper_upgrade`: the host let go of it already.
@@ -130,10 +133,8 @@ unsafe extern "C" fn call_fn(
     let rec = unsafe { &mut *ffi::JSObjectGetPrivate(function).cast::<FnRec>() };
     // SAFETY: the frame's engine, suspended in the framework
     let e = unsafe { &mut *f.engine };
-    if e.halted() {
-        return UNDEFINED.raw();
-    }
     match rec.kind {
+        FnKind::Host { .. } if e.halted() => halted(exception),
         FnKind::Host { f: hf, data, thunk } => {
             assert_eq!(rec.host_type, f.host_type, "one host type per isolate");
             let this = if this.is_null() { UNDEFINED.0 } else { this as u64 };
@@ -142,14 +143,10 @@ unsafe extern "C" fn call_fn(
             // SAFETY: as above
             let e = unsafe { &mut *f.engine };
             if r == THROWN {
-                match e.exception.take() {
-                    Some(x) => {
-                        // SAFETY: the framework's exception slot
-                        unsafe { *exception = x.raw() };
-                        e.unprotect(x);
-                    }
-                    None => return UNDEFINED.raw(),
-                }
+                let Some(x) = e.exception.take() else { return halted(exception) };
+                // SAFETY: the framework's exception slot
+                unsafe { *exception = x.raw() };
+                e.unprotect(x);
                 return std::ptr::null();
             }
             // the result stays on this stack, which the collector scans,
@@ -163,6 +160,16 @@ unsafe extern "C" fn call_fn(
         }
         FnKind::Ran => UNDEFINED.raw(),
     }
+}
+
+/// What a host function gives script that is being ended: an exception,
+/// so that script that ignores the result cannot go on as if the call
+/// had worked. Script may catch it; the watchdog, armed again, ends that
+/// script at its next look.
+fn halted(exception: *mut JSValueRef) -> JSValueRef {
+    // SAFETY: the framework's exception slot
+    unsafe { *exception = UNDEFINED.raw() };
+    std::ptr::null()
 }
 
 unsafe extern "C" fn finalize_fn(obj: JSObjectRef) {

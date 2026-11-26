@@ -76,7 +76,7 @@ impl Value {
 }
 
 /// Make the framework encode a few values and compare with the
-/// encoding above.
+/// encoding above, a heap value among them.
 pub(crate) fn check_layout(ctx: JSContextRef) {
     // SAFETY: a live context; making immediates allocates nothing
     let made = unsafe {
@@ -96,6 +96,12 @@ pub(crate) fn check_layout(ctx: JSContextRef) {
     for (got, want) in made {
         assert_eq!(Value::from_ref(got), want, "JavaScriptCore encodes values as this adapter expects");
     }
+    // SAFETY: a live context; the object is unreachable once checked
+    let heap = Value::from_ref(unsafe { ffi::JSObjectMake(ctx, std::ptr::null_mut(), std::ptr::null_mut()) });
+    assert!(
+        heap.is_cell() && heap.as_number().is_none() && heap.as_boolean().is_none(),
+        "JavaScriptCore encodes an object as a pointer to a cell"
+    );
 }
 
 #[cfg(test)]
