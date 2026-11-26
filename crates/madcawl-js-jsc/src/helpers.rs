@@ -35,8 +35,10 @@ impl Helper {
 // descriptors and arrays have no prototype to intercept a lookup. The
 // one exception is the direct `eval` that compiles a handler: it is
 // looked up when called, through the handler's scopes, so a page that
-// replaced it runs its own code there.
+// replaced it runs its own code there. The helpers are strict, so that
+// page code they call finds none of them as its `caller`.
 pub(crate) const HELPERS: &str = r#"(function () {
+  'use strict';
   const dp = Object.defineProperty;
   const apply = Reflect.apply;
   const bind = Function.prototype.bind;
@@ -67,7 +69,7 @@ pub(crate) const HELPERS: &str = r#"(function () {
   const P = Proxy;
   const R = { __proto__: null, get: Reflect.get, set: Reflect.set, ownKeys: Reflect.ownKeys,
     gopd: Reflect.getOwnPropertyDescriptor, define: Reflect.defineProperty, proto: Reflect.getPrototypeOf,
-    setProto: Reflect.setPrototypeOf };
+    setProto: Reflect.setPrototypeOf, del: Reflect.deleteProperty };
   // each placed wrapper to its tree's group, which holds every wrapper
   // of the tree: one held keeps all, and none held lets all go
   const groupOf = new WM();
@@ -78,16 +80,17 @@ pub(crate) const HELPERS: &str = r#"(function () {
     apply(setAdd, g, [w]);
     apply(wmSet, groupOf, [w, g]);
   };
-  // the scopes come innermost first (element, form, document)
-  function handler(__mcParams, __mcBody, __mcScopes) {
-    const __mcS = [create(null), create(null), create(null)];
-    for (let i = 0; i < 3 && i < __mcScopes.length; i++) __mcS[2 - i] = __mcScopes[i];
+  // the scopes come innermost first (element, form, document). Sloppy,
+  // for `with`, and made by `Function`, so that the code it compiles
+  // sees the global scope and the scopes, not the names in here
+  const handler = Function('__mcParams', '__mcBody', '__mcScopes', `
+    const __mcS = [{ __proto__: null }, { __proto__: null }, { __proto__: null }];
+    for (let __mcI = 0; __mcI < 3 && __mcI < __mcScopes.length; __mcI++) __mcS[2 - __mcI] = __mcScopes[__mcI];
     let __mcP = '';
-    for (let i = 0; i < __mcParams.length; i++) __mcP += (i ? ',' : '') + __mcParams[i];
+    for (let __mcI = 0; __mcI < __mcParams.length; __mcI++) __mcP += (__mcI ? ',' : '') + __mcParams[__mcI];
     with (__mcS[0]) with (__mcS[1]) with (__mcS[2]) {
-      return eval('(function (' + __mcP + ') {\n' + __mcBody + '\n})');
-    }
-  }
+      return eval('(function (' + __mcP + ') {\\n' + __mcBody + '\\n})');
+    }`);
   return [
     (o, n, g, s) => {
       named(g, 'get ' + n, 0);
@@ -118,7 +121,7 @@ pub(crate) const HELPERS: &str = r#"(function () {
         get: (_, k) => R.get(state.g, k),
         set: (_, k, v) => R.set(state.g, k, v),
         has: (_, k) => k in state.g,
-        deleteProperty: (_, k) => delete state.g[k],
+        deleteProperty: (_, k) => R.del(state.g, k),
         ownKeys: () => R.ownKeys(state.g),
         getOwnPropertyDescriptor: (_, k) => {
           const d = R.gopd(state.g, k);

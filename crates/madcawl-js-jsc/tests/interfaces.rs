@@ -186,6 +186,16 @@ return [seen.length >= 7, seen.every(c => c === 'null')].join();";
 }
 
 #[test]
+fn deleting_a_fixed_window_property_answers_false_or_throws_in_strict_code() {
+    let (mut e, mut h) = page("<p>x</p>");
+    let src = "Object.defineProperty(window, 'fixed', { value: 1 }); window.loose = 2;
+var strict = (function () { 'use strict'; try { delete window.fixed; return 'none'; } catch (x) { return x.name; } })();
+return [delete window.fixed, delete window.loose, window.fixed, window.loose, strict].join();";
+    assert_eq!(eval(&mut e, &mut h, src), "false,true,1,,TypeError");
+    h.close(&mut e);
+}
+
+#[test]
 fn attributes_are_named_removed_and_toggled_as_script_expects() {
     let (mut e, mut h) = page("<p id=a class=x title=t>x</p>");
     let src = "var p = document.getElementById('a'), xs = document.getElementsByClassName('x'), seen = [];

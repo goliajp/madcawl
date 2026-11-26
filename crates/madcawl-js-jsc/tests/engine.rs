@@ -205,6 +205,22 @@ fn handlers_see_their_scopes_and_weak_handles_read_their_targets() {
     e.weak_drop(w);
 }
 
+#[test]
+fn a_handler_body_sees_page_globals_not_the_names_inside_the_helpers() {
+    let (mut e, mut h, realm) = setup();
+    let page = function(&mut e, &mut h, realm, "(function () { globalThis.apply = 'page'; return function () {}; })()");
+    let url = DomString::from_wtf8(b"x");
+    let origin = ScriptOrigin { url: &url, line: 1, column: 0 };
+    let body = "return [apply, typeof dp, typeof groupOf, typeof create, typeof R, typeof errors, typeof handler].join()";
+    let f = e.compile_handler(&mut h, realm, &["event"], &DomString::from_wtf8(body.as_bytes()), &[], &origin);
+    assert!(!Jsc::is_thrown(f.get()));
+    let r = e.call(&mut h, f.get(), Jsc::undefined(), &[Jsc::number(5.0)]);
+    assert_eq!(text(&e.as_string(r.get()).unwrap()), "page,undefined,undefined,undefined,undefined,undefined,undefined");
+    for x in [r, f, page] {
+        e.release(x);
+    }
+}
+
 fn function(e: &mut Jsc, h: &mut Log, realm: madcawl_js_jsc::Realm, src: &str) -> Owned<Value> {
     let url = DomString::from_wtf8(b"test.js");
     let f = e.evaluate(h, realm, &DomString::from_wtf8(src.as_bytes()), &ScriptOrigin { url: &url, line: 1, column: 0 });
