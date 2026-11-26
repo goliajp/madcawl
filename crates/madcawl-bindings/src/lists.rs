@@ -4,7 +4,10 @@
 //! holds each of its nodes. `childNodes` and `children` give the same
 //! object while one is alive.
 
+use std::collections::HashMap;
+
 use madcawl_dom::{Dom, NodeId, NodeKind};
+use madcawl_html::QuirksMode;
 use madcawl_js::{ClassDef, Engine, Owned};
 use madcawl_str::Atom;
 
@@ -72,6 +75,8 @@ impl ListState {
         match filter {
             Filter::Children => self.nodes.extend(dom.children(root)),
             Filter::ElementChildren => self.nodes.extend(dom.children(root).filter(element)),
+            // an element in this DOM has no prefix: its qualified name is
+            // its local name
             Filter::Tag { name, lower } => {
                 let mut local = Vec::new();
                 self.nodes.extend(dom.descendants(root).filter(element).filter(|&n| {
@@ -82,6 +87,14 @@ impl ListState {
                     dom.local_name(n).expect("an element").write_wtf8(&mut local);
                     local[..] == **if dom.in_html_namespace(n) { lower } else { name }
                 }));
+            }
+            Filter::Classes(names) if dom.quirks_mode() == QuirksMode::Quirks => {
+                let mut by_list = HashMap::new();
+                let mut has = |n: &NodeId| {
+                    let (k, list) = dom.class_list(*n);
+                    *by_list.entry(k).or_insert_with(|| caseless_all(names, list))
+                };
+                self.nodes.extend(dom.descendants(root).filter(element).filter(|n| has(n)));
             }
             Filter::Classes(names) => {
                 // no element has a class no atom spells
@@ -103,6 +116,20 @@ impl ListState {
     fn len(&self) -> usize {
         if self.root.is_some() { self.nodes.len() } else { self.items.len() }
     }
+}
+
+/// Every name in `names` is, ASCII case-insensitively, a class in `list`
+/// (quirks mode); no names match nothing.
+fn caseless_all(names: &[Box<[u8]>], list: &[Atom]) -> bool {
+    let mut b = Vec::new();
+    !names.is_empty()
+        && names.iter().all(|name| {
+            list.iter().any(|a| {
+                b.clear();
+                a.write_wtf8(&mut b);
+                b.eq_ignore_ascii_case(name)
+            })
+        })
 }
 
 fn held_node(h: &Held) -> NodeId {

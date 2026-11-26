@@ -99,6 +99,18 @@ return [lis.length, kids.length, nodes.length, xs.length].join();";
 }
 
 #[test]
+fn class_names_match_ascii_case_insensitively_only_in_quirks_mode() {
+    let src = "var a = document.getElementsByClassName('fOO bar'), b = document.getElementsByClassName('\\u00c9t\\u00e9');
+return [a.length, b.length, document.getElementsByClassName('BAR').length].join();";
+    let html = "<div class='Foo BAR'></div><i class=bar></i><b class='\u{e9}t\u{e9}'></b>";
+    for (doctype, want) in [("", "1,0,2"), ("<!DOCTYPE html>", "0,0,1")] {
+        let (mut e, mut h) = page(&format!("{doctype}{html}"));
+        assert_eq!(eval(&mut e, &mut h, src), want, "doctype {doctype:?}");
+        h.close(&mut e);
+    }
+}
+
+#[test]
 fn a_collection_keeps_its_root_tree_and_a_dropped_one_is_freed() {
     let (mut e, mut h) = page("<p>x</p>");
     let (nodes, sides) = (h.dom.node_count(), h.side_objects());
