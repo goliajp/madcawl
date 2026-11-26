@@ -58,6 +58,8 @@ pub(crate) fn options<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Value, add
             "capture" => o.capture = b,
             "once" => o.once = b,
             "passive" if kind != ValueKind::Undefined => o.passive = Some(b),
+            // a bound: no AbortSignal exists to pass until the interface is
+            // bound, so any signal fails the dictionary's conversion
             "signal" if kind != ValueKind::Undefined => {
                 return Err(throw(e, ErrorKind::Type, "the signal is not an AbortSignal"));
             }

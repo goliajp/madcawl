@@ -11,8 +11,9 @@ interface EventTarget {
   constructor();
 
   // the options, a boolean or a dictionary, are read as any: of the
-  // dictionary only capture and once are acted on; [Atom] (not in the
-  // standard) takes the type as an atom
+  // dictionary capture, once and passive are acted on, and a signal
+  // that is present throws a TypeError, since no AbortSignal is bound
+  // yet; [Atom] (not in the standard) takes the type as an atom
   undefined addEventListener([Atom] DOMString type, EventListener? callback, optional any options);
   undefined removeEventListener([Atom] DOMString type, EventListener? callback, optional any options);
   boolean dispatchEvent(Event event);
