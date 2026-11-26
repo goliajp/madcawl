@@ -219,7 +219,7 @@ impl<E: Engine> DomHost<E> {
         self.close_window(e);
         for (_, list) in std::mem::take(&mut self.listeners) {
             for mut l in list {
-                l.callback.clear(e);
+                l.callback.close(e);
             }
         }
         // wrappers made since the last settle are preserved by it

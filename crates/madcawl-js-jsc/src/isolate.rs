@@ -78,6 +78,8 @@ pub struct Jsc {
     pub(crate) deref: Value,
     /// The private property name a wrapper's members hang on.
     pub(crate) members_name: JSStringRef,
+    /// How many times a member was taken out of a container.
+    pub(crate) member_writes: u64,
 }
 
 impl Jsc {
@@ -133,6 +135,7 @@ impl Jsc {
             deref: Value(0),
             // SAFETY: a static string; released in Drop
             members_name: unsafe { ffi::JSStringCreateWithUTF8CString(c"members".as_ptr()) },
+            member_writes: 0,
         }
     }
 

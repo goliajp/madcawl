@@ -54,8 +54,14 @@ impl<E: Engine> Member<E> {
         }
     }
 
+    /// Give the value up as the collector unlinks the owner. One kept
+    /// beside the owner's wrapper ([`Engine::member`]) holds no count to
+    /// give: the owner is garbage only once that wrapper died, and the
+    /// value went with it.
     pub fn unlink(&mut self, u: &mut E::Unlinker) {
-        if let Some(v) = self.v.take() {
+        if self.beside_wrapper() {
+            self.v = None;
+        } else if let Some(v) = self.v.take() {
             // SAFETY: the count this handle held
             u.release(unsafe { Owned::from_raw(v) });
         }
@@ -67,6 +73,19 @@ impl<E: Engine> Member<E> {
             let v = unsafe { Owned::from_raw(v) };
             if self.owner == 0 { e.release(v) } else { e.release_member(self.owner, v) }
         }
+    }
+
+    /// Let go of the value as the host closes, before its realm is
+    /// detached. One kept beside the owner's wrapper is forgotten, not
+    /// taken out: that wrapper may be garbage the engine found but has
+    /// not swept yet, whose memory the host must not write, and the
+    /// value holds no count; it goes with the wrapper.
+    pub fn close(&mut self, e: &mut E) {
+        if self.beside_wrapper() { self.forget() } else { self.clear(e) }
+    }
+
+    fn beside_wrapper(&self) -> bool {
+        self.owner != 0 && E::PLACES_WRAPPERS
     }
 
     /// Let go of the value without the engine: its owner's wrapper died

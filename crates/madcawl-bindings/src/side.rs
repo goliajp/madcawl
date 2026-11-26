@@ -238,10 +238,10 @@ impl<E: Engine> DomHost<E> {
     /// and the nodes it holds: the host is closing.
     pub(crate) fn close_sides(&mut self, e: &mut E) {
         for (_, mut d) in std::mem::take(&mut self.details) {
-            d.clear(e);
+            d.close(e);
         }
         for mut l in std::mem::take(&mut self.side_listeners).into_values().flatten() {
-            l.callback.clear(e);
+            l.callback.close(e);
         }
         let mut held = Vec::new();
         for s in self.sides.map.values_mut() {

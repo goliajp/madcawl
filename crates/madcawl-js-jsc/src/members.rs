@@ -7,6 +7,7 @@
 
 use crate::isolate::Jsc;
 use crate::objects::WrapRec;
+use crate::protos::Helper;
 use crate::value::{UNDEFINED, Value};
 use crate::{ffi, private};
 
@@ -39,15 +40,37 @@ impl Jsc {
 
     /// Drop one `v` kept beside the wrapper whose word is `owner`;
     /// nothing once that wrapper is dead (the value went with it) or its
-    /// realm is gone.
+    /// realm is gone. A wrapper that is not strong may have been found
+    /// dead by a collection whose sweep has not reached it, which only
+    /// its `WeakRef` tells (`wrap.rs`): its container is not written
+    /// then, nor when script was being stopped as it was read.
     pub(crate) fn remove_member(&mut self, owner: u64, v: Value) {
         let rec = record(owner);
         if rec.dead || self.realms[rec.realm as usize].detached {
             return;
         }
+        // held while its container is written, which may allocate
+        let held = if rec.strong {
+            UNDEFINED
+        } else {
+            match self.call_helper(rec.realm, Helper::Deref, &[rec.weak]) {
+                Ok(w) if w != UNDEFINED => {
+                    self.protect(w);
+                    w
+                }
+                r => {
+                    if r.is_err() {
+                        self.after_stop();
+                    }
+                    return;
+                }
+            }
+        };
+        let rec = record(owner);
         let i = rec.members.iter().rposition(|&m| m == v).expect("a member of this wrapper");
         let last = rec.members.len() - 1;
         rec.members.swap_remove(i);
+        self.member_writes += 1;
         let ctx = self.realms[rec.realm as usize].ctx;
         let c = rec.container.0 as ffi::JSObjectRef;
         // SAFETY: as in add_member
@@ -57,5 +80,15 @@ impl Jsc {
             }
             ffi::JSObjectSetPropertyAtIndex(ctx, c, last as u32, UNDEFINED.raw(), std::ptr::null_mut());
         }
+        self.unprotect(held);
+    }
+}
+
+#[cfg(feature = "collect-now")]
+impl Jsc {
+    /// How many members were taken out of their wrappers' containers so
+    /// far: for this crate's tests, as `collect_now`.
+    pub fn member_writes(&self) -> u64 {
+        self.member_writes
     }
 }
