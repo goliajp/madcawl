@@ -93,6 +93,10 @@ pub type IndexGetter = unsafe extern "C" fn(ctx: *mut Ctx, this: u64, index: u32
 /// `(ctx, this) -> how many indices`.
 pub type Length = unsafe extern "C" fn(ctx: *mut Ctx, this: u64) -> u32;
 
+/// `(ctx, this, name) -> value` for a name that is no index (a string
+/// value, borrowed), as [`IndexGetter`].
+pub type NamedGetter = unsafe extern "C" fn(ctx: *mut Ctx, this: u64, name: u64) -> u64;
+
 /// A C-ABI function bound to engine type `E` and host type `H`: what a
 /// class table of `ClassDef<E, H>` and [`Engine::new_function`] take.
 /// The function reads its [`Ctx`] as those two types, which nothing in
@@ -166,21 +170,19 @@ impl<E, H> Bound<HostFn, E, H> {
     }
 }
 
-impl<E, H> Bound<IndexGetter, E, H> {
-    /// # Safety
-    /// As for [`Bound::host_fn`].
-    pub const unsafe fn index(f: IndexGetter) -> Self {
-        Bound { f, of: PhantomData }
-    }
+macro_rules! bind {
+    ($($ty:ty => $name:ident),*) => {$(
+        impl<E, H> Bound<$ty, E, H> {
+            /// # Safety
+            /// As for [`Bound::host_fn`].
+            pub const unsafe fn $name(f: $ty) -> Self {
+                Bound { f, of: PhantomData }
+            }
+        }
+    )*};
 }
 
-impl<E, H> Bound<Length, E, H> {
-    /// # Safety
-    /// As for [`Bound::host_fn`].
-    pub const unsafe fn length(f: Length) -> Self {
-        Bound { f, of: PhantomData }
-    }
-}
+bind!(IndexGetter => index, Length => length, NamedGetter => named);
 
 pub struct Attribute<E: 'static, H: 'static> {
     pub name: &'static str,
@@ -208,10 +210,12 @@ pub struct Constant {
 /// bits of [`Engine::absent`], and lookup continues on the class's
 /// static members. A class with an index getter and a length has
 /// `%Array.prototype.values%` as its prototype object's
-/// `@@iterator`, as Web IDL gives it.
+/// `@@iterator`, as Web IDL gives it. The named getter is asked only
+/// for a name the object and its prototypes do not have.
 pub struct Interceptors<E: 'static, H: 'static> {
     pub index: Option<Bound<IndexGetter, E, H>>,
     pub length: Option<Bound<Length, E, H>>,
+    pub named: Option<Bound<NamedGetter, E, H>>,
     /// A value iterator (`iterable<T>`): `entries`, `keys`, `values`
     /// and `forEach` are `Array.prototype`'s too.
     pub iterable: bool,

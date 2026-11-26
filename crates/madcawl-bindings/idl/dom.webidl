@@ -249,10 +249,9 @@ interface NodeList {
   iterable<Node>;
 };
 
-// named properties are not intercepted yet: namedItem only
 [Exposed=Window, Side]
 interface HTMLCollection {
   readonly attribute unsigned long length;
   getter Element? item(unsigned long index);
-  Element? namedItem(DOMString name);
+  getter Element? namedItem(DOMString name);
 };

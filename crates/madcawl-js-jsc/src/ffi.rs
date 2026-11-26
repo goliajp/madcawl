@@ -141,7 +141,8 @@ unsafe extern "C" {
     -> JSObjectRef;
     pub fn JSObjectGetPrototype(ctx: JSContextRef, object: JSObjectRef) -> JSValueRef;
     pub fn JSObjectSetPrototype(ctx: JSContextRef, object: JSObjectRef, value: JSValueRef);
-    pub fn JSObjectHasProperty(ctx: JSContextRef, object: JSObjectRef, name: JSStringRef) -> bool;
+    pub fn JSObjectHasPropertyForKey(ctx: JSContextRef, object: JSObjectRef, key: JSValueRef, exception: *mut JSValueRef)
+    -> bool;
     pub fn JSObjectGetProperty(
         ctx: JSContextRef,
         object: JSObjectRef,

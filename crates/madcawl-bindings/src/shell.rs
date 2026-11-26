@@ -64,3 +64,14 @@ pub(crate) unsafe fn count<E: Engine>(ctx: *mut Ctx, this: u64, f: Count<E>) -> 
     let (e, h) = unsafe { Ctx::parts::<E, DomHost<E>>(ctx) };
     f(e, h, E::from_bits(this))
 }
+
+pub(crate) type Named<E> = fn(&mut E, &mut DomHost<E>, Value<E>, Value<E>) -> Owned<Value<E>>;
+
+/// # Safety
+/// As for [`op`]; `name` is a string value's word.
+#[inline(always)]
+pub(crate) unsafe fn named<E: Engine>(ctx: *mut Ctx, this: u64, name: u64, f: Named<E>) -> u64 {
+    // SAFETY: the caller's
+    let (e, h) = unsafe { Ctx::parts::<E, DomHost<E>>(ctx) };
+    E::to_bits(f(e, h, E::from_bits(this), E::from_bits(name)).into_raw())
+}

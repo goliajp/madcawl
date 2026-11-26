@@ -69,7 +69,7 @@ pub mod trial;
 
 pub use class::{
     Attribute, Bound, ClassDef, ClassId, Constant, Ctx, Getter, HostFn, HostOps, IndexGetter,
-    Interceptors, Length, Operation, Setter,
+    Interceptors, Length, NamedGetter, Operation, Setter,
 };
 pub use engine::Engine;
 pub use host::Host;

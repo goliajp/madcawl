@@ -1,8 +1,8 @@
 """The Rust glue tools/gen-bindings.py writes for each member: a function
 generic over the engine that converts `this` and calls the member's
-implementation, and the C-ABI shell its table holds; the index getter and
-length of an interface with an indexed getter; and the IDL types and
-effects in the signature of each table entry."""
+implementation, and the C-ABI shell its table holds; the index getter,
+length and named getter of an interface with an indexed getter; and the
+IDL types and effects in the signature of each table entry."""
 import re
 import sys
 
@@ -114,4 +114,18 @@ def interceptor_glue(i, m):
         f'    lists::count(e, h, this, &{n}Class::<E>::DEF, impls::{m}::length)', '}', '',
         '// SAFETY: called as the length of its table',
         f'unsafe extern "C" fn {m}_count_abi<E: Engine>(ctx: *mut Ctx, this: u64) -> u32 {{ unsafe {{ shell::count(ctx, this, {m}_count::<E>) }} }}',
+        ''] + (named_glue(i, m) if i['named'] else [])
+
+
+def named_glue(i, m):
+    n, named = i['name'], ident(i['named']['name'])
+    return [
+        f'fn {m}_named<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, name: E::Value) -> Owned<E::Value> {{',
+        '    cv::run(e, h, |e, h| {',
+        f'        let this = cv::this_side(e, h, this, &{n}Class::<E>::DEF)?;',
+        '        let name = e.as_string(name).expect("a property name");',
+        f'        impls::{m}::{named}(e, h, this, name).map(lists::OrAbsent)',
+        '    })', '}', '',
+        '// SAFETY: called as the named getter of its table',
+        f'unsafe extern "C" fn {m}_named_abi<E: Engine>(ctx: *mut Ctx, this: u64, name: u64) -> u64 {{ unsafe {{ shell::named(ctx, this, name, {m}_named::<E>) }} }}',
         '']

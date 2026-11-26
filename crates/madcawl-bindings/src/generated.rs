@@ -1651,6 +1651,7 @@ impl<E: Engine> NodeListClass<E> {
     const INTERCEPTORS: Interceptors<E, DomHost<E>> = Interceptors {
         index: Some(unsafe { Bound::index(node_list_index_abi::<E>) }),
         length: Some(unsafe { Bound::length(node_list_count_abi::<E>) }),
+        named: None,
         iterable: true,
     };
 }
@@ -1722,6 +1723,7 @@ impl<E: Engine> HTMLCollectionClass<E> {
     const INTERCEPTORS: Interceptors<E, DomHost<E>> = Interceptors {
         index: Some(unsafe { Bound::index(html_collection_index_abi::<E>) }),
         length: Some(unsafe { Bound::length(html_collection_count_abi::<E>) }),
+        named: Some(unsafe { Bound::named(html_collection_named_abi::<E>) }),
         iterable: false,
     };
 }
@@ -1742,6 +1744,17 @@ fn html_collection_count<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Valu
 
 // SAFETY: called as the length of its table
 unsafe extern "C" fn html_collection_count_abi<E: Engine>(ctx: *mut Ctx, this: u64) -> u32 { unsafe { shell::count(ctx, this, html_collection_count::<E>) } }
+
+fn html_collection_named<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, name: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &HTMLCollectionClass::<E>::DEF)?;
+        let name = e.as_string(name).expect("a property name");
+        impls::html_collection::named_item(e, h, this, name).map(lists::OrAbsent)
+    })
+}
+
+// SAFETY: called as the named getter of its table
+unsafe extern "C" fn html_collection_named_abi<E: Engine>(ctx: *mut Ctx, this: u64, name: u64) -> u64 { unsafe { shell::named(ctx, this, name, html_collection_named::<E>) } }
 
 fn html_collection_get_length<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {

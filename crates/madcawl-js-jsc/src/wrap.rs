@@ -41,7 +41,7 @@ impl Jsc {
             shared: self.shared,
         }));
         let list = class.chain().find_map(|c| c.interceptors).and_then(|x| {
-            Some(crate::lists::ListCalls::of::<H>(x.index?.get(), x.length?.get()))
+            Some(crate::lists::ListCalls::of::<H>(x.index?.get(), x.length?.get(), x.named.map(|f| f.get())))
         });
         let jsclass = self.classes.wrapper_of(class.id.0, class.name, list);
         // SAFETY: the record lives until the host is told the wrapper died

@@ -29,7 +29,9 @@ implementation's caching).
 An interface with a `getter` operation of one `unsigned long` argument
 gets interceptors: its index getter calls the operation's
 implementation and gives no property for `None`, and its length calls
-the implementation of its `length` attribute.
+the implementation of its `length` attribute. A `getter` of one
+`DOMString` argument beside it is its named getter, which calls the
+operation's implementation the same way.
 A `[Atom] DOMString` argument is a name, such as an event type: the
 implementation gets an atom made from the value, with no string block
 for a short string.
@@ -75,7 +77,7 @@ def parse(text):
                  'side': bool(ext and re.search(r'\bSide\b', ext)),
                  'targets': bool(ext and re.search(r'\bTargets\b', ext)),
                  'error_proto': bool(ext and re.search(r'\bErrorPrototype\b', ext)), 'consts': [], 'attrs': [], 'ops': [],
-                 'ctor': None, 'getter': None, 'iterable': False}
+                 'ctor': None, 'getter': None, 'named': None, 'iterable': False}
         for member in body.split(';'):
             ext = re.match(r'^\s*\[([^\]]*)\]', member)
             flags = set(re.findall(r'\w+', ext.group(1))) if ext else set()
@@ -104,9 +106,10 @@ def parse(text):
                                  'optional': bool(a.group(2)), 'default': a.group(5)})
                 op = {'name': o.group(2), 'ret': o.group(1), 'args': args, 'flags': flags}
                 if getter:
-                    if [a['type'] for a in args] != ['unsigned long']:
-                        sys.exit(f"{name}.{op['name']}: only an indexed getter is supported")
-                    iface['getter'] = op
+                    kind = {'unsigned long': 'getter', 'DOMString': 'named'}.get(' '.join(a['type'] for a in args))
+                    if kind is None:
+                        sys.exit(f"{name}.{op['name']}: a getter takes an unsigned long or a DOMString")
+                    iface[kind] = op
                 if ctor:
                     iface['ctor'] = op
                 else:
@@ -194,6 +197,7 @@ def emit(ifaces, sources):
                     '    const INTERCEPTORS: Interceptors<E, DomHost<E>> = Interceptors {',
                     f'        index: Some(unsafe {{ Bound::index({m}_index_abi::<E>) }}),',
                     f'        length: Some(unsafe {{ Bound::length({m}_count_abi::<E>) }}),',
+                    f"        named: {f'Some(unsafe {{ Bound::named({m}_named_abi::<E>) }})' if i['named'] else 'None'},",
                     f"        iterable: {'true' if i['iterable'] else 'false'},", '    };']
         out += ['}', '']
         if i['getter']:

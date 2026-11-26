@@ -173,6 +173,37 @@ return 'ok';";
 }
 
 #[test]
+fn indices_refuse_writes_and_an_html_collection_answers_names_its_prototype_does_not_have() {
+    let (mut e, mut h) = page("<div id=r><b id=b1></b><i name=n1></i><a id=length></a><a name=item></a><p id=zz></p></div>");
+    let src = "var r = document.getElementById('r'), nl = r.childNodes, hc = r.children, first = nl[0];
+nl[7] = 'x'; nl[0] = 5; (function () { 'use strict'; nl[1] = 6; })();
+var d = Object.getOwnPropertyDescriptor(nl, '0');
+hc.zz = 'own'; hc.b1 = 5;
+return [nl[0] === first, nl[7], Object.prototype.hasOwnProperty.call(nl, '7'), d.writable, d.value === first, 0 in nl, 9 in nl,
+  hc.b1 === r.firstChild, hc.n1 === r.children[1], typeof hc.length, typeof hc.item, hc.zz === r.lastChild, Object.getOwnPropertyDescriptor(hc, 'b1').value === r.firstChild, hc.missing, 'b1' in hc, 'nope' in hc,
+  r.getElementsByTagName('i').n1 === hc[1], hc[''], nl.b1].join();";
+    assert_eq!(
+        eval(&mut e, &mut h, src),
+        "true,,false,false,true,true,false,true,true,number,function,true,true,,true,false,true,,"
+    );
+    h.close(&mut e);
+}
+
+#[test]
+fn a_named_lookup_throws_what_the_prototype_chain_throws_and_guards_only_its_own_collection() {
+    let (mut e, mut h) = page("<div id=r><b id=b1></b></div><div id=s><i id=i1></i></div>");
+    let src = "var hc = document.getElementById('r').children, hs = document.getElementById('s').children, seen = [];
+Object.setPrototypeOf(hc, new Proxy(Object.getPrototypeOf(hc), { has(t, k) {
+  if (k === 'boom') throw new Error('trap');
+  if (k === 'b1') seen.push(String(hs.i1 && hs.i1.id), String(hc.b1));
+  return Reflect.has(t, k); } }));
+var got; try { got = String(hc.boom); } catch (x) { got = x.message; }
+return [got, hc.b1.id, seen.join(' ')].join();";
+    assert_eq!(eval(&mut e, &mut h, src), "trap,b1,i1 undefined");
+    h.close(&mut e);
+}
+
+#[test]
 fn a_collection_keeps_its_root_tree_and_a_dropped_one_is_freed() {
     let (mut e, mut h) = page("<p>x</p>");
     let (nodes, sides) = (h.dom.node_count(), h.side_objects());
