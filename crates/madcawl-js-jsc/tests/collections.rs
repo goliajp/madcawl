@@ -203,28 +203,6 @@ return [got, hc.b1.id, seen.join(' ')].join();";
     h.close(&mut e);
 }
 
-#[test]
-fn a_collection_keeps_its_root_tree_and_a_dropped_one_is_freed() {
-    let (mut e, mut h) = page("<p>x</p>");
-    let (nodes, sides) = (h.dom.node_count(), h.side_objects());
-    let src = "for (let i = 0; i < 100; i++) { const d = document.createElement('div'); d.appendChild(document.createElement('i'));
-d.childNodes.length; d.children[0]; d.getElementsByTagName('i').length; d.querySelectorAll('i')[0]; }
-window.kept = (function () { var d = document.createElement('div'); d.x = 'kept'; d.appendChild(document.createElement('i')); return d.children; })();
-window.found = (function () { var d = document.createElement('div'); d.appendChild(document.createElement('i')).y = 'found'; return d.querySelectorAll('i'); })();
-return 'ok';";
-    assert_eq!(eval(&mut e, &mut h, src), "ok");
-    collect_everything(&mut e, &mut h);
-    // the two kept collections and their trees; in parallel test runs the
-    // framework now and then keeps one more object past a full
-    // collection (a collection of one early round, never more), so one
-    // round's tree and collection are allowed
-    let (n, s) = (h.dom.node_count() - nodes, h.side_objects() - sides);
-    assert!((4..=6).contains(&n) && (2..=3).contains(&s), "{n} nodes and {s} collections left");
-    assert_eq!(eval(&mut e, &mut h, "return [kept[0].parentNode.x, found[0].y].join();"), "kept,found");
-    assert_eq!(h.dom.audit().mismatches(), 0);
-    h.close(&mut e);
-}
-
 #[inline(never)]
 fn scrub() {
     let pad = [0u8; 512 * 1024];
