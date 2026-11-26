@@ -174,6 +174,17 @@ return [foreign.join('; ') || 'ok', lengths.join(' '), thrown.join(' '), new Tex
     h.close(&mut e);
 }
 
+#[test]
+fn a_new_target_proxy_cannot_reach_the_constructor_behind_an_interface_object() {
+    let (mut e, mut h) = page("<p>x</p>");
+    let src = "var seen = [];
+var nt = new Proxy(function () {}, { get: function trap(t, k) { if (k === 'prototype') seen.push(String(trap.caller)); return t[k]; } });
+for (const C of [Event, CustomEvent, EventTarget, Text, Comment, DocumentFragment, DOMException]) Reflect.construct(C, ['x'], nt);
+return [seen.length >= 7, seen.every(c => c === 'null')].join();";
+    assert_eq!(eval(&mut e, &mut h, src), "true,true");
+    h.close(&mut e);
+}
+
 #[inline(never)]
 fn scrub() {
     let pad = [0u8; 512 * 1024];

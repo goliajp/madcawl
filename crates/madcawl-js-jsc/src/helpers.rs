@@ -173,11 +173,13 @@ pub(crate) const HELPERS: &str = r#"(function () {
     // its own (Web IDL takes the interface's when that is not an
     // object); a call throws. Bound, it shows as native code, and `new`
     // on it passes the inner function as `new.target`, whose prototype
-    // is `p` too
+    // is `p` too. Strict, so that script `new.target` calls into (a
+    // proxy's trap) finds no `caller` to read it through
     (native, p) => {
-      const inner = (0, function (...args) {
+      const inner = (0, function () {
+        'use strict';
         if (new.target === undefined) throw new errors[0]('Illegal constructor');
-        const o = apply(native, undefined, args);
+        const o = apply(native, undefined, arguments);
         const q = new.target.prototype;
         if (q !== null && (typeof q === 'object' || typeof q === 'function') && R.proto(o) !== q) R.setProto(o, q);
         return o;
