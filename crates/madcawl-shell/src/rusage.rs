@@ -67,7 +67,7 @@ const SYSTEM_TIME: usize = 1;
 const PKG_IDLE_WKUPS: usize = 2;
 const INTERRUPT_WKUPS: usize = 3;
 const PHYS_FOOTPRINT: usize = 7;
-const LIFETIME_MAX_FOOTPRINT: usize = 29;
+const LIFETIME_MAX_FOOTPRINT: usize = 28;
 const ENERGY_NJ: usize = 40;
 
 #[repr(C)]
@@ -131,8 +131,13 @@ pub fn footprint() -> u64 {
 
 /// How many file descriptors process `pid` has open.
 pub fn fd_count(pid: i32) -> std::io::Result<usize> {
+    fds(pid).map(|f| f.len())
+}
+
+/// The file descriptors process `pid` has open.
+pub fn fds(pid: i32) -> std::io::Result<Vec<i32>> {
     const PROC_PIDLISTFDS: i32 = 1;
-    // a proc_fdinfo is 8 bytes; the call with no buffer says how many bytes it would fill
+    // a proc_fdinfo is an i32 descriptor then a u32 type; the call with no buffer says how many bytes it would fill
     // SAFETY: a null buffer of size 0 only asks for the size
     let want = unsafe { proc_pidinfo(pid, PROC_PIDLISTFDS, 0, std::ptr::null_mut(), 0) };
     if want <= 0 {
@@ -144,7 +149,7 @@ pub fn fd_count(pid: i32) -> std::io::Result<usize> {
     if got <= 0 {
         return Err(std::io::Error::last_os_error());
     }
-    Ok(got as usize / 8)
+    Ok(buf[..got as usize].as_chunks::<8>().0.iter().map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
 }
 
 /// How many threads process `pid` has.
@@ -181,8 +186,10 @@ mod tests {
         let v: Vec<u64> = (0..200_000u64).map(|i| i * i).collect();
         let b = usage_of(pid).unwrap();
         assert!(v.len() == 200_000 && b.cpu_ns > a.cpu_ns && b.footprint > 0);
-        assert!(b.lifetime_max_footprint >= b.footprint);
+        // a neighbouring counter (instructions, cycles) would be far larger
+        assert!(b.lifetime_max_footprint >= b.footprint && b.lifetime_max_footprint < b.footprint * 64, "{b:?}");
         assert!(fd_count(pid).unwrap() >= 3, "stdin, stdout and stderr at least");
+        assert!(fds(pid).unwrap().starts_with(&[0, 1, 2]), "{:?}", fds(pid));
         assert!(thread_count(pid).unwrap() >= 1);
         assert!(physical_memory() >= 1 << 30);
         assert!(usage_of(-1).is_err());

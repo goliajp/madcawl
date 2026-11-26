@@ -199,7 +199,11 @@ fn watchdog(w: &Arc<Inner>) {
         if elapsed >= limit {
             b.told += 1;
             let line = format!("{word}: request {} for {} ms, in stage {}", b.what, elapsed.as_millis(), b.stage);
+            // the sink writes to stderr, which may block: not with the
+            // request loop's lock held
+            drop(s);
             (w.sink)(&line);
+            s = w.state.lock().unwrap_or_else(|e| e.into_inner());
             continue;
         }
         let seq = b.seq;
