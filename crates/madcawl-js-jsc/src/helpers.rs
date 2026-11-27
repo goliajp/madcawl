@@ -24,10 +24,11 @@ pub(crate) enum Helper {
     ErrorProto = 18,
     Iterable = 19,
     ErrorInfo = 20,
+    IteratorOf = 21,
 }
 
 impl Helper {
-    pub(crate) const LAST: Helper = Helper::ErrorInfo;
+    pub(crate) const LAST: Helper = Helper::IteratorOf;
 }
 
 // Page script runs in the realm and may replace any global or
@@ -231,5 +232,7 @@ pub(crate) const HELPERS: &str = r#"(function () {
       for (let p = R.proto(x); name === undefined && builtinError(p); p = R.proto(p)) name = own(p, 'name');
       return [cut(name), cut(own(x, 'message')), cut(own(x, 'sourceURL')), own(x, 'line'), own(x, 'column')];
     },
+    // the iterator method of an object, by the realm's own @@iterator
+    (o) => o[iterator],
   ];
 })()"#;

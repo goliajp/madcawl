@@ -1,13 +1,13 @@
 //! The host's reads and definitions through a realm's own builtins
 //! (`helpers.rs`).
 
-use madcawl_js::{ArrayType, Builtins, ErrorInfo};
+use madcawl_js::{ArrayType, Builtins, ErrorInfo, Host, Owned};
 use madcawl_str::DomString;
 
 use crate::ffi;
 use crate::helpers::Helper;
 use crate::isolate::{Jsc, Realm};
-use crate::value::Value;
+use crate::value::{UNDEFINED, Value};
 
 impl Builtins for Jsc {
     fn typed_array(&mut self, v: Value) -> Option<(ArrayType, &mut [u8])> {
@@ -41,6 +41,11 @@ impl Builtins for Jsc {
             line: number(line),
             column: number(column),
         })
+    }
+
+    fn iterator_method<H: Host<Jsc>>(&mut self, host: &mut H, realm: Realm, v: Value) -> Owned<Value> {
+        let f = self.helper(self.index(realm), Helper::IteratorOf);
+        self.call_value(host, f, UNDEFINED, &[v])
     }
 
     fn define_accessor(&mut self, realm: Realm, obj: Value, name: &str, get: Value, set: Value, unforgeable: bool) -> bool {

@@ -28,3 +28,5 @@ madcawl-js-jsc = { path = ".", features = ["collect-now"] }
 madcawl-bindings = { path = "../madcawl-bindings" }
 madcawl-dom = { path = "../madcawl-dom" }
 madcawl-html = { path = "../madcawl-html" }
+# document.cookie is tested against the network stack's own jar
+madcawl-net = { path = "../madcawl-net" }

@@ -99,6 +99,7 @@ dependencies = [
  "madcawl-html",
  "madcawl-js",
  "madcawl-js-jsc",
+ "madcawl-net",
  "madcawl-str",
 ]
 

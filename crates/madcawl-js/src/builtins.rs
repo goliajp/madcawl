@@ -5,7 +5,7 @@
 use madcawl_str::DomString;
 
 use crate::engine::Engine;
-use crate::value::ArrayType;
+use crate::value::{ArrayType, Owned};
 
 /// What an error object says of itself, read from its own data
 /// properties: each string at most the code units asked for, plus one
@@ -47,6 +47,23 @@ pub trait Builtins {
     {
         let _ = (realm, v, max);
         None
+    }
+
+    /// GetMethod(`v`, @@iterator) for an object `v`: the value of its
+    /// `Symbol.iterator` property, which may run script (a getter, a
+    /// proxy trap); thrown, with the exception registered, when that
+    /// threw. An engine without symbols has none: undefined.
+    fn iterator_method<H: crate::Host<Self>>(
+        &mut self,
+        host: &mut H,
+        realm: <Self as Engine>::Realm,
+        v: <Self as Engine>::Value,
+    ) -> Owned<<Self as Engine>::Value>
+    where
+        Self: Engine,
+    {
+        let _ = (host, realm, v);
+        self.retain(Self::undefined())
     }
 
     /// Make `name` of `obj` an enumerable accessor property of `get` and
