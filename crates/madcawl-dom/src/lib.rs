@@ -31,6 +31,7 @@ mod classes;
 mod dat;
 mod dom;
 mod edit;
+mod fragment;
 mod held;
 mod host;
 mod limits;
@@ -49,6 +50,7 @@ mod text;
 mod tree;
 
 pub use audit::Audit;
+pub use fragment::Parsed;
 pub use dom::{Attr, Dom, HEADROOM, Limits, NodeId, Refused};
 pub use held::HeldNode;
 pub use host::Edge;
