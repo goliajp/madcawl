@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use madcawl_js::{Control, Halt, Host, Interrupt, Unsupported};
+use madcawl_js::{AbortCause, Control, Halt, Host, Interrupt, Unsupported};
 
 use crate::cell::Cell;
 use crate::isolate::Stub;
@@ -115,5 +115,13 @@ impl Control for Stub {
 
     fn memory_usage(&self) -> usize {
         self.live * size_of::<Cell>() + self.external.max(0) as usize
+    }
+
+    fn set_time_limit(&mut self, _: Option<std::time::Duration>) -> Result<(), Unsupported> {
+        Err(Unsupported)
+    }
+
+    fn abort_cause(&self) -> AbortCause {
+        AbortCause::Asked
     }
 }

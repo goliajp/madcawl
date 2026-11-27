@@ -1,4 +1,6 @@
-//! Stopping script from another thread, and the memory limits.
+//! Stopping script from another thread, and the memory and time limits.
+
+use std::time::Duration;
 
 /// What the host may do from any thread, and the memory limits.
 pub trait Control {
@@ -11,6 +13,27 @@ pub trait Control {
     /// images), counted against the limits.
     fn adjust_external_memory(&mut self, delta: isize);
     fn memory_usage(&self) -> usize;
+    /// Abort script that has run for `limit` since the isolate was last
+    /// entered with no script on the stack, as [`Interrupt::abort`] does;
+    /// `None` lifts the limit. Time script spends blocked in a host
+    /// function may not count. As with any abort, the script that called
+    /// in runs on until the engine's next interrupt check sees the stop.
+    /// Optional for an engine.
+    fn set_time_limit(&mut self, limit: Option<Duration>) -> Result<(), Unsupported>;
+    /// Why script is [`Halt::Aborted`]; meaningful only then.
+    fn abort_cause(&self) -> AbortCause;
+}
+
+/// What aborted script.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AbortCause {
+    /// [`Interrupt::abort`].
+    Asked,
+    /// The time limit, met in script the host's call ran.
+    TimeLimit,
+    /// The time limit, met in a promise job the engine ran as the host's
+    /// call returned: the jobs queued after it were dropped unrun.
+    TimeLimitInJob,
 }
 
 /// Where script stands after an [`Interrupt`] request.

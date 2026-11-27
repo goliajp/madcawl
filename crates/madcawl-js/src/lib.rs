@@ -76,7 +76,7 @@ pub use builtins::{Builtins, ErrorInfo};
 pub use engine::Engine;
 pub use host::Host;
 pub use graph::{Deadline, Step, Tracer, Unlinker};
-pub use halt::{Control, Halt, Interrupt, Unsupported};
+pub use halt::{AbortCause, Control, Halt, Interrupt, Unsupported};
 pub use handle::{Member, Root};
 pub use script::{ModuleRequest, ScriptOrigin};
 pub use sig::{AttributeSig, Effects, IdlType, Signature};

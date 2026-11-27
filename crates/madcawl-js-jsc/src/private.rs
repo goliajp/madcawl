@@ -13,7 +13,7 @@ use std::ffi::{CStr, c_void};
 use std::sync::atomic::Ordering;
 
 use crate::ffi::{JSContextGroupRef, JSContextRef, JSObjectRef, JSStringRef, JSValueRef};
-use crate::halt::{ABORT, Flags, TERMINATE};
+use crate::halt::{ABORT, Flags, TERMINATE, TIMED};
 
 type ShouldTerminate = unsafe extern "C" fn(JSContextRef, *mut c_void) -> bool;
 type SetTimeLimit = unsafe extern "C" fn(JSContextGroupRef, f64, Option<ShouldTerminate>, *mut c_void);
@@ -22,9 +22,10 @@ const SET_TIME_LIMIT: &CStr = c"JSContextGroupSetExecutionTimeLimit";
 const SET_PRIVATE_PROPERTY: &CStr = c"JSObjectSetPrivateProperty";
 type SetPrivateProperty = unsafe extern "C" fn(JSContextRef, JSObjectRef, JSStringRef, JSValueRef) -> bool;
 
-/// How often running script looks at the interrupt flags, in seconds:
-/// the bound on how long a stop request waits.
-const WATCH_INTERVAL: f64 = 0.01;
+/// How often running script looks at the interrupt flags, in seconds of
+/// the thread's CPU time: the bound on how long a stop request waits,
+/// and the unit of the time limit.
+pub(crate) const WATCH_INTERVAL: f64 = 0.01;
 
 unsafe extern "C" {
     fn dlsym(handle: *mut c_void, symbol: *const std::ffi::c_char) -> *mut c_void;
@@ -50,12 +51,22 @@ pub fn check() -> Vec<&'static str> {
 // the framework arms its timer once per entry and asks once: armed
 // again either way, so that script a stop did not end (script that
 // caught the exception a host function threw while halted, the script
-// a nested call returned to) is asked again
+// a nested call returned to) is asked again. It asks on the thread
+// that runs script, once per interval of that thread's CPU time, so a
+// count of the calls is how long script has run
 unsafe extern "C" fn should_terminate(_: JSContextRef, data: *mut c_void) -> bool {
     // SAFETY: the flags the isolate keeps alive while its group lives
     let flags = unsafe { &*data.cast::<Flags>() };
     arm(flags.group.load(Ordering::Relaxed) as JSContextGroupRef, data.cast());
-    flags.bits.load(Ordering::Acquire) & (TERMINATE | ABORT) != 0
+    let limit = flags.limit.load(Ordering::Relaxed);
+    if limit != 0 && flags.ticks.fetch_add(1, Ordering::Relaxed) + 1 >= limit {
+        flags.bits.fetch_or(ABORT | TIMED, Ordering::AcqRel);
+    }
+    let end = flags.bits.load(Ordering::Acquire) & (TERMINATE | ABORT) != 0;
+    if end {
+        flags.ended.store(true, Ordering::Relaxed);
+    }
+    end
 }
 
 fn arm(group: JSContextGroupRef, flags: *const Flags) {

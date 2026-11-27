@@ -78,11 +78,16 @@ impl Jsc {
         let ctx = self.realms[realm as usize].ctx;
         let f = self.helper(realm, h);
         let mut exc: JSValueRef = std::ptr::null();
-        self.depth += 1;
+        self.deeper();
         // SAFETY: a helper function of a live realm; `Value` is the word
         let r = unsafe { ffi::JSObjectCallAsFunction(ctx, f.0 as _, std::ptr::null_mut(), args.len(), args.as_ptr().cast(), &mut exc) };
         self.depth -= 1;
-        if exc.is_null() { Ok(Value::from_ref(r)) } else { Err(Value::from_ref(exc)) }
+        if exc.is_null() {
+            self.after_drain();
+            Ok(Value::from_ref(r))
+        } else {
+            Err(Value::from_ref(exc))
+        }
     }
 
     /// The interface and prototype objects of `class` in `realm`,

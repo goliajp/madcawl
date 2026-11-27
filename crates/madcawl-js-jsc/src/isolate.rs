@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use madcawl_js::{Halt, HostRef, Owned};
+use madcawl_js::{AbortCause, Halt, HostRef, Owned};
 
 use crate::ffi::{self, JSContextGroupRef, JSContextRef, JSGlobalContextRef, JSStringRef};
 use crate::halt::Flags;
@@ -54,6 +54,7 @@ pub struct Jsc {
     /// Calls into the framework that can run script, on the stack.
     pub(crate) depth: u32,
     pub(crate) halt: Halt,
+    pub(crate) cause: AbortCause,
     pub(crate) flags: Arc<Flags>,
     /// Host microtasks queued while no script ran: queued in the
     /// framework at the next checkpoint, in order.
@@ -121,6 +122,7 @@ impl Jsc {
             exception: None,
             depth: 0,
             halt: Halt::Running,
+            cause: AbortCause::Asked,
             flags,
             pending: Vec::new(),
             in_checkpoint: false,

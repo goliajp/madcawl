@@ -23,10 +23,11 @@ impl Jsc {
         let me: *mut Jsc = self;
         let _frame = frame::enter(me, host);
         let mut exc: JSValueRef = std::ptr::null();
-        self.depth += 1;
+        self.deeper();
         let r = f(self, &mut exc);
         self.depth -= 1;
         if exc.is_null() {
+            self.after_drain();
             return Some(r);
         }
         self.after_stop();
