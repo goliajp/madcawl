@@ -69,6 +69,9 @@ pub(crate) enum Body {
     /// held. An entry whose key died is dropped at the next use.
     WeakMap { entries: Vec<(u32, Value)> },
     Symbol,
+    /// An accessor property's functions, held: the value of an own
+    /// property defined as one, never given to script
+    Accessor { get: Value, set: Value, configurable: bool },
     Function {
         name: &'static str,
         length: u8,
@@ -159,6 +162,7 @@ impl Cell {
                 ..
             } => out.extend_from_slice(captures),
             Body::StrView { s: v, .. } | Body::Proxy { global: v, .. } => out.push(*v),
+            Body::Accessor { get, set, .. } => out.extend([*get, *set]),
             _ => {}
         }
     }
@@ -175,6 +179,9 @@ impl Cell {
             } => out.append(captures),
             Body::StrView { s: v, .. } | Body::Proxy { global: v, .. } => {
                 out.push(std::mem::replace(v, crate::value::UNDEFINED));
+            }
+            Body::Accessor { get, set, .. } => {
+                out.extend([std::mem::replace(get, crate::value::UNDEFINED), std::mem::replace(set, crate::value::UNDEFINED)]);
             }
             _ => {}
         }

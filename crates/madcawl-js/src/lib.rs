@@ -55,6 +55,7 @@
 //! engine's collector runs, and that an adapter for a tracing engine
 //! runs over detached trees.
 
+mod builtins;
 mod class;
 mod engine;
 mod graph;
@@ -71,6 +72,7 @@ pub use class::{
     Attribute, Bound, ClassDef, ClassId, Constant, Ctx, Getter, HostFn, HostOps, IndexGetter,
     Interceptors, Length, NamedGetter, Operation, Setter,
 };
+pub use builtins::{Builtins, ErrorInfo};
 pub use engine::Engine;
 pub use host::Host;
 pub use graph::{Deadline, Step, Tracer, Unlinker};
@@ -78,4 +80,4 @@ pub use halt::{Control, Halt, Interrupt, Unsupported};
 pub use handle::{Member, Root};
 pub use script::{ModuleRequest, ScriptOrigin};
 pub use sig::{AttributeSig, Effects, IdlType, Signature};
-pub use value::{ErrorKind, HostRef, Key, Owned, Tree, ValueKind};
+pub use value::{ArrayType, ErrorKind, HostRef, Key, Owned, Tree, ValueKind};

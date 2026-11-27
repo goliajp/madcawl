@@ -30,6 +30,7 @@
 //!   of the undeclared entry points the architecture allows
 //!   (`private.rs`).
 
+mod builtins;
 mod collect;
 mod engine;
 mod ffi;
@@ -47,6 +48,7 @@ mod ops;
 mod private;
 mod protos;
 mod strings;
+mod typed;
 mod value;
 mod weak;
 mod wrap;

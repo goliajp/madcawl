@@ -8,6 +8,7 @@ use std::any::TypeId;
 use madcawl_js::{Bound, ClassDef, Ctx, Engine, ErrorKind, Getter, Host, HostFn, Key, Owned, Setter};
 use madcawl_str::DomString;
 
+use crate::accessor::accessor;
 use crate::cell::{Body, Call, Cell, ErasedClass, PropKey};
 use crate::isolate::{Realm, RealmData, Stub, name_bytes};
 use crate::proto::Link;
@@ -69,6 +70,9 @@ impl Stub {
                     // SAFETY: a live cell on the chain, read only
                     let c = unsafe { Cell::at(o) };
                     if let Some(&(_, v)) = c.props.iter().find(|(pk, _)| *pk == k) {
+                        if let Some((get, _, _)) = accessor(v) {
+                            return self.call_value(host, get, obj, &[]);
+                        }
                         self.retain_value(v);
                         return Stub::owned(v);
                     }
@@ -121,6 +125,9 @@ impl Stub {
         // SAFETY: a live cell, read only
         self.own(unsafe { Cell::at(obj) });
         let k = self.key(key);
+        if let Some(r) = self.set_accessor(host, obj, k, v) {
+            return r;
+        }
         if let PropKey::Name(a) = k {
             let name = name_bytes(a);
             let setter = self.chain::<H>(obj).into_iter().find_map(|l| match l {
@@ -162,40 +169,6 @@ impl Stub {
             self.release_value(old);
         }
         true
-    }
-
-    pub(crate) fn delete_prop(&mut self, obj: Value, key: Key<'_>) -> bool {
-        let obj = self.target(obj);
-        if !obj.is_cell() {
-            return true;
-        }
-        let k = self.key(key);
-        // SAFETY: a live cell
-        let c = unsafe { Cell::at(obj) };
-        if c.frozen {
-            return true;
-        }
-        if let Some(i) = c.props.iter().position(|(pk, _)| *pk == k) {
-            let (_, v) = c.props.remove(i);
-            self.release_value(v);
-        }
-        true
-    }
-
-    /// The wrapper `obj` gained state script can observe: the engine
-    /// counts the edge from its host object, and tells the host.
-    pub(crate) fn preserve<H: Host<Stub>>(&mut self, host: &mut H, obj: Value) {
-        if !obj.is_cell() {
-            return;
-        }
-        // SAFETY: a live cell
-        let c = unsafe { Cell::at(obj) };
-        if let Body::Wrapper { preserved: p @ false, class, obj: node, .. } = &mut c.body {
-            *p = true;
-            let (class, node) = (*class, *node);
-            c.set_count(c.count() + 1);
-            (class_as::<H>(&class).host_ops().wrapper_needs_preserve)(host, node);
-        }
     }
 
     fn method<H: Host<Stub>>(&mut self, realm: u32, table: usize, i: u16) -> Owned<Value> {

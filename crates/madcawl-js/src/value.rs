@@ -106,3 +106,19 @@ pub enum Tree<V> {
     /// The detached tree that wrapper `V`, already placed, is in.
     With(V),
 }
+
+/// The element type of a typed array.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArrayType {
+    Int8,
+    Uint8,
+    Uint8Clamped,
+    Int16,
+    Uint16,
+    Int32,
+    Uint32,
+    BigInt64,
+    BigUint64,
+    /// A float type, or one this interface does not name
+    Other,
+}

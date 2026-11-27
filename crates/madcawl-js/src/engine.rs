@@ -24,9 +24,9 @@ use crate::value::{ErrorKind, HostRef, Key, Owned, Tree, ValueKind};
 /// the host is inside a call, and halt state, and no value, realm or
 /// handle passes from one to another.
 ///
-/// [`Control`] is what the host does from other threads (interrupts)
-/// and the memory limits; every engine has it.
-pub trait Engine: Control + Sized + 'static {
+/// Every engine has [`Control`] (interrupts from other threads, the
+/// memory limits) and [`crate::Builtins`] (the realm's own builtins).
+pub trait Engine: Control + crate::Builtins + Sized + 'static {
     /// A script value: 8 bytes, copied by its bits, opaque to the host.
     type Value: Copy + Eq + Debug;
     type Realm: Copy + Eq + Debug;

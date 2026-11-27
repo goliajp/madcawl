@@ -37,6 +37,21 @@ pub const kJSTypeObject: JSType = 5;
 pub const kJSTypeSymbol: JSType = 6;
 pub const kJSTypeBigInt: JSType = 7;
 
+pub type JSTypedArrayType = u32;
+pub const kJSTypedArrayTypeInt8Array: JSTypedArrayType = 0;
+pub const kJSTypedArrayTypeInt16Array: JSTypedArrayType = 1;
+pub const kJSTypedArrayTypeInt32Array: JSTypedArrayType = 2;
+pub const kJSTypedArrayTypeUint8Array: JSTypedArrayType = 3;
+pub const kJSTypedArrayTypeUint8ClampedArray: JSTypedArrayType = 4;
+pub const kJSTypedArrayTypeUint16Array: JSTypedArrayType = 5;
+pub const kJSTypedArrayTypeUint32Array: JSTypedArrayType = 6;
+pub const kJSTypedArrayTypeFloat32Array: JSTypedArrayType = 7;
+pub const kJSTypedArrayTypeFloat64Array: JSTypedArrayType = 8;
+pub const kJSTypedArrayTypeArrayBuffer: JSTypedArrayType = 9;
+pub const kJSTypedArrayTypeNone: JSTypedArrayType = 10;
+pub const kJSTypedArrayTypeBigInt64Array: JSTypedArrayType = 11;
+pub const kJSTypedArrayTypeBigUint64Array: JSTypedArrayType = 12;
+
 pub type JSPropertyAttributes = u32;
 pub const kJSPropertyAttributeNone: u32 = 0;
 pub const kJSPropertyAttributeReadOnly: u32 = 1 << 1;
@@ -208,4 +223,9 @@ unsafe extern "C" {
     pub fn JSStringGetLength(s: JSStringRef) -> usize;
     pub fn JSStringGetCharactersPtr(s: JSStringRef) -> *const JSChar;
     pub fn JSPropertyNameAccumulatorAddName(accumulator: JSPropertyNameAccumulatorRef, name: JSStringRef);
+
+    pub fn JSValueGetTypedArrayType(ctx: JSContextRef, value: JSValueRef, exception: *mut JSValueRef) -> JSTypedArrayType;
+    pub fn JSObjectGetTypedArrayBytesPtr(ctx: JSContextRef, object: JSObjectRef, exception: *mut JSValueRef) -> *mut c_void;
+    pub fn JSObjectGetTypedArrayByteLength(ctx: JSContextRef, object: JSObjectRef, exception: *mut JSValueRef) -> usize;
+    pub fn JSObjectGetTypedArrayByteOffset(ctx: JSContextRef, object: JSObjectRef, exception: *mut JSValueRef) -> usize;
 }

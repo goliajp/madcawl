@@ -23,10 +23,11 @@ pub(crate) enum Helper {
     Constructor = 17,
     ErrorProto = 18,
     Iterable = 19,
+    ErrorInfo = 20,
 }
 
 impl Helper {
-    pub(crate) const LAST: Helper = Helper::Iterable;
+    pub(crate) const LAST: Helper = Helper::ErrorInfo;
 }
 
 // Page script runs in the realm and may replace any global or
@@ -49,6 +50,15 @@ pub(crate) const HELPERS: &str = r#"(function () {
     dp(f, 'length', ({ __proto__: null, value: l, configurable: true }));
   };
   const errors = [TypeError, RangeError, SyntaxError, ReferenceError];
+  const errorProtos = [Error, EvalError, RangeError, ReferenceError, SyntaxError, TypeError, URIError, AggregateError]
+    .map((c) => c.prototype);
+  const builtinError = (p) => {
+    for (let i = 0; i < errorProtos.length; i++) if (errorProtos[i] === p) return true;
+    return false;
+  };
+  const isError = Error.isError;
+  const hasOwn = Object.hasOwn;
+  const slice = String.prototype.slice;
   const AP = Array.prototype;
   const iterating = [['entries', AP.entries], ['keys', AP.keys], ['values', AP.values], ['forEach', AP.forEach]];
   const iterator = Symbol.iterator;
@@ -92,10 +102,10 @@ pub(crate) const HELPERS: &str = r#"(function () {
       return eval('(function (' + __mcP + ') {\\n' + __mcBody + '\\n})');
     }`);
   return [
-    (o, n, g, s) => {
+    (o, n, g, s, unforgeable) => {
       named(g, 'get ' + n, 0);
       if (s) named(s, 'set ' + n, 1);
-      dp(o, n, ({ __proto__: null, get: g, set: s, enumerable: true, configurable: true }));
+      dp(o, n, ({ __proto__: null, get: g, set: s, enumerable: true, configurable: !unforgeable }));
     },
     (o, n, f, l) => {
       named(f, n, l);
@@ -203,6 +213,23 @@ pub(crate) const HELPERS: &str = r#"(function () {
       for (let i = 0; all && i < 4; i++) {
         dp(p, iterating[i][0], ({ __proto__: null, value: iterating[i][1], writable: true, enumerable: true, configurable: true }));
       }
+    },
+    // what `x` says of itself: name, message, sourceURL, line, column,
+    // from own data properties only. An error object is ordinary, and a
+    // proxy is none, so no getter or trap runs; the name comes from the
+    // object or a builtin error prototype on its chain. A string is
+    // its own message; strings are cut to `n` code units
+    (x, n) => {
+      const cut = (v) => (typeof v !== 'string' ? undefined : v.length > n ? apply(slice, v, [0, n]) : v);
+      if (typeof x === 'string') return [undefined, cut(x), undefined, 0, 0];
+      if (!isError(x)) return undefined;
+      const own = (o, k) => {
+        const d = R.gopd(o, k);
+        return d !== undefined && hasOwn(d, 'value') ? d.value : undefined;
+      };
+      let name = own(x, 'name');
+      for (let p = R.proto(x); name === undefined && builtinError(p); p = R.proto(p)) name = own(p, 'name');
+      return [cut(name), cut(own(x, 'message')), cut(own(x, 'sourceURL')), own(x, 'line'), own(x, 'column')];
     },
   ];
 })()"#;

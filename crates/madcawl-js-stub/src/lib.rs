@@ -26,6 +26,7 @@
 //! send(madcawl_js::Root::<madcawl_js_stub::Stub>::new(madcawl_js::Engine::retain(&mut e, <madcawl_js_stub::Stub as madcawl_js::Engine>::null())));
 //! ```
 
+mod accessor;
 mod builtins;
 mod cell;
 mod collect;
