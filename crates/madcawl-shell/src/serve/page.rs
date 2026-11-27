@@ -171,7 +171,7 @@ impl Page {
         let id = net.fetch(&mut self.conn, env.owner, fetch_frame(&nav)).map_err(|e| format!("the network service: {e}"))?;
         let mut p = Pending::new("document", r.method, r.shown);
         p.mask = r.mask;
-        self.loader.begin(id, p, &mut self.log);
+        self.loader.begin(id, p, (net, env.owner), &mut self.log);
         Ok(())
     }
 

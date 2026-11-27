@@ -15,7 +15,7 @@ use std::os::unix::fs::FileTypeExt as _;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar};
 use std::time::{Duration, Instant};
 
 use madcawl_net::wire::{Frame, kind, tag};
@@ -23,7 +23,8 @@ use madcawl_net::{Client, Config};
 use madcawl_netd::{Downloads, ServerLimits, serve_guarded};
 
 use super::link::Link;
-use super::netctl::{Control, read_frame, write_with_id};
+pub use super::netctl::NetConn;
+use super::netctl::{Control, ControlLock};
 use super::netproc::{self, Process, Spec};
 
 /// How long a control-channel answer or a write to the service may take.
@@ -46,7 +47,7 @@ pub struct Net {
 /// asks its host to register and release its pages' connections, which
 /// the host does only in the session's own partition.
 enum Channel {
-    Own(Mutex<Control>),
+    Own(ControlLock),
     Host(Arc<Link>),
 }
 
@@ -85,8 +86,8 @@ impl Net {
         Ok(Net::new(socket, control, downloads.map(|d| d.0.to_path_buf()), None))
     }
 
-    fn new(socket: &Path, control: Control, downloads: Option<PathBuf>, process: Option<Process>) -> Net {
-        let control = Channel::Own(Mutex::new(control));
+    pub(super) fn new(socket: &Path, control: Control, downloads: Option<PathBuf>, process: Option<Process>) -> Net {
+        let control = Channel::Own(ControlLock::new(control));
         Net { socket: socket.to_path_buf(), control, replaced: Condvar::new(), downloads, process, slots: AtomicUsize::new(0) }
     }
 
@@ -97,7 +98,7 @@ impl Net {
         Net { socket: socket.to_path_buf(), control, replaced: Condvar::new(), downloads, process: None, slots: AtomicUsize::new(0) }
     }
 
-    fn own(&self) -> &Mutex<Control> {
+    fn own(&self) -> &ControlLock {
         match &self.control {
             Channel::Own(c) => c,
             Channel::Host(_) => unreachable!("only a host supervises its network process"),
@@ -119,7 +120,7 @@ impl Net {
     /// The network process was replaced by process `pid`, whose control
     /// channel `host` is.
     pub(crate) fn replaced(&self, host: UnixStream, pid: i32) {
-        let mut c = self.own().lock().unwrap_or_else(|e| e.into_inner());
+        let mut c = self.own().lock();
         match Control::new(host, CONTROL_WAIT) {
             Ok(mut new) => {
                 new.generation = c.generation + 1;
@@ -139,23 +140,25 @@ impl Net {
 
     /// The network process will not be started again.
     pub(crate) fn braked(&self) {
-        self.own().lock().unwrap_or_else(|e| e.into_inner()).braked = true;
+        self.own().lock().braked = true;
         self.replaced.notify_all();
     }
 
     /// One request on the control channel. When the network process is
     /// found gone, the request waits for the next one and goes to it.
-    fn control(&self, f: Frame) -> io::Result<Frame> {
-        let mut c = self.own().lock().unwrap_or_else(|e| e.into_inner());
+    /// Each wait is cut short at `by` when there is one.
+    fn control(&self, f: Frame, by: Option<Instant>) -> io::Result<Frame> {
+        let wait = |d: Duration| by.map_or(d, |b| d.min(b.saturating_duration_since(Instant::now())));
+        let mut c = self.own().lock_by(by, &f)?;
         let generation = c.generation;
-        match c.request(f.clone()) {
+        match c.request(f.clone(), wait(CONTROL_WAIT)) {
             Err(e) if self.process.is_some() && e.kind() != io::ErrorKind::TimedOut => {
-                let wait = self.replaced.wait_timeout_while(c, RESTART_WAIT, |c| c.generation == generation && !c.braked);
-                let mut c = wait.unwrap_or_else(|e| e.into_inner()).0;
+                let replaced = self.replaced.wait_timeout_while(c, wait(RESTART_WAIT), |c| c.generation == generation && !c.braked);
+                let mut c = replaced.unwrap_or_else(|e| e.into_inner()).0;
                 if c.generation == generation {
                     return Err(e);
                 }
-                c.request(f)
+                c.request(f, wait(CONTROL_WAIT))
             }
             r => r,
         }
@@ -194,8 +197,12 @@ impl Net {
     /// `session`, in that session's cookie partition; its token, and the
     /// generation of the network process it was made in.
     pub fn register(&self, session: u32) -> io::Result<(Vec<u8>, u64)> {
+        self.register_by(session, None)
+    }
+
+    pub(crate) fn register_by(&self, session: u32, by: Option<Instant>) -> io::Result<(Vec<u8>, u64)> {
         let reg = Frame::new(kind::REGISTER).num(tag::NAVIGATION, 1).num(tag::PARTITION, partition_of(session));
-        let r = self.control(reg)?;
+        let r = self.control(reg, by)?;
         match (r.kind, r.field(tag::TOKEN)) {
             (kind::REGISTERED, Some(t)) => Ok((t.to_vec(), self.generation())),
             _ => Err(io::Error::other(r.get_str(tag::MESSAGE).unwrap_or("not registered").to_owned())),
@@ -204,24 +211,28 @@ impl Net {
 
     /// Drops the registration `token`; whether the service knew it.
     pub fn unregister(&self, token: &[u8]) -> io::Result<bool> {
-        Ok(self.control(Frame::new(kind::UNREGISTER).bytes(tag::TOKEN, token))?.kind == kind::REGISTERED)
+        self.unregister_by(token, None)
+    }
+
+    pub(crate) fn unregister_by(&self, token: &[u8], by: Option<Instant>) -> io::Result<bool> {
+        Ok(self.control(Frame::new(kind::UNREGISTER).bytes(tag::TOKEN, token), by)?.kind == kind::REGISTERED)
     }
 
     /// A connection of the host's own, for one page of agent session
     /// `session`, in that session's cookie partition.
     pub fn connect(&self, session: u32) -> io::Result<NetConn> {
+        self.connect_by(session, None)
+    }
+
+    /// As `connect`, given up at `by` when there is one; a content
+    /// process's host is given `by` with the question and gives up then.
+    pub fn connect_by(&self, session: u32, by: Option<Instant>) -> io::Result<NetConn> {
         let token = match &self.control {
-            Channel::Own(_) => self.register(session)?.0,
-            Channel::Host(link) => link.net_register()?,
+            Channel::Own(_) => self.register_by(session, by)?.0,
+            Channel::Host(link) => link.net_register(by)?,
         };
-        let mut s = UnixStream::connect(&self.socket)?;
-        s.set_write_timeout(Some(CONTROL_WAIT))?;
-        let mut conn = NetConn { s: s.try_clone()?, buf: Vec::new(), token, next_id: 1 };
-        Frame::new(kind::HELLO).num(tag::ID, 0).bytes(tag::TOKEN, &conn.token).write_to(&mut s)?;
-        match conn.next(Instant::now() + CONTROL_WAIT)? {
-            Some(f) if f.kind == kind::HELLO && f.get_num(tag::OK) == Some(1) => Ok(conn),
-            _ => Err(io::Error::other("the network service refused the host's connection")),
-        }
+        let hello = by.unwrap_or_else(|| Instant::now() + CONTROL_WAIT);
+        NetConn::open(&self.socket, token.clone(), CONTROL_WAIT, hello).inspect_err(|_| self.release_token(&token, by))
     }
 
     /// Sends a FETCH for a page of session `session` on `conn`, connected
@@ -238,9 +249,18 @@ impl Net {
 
     /// Drops a page's registration; its connection is refused after.
     pub fn release(&self, conn: &NetConn) {
+        self.release_token(&conn.token, None);
+    }
+
+    /// As `release`, given up at `by` as `connect_by` is.
+    pub fn release_by(&self, conn: &NetConn, by: Option<Instant>) {
+        self.release_token(&conn.token, by);
+    }
+
+    fn release_token(&self, token: &[u8], by: Option<Instant>) {
         let _ = match &self.control {
-            Channel::Own(_) => self.unregister(&conn.token).map(drop),
-            Channel::Host(link) => link.net_release(&conn.token),
+            Channel::Own(_) => self.unregister_by(token, by).map(drop),
+            Channel::Host(link) => link.net_release(token, by),
         };
     }
 
@@ -251,7 +271,7 @@ impl Net {
         if matches!(self.control, Channel::Host(_)) {
             return Ok(true);
         }
-        let r = self.control(Frame::new(kind::PARTITION_DROP).num(tag::PARTITION, partition_of(session)))?;
+        let r = self.control(Frame::new(kind::PARTITION_DROP).num(tag::PARTITION, partition_of(session)), None)?;
         match r.kind {
             kind::PARTITION_DROP => Ok(r.get_num(tag::OK) == Some(1)),
             _ => Err(io::Error::other(r.get_str(tag::MESSAGE).unwrap_or("not dropped").to_owned())),
@@ -264,31 +284,6 @@ impl Drop for Net {
         if let Some(p) = &self.process {
             p.kill();
         }
-    }
-}
-
-/// One page's connection to the network service: frames out, and frames
-/// in as they arrive, kept whole across reads that time out.
-pub struct NetConn {
-    s: UnixStream,
-    buf: Vec<u8>,
-    token: Vec<u8>,
-    next_id: u64,
-}
-
-impl NetConn {
-    /// Sends a FETCH; its id.
-    pub fn fetch(&mut self, f: Frame) -> io::Result<u64> {
-        let id = self.next_id;
-        self.next_id += 1;
-        write_with_id(&mut self.s, f, id)?;
-        Ok(id)
-    }
-
-    /// The next frame, or `None` once `deadline` passes with no whole
-    /// frame in.
-    pub fn next(&mut self, deadline: Instant) -> io::Result<Option<Frame>> {
-        read_frame(&mut self.s, &mut self.buf, deadline)
     }
 }
 

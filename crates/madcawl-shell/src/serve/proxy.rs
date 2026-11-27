@@ -26,6 +26,8 @@ mod netreg;
 mod pages;
 mod recover;
 #[cfg(test)]
+mod cookie_tests;
+#[cfg(test)]
 mod tests;
 
 use std::collections::{HashMap, VecDeque};
@@ -227,7 +229,7 @@ impl<'a> Proxy<'a> {
     fn answer(&mut self, q: &Frame) -> Option<Frame> {
         Some(match q.kind {
             internal::NEW_PAGE => self.new_page(),
-            internal::NET_REGISTER => self.net_register(),
+            internal::NET_REGISTER => self.net_register(q),
             internal::NET_RELEASE => self.net_release(q),
             internal::AUDIT => {
                 self.audit(q);

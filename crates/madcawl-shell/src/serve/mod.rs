@@ -17,6 +17,7 @@ mod activation;
 mod config;
 mod conn;
 pub mod content;
+pub mod cookies;
 mod doc;
 mod limit;
 pub mod link;

@@ -22,7 +22,8 @@ pub mod internal {
     pub const STATE: u16 = 241;
     /// Content to host: register a page's connection with the network
     /// service; the host names the session's partition and answers the
-    /// token in `DATA`
+    /// token in `DATA`. An optional `TIMEOUT` is how many milliseconds
+    /// the content process waits; the host gives up when they are spent
     pub const NET_REGISTER: u16 = 242;
     /// Content to host: a number for a page it is opening, or an error
     /// when the host holds as many pages as it may
@@ -31,7 +32,8 @@ pub mod internal {
     /// and exit
     pub const END: u16 = 244;
     /// Content to host: drop the registration whose token is in `DATA`,
-    /// one the host made for this session
+    /// one the host made for this session; `TIMEOUT` as for
+    /// `NET_REGISTER`
     pub const NET_RELEASE: u16 = 245;
     /// Content to host, unanswered: an audit line, its fields (origin,
     /// action, role, name, result) as five `FIELD`s
@@ -119,15 +121,16 @@ impl Link {
     }
 
     /// A registration with the network service in the session's cookie
-    /// partition, made by the host; its token.
-    pub fn net_register(&self) -> io::Result<Vec<u8>> {
-        let r = self.ask(&Frame::new(internal::NET_REGISTER))?;
+    /// partition, made by the host, which gives up at `by`; its token.
+    pub fn net_register(&self, by: Option<Instant>) -> io::Result<Vec<u8>> {
+        let r = self.ask(&with_deadline(Frame::new(internal::NET_REGISTER), by))?;
         r.field(tag::DATA).map(<[u8]>::to_vec).ok_or_else(|| io::Error::other(r.get_str(tag::TEXT).unwrap_or("no answer").to_owned()))
     }
 
-    /// Drops a registration `net_register` made.
-    pub fn net_release(&self, token: &[u8]) -> io::Result<()> {
-        let r = self.ask(&Frame::new(internal::NET_RELEASE).bytes(tag::DATA, token))?;
+    /// Drops a registration `net_register` made; the host gives up at
+    /// `by`.
+    pub fn net_release(&self, token: &[u8], by: Option<Instant>) -> io::Result<()> {
+        let r = self.ask(&with_deadline(Frame::new(internal::NET_RELEASE).bytes(tag::DATA, token), by))?;
         match r.kind {
             madcawl_agent::kind::RESULT => Ok(()),
             _ => Err(io::Error::other(r.get_str(tag::TEXT).unwrap_or("not released").to_owned())),
@@ -140,6 +143,20 @@ impl Link {
         let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
         write(&mut g.0, &f)
     }
+}
+
+/// `f` with the milliseconds left until `by`, when there is one.
+fn with_deadline(f: Frame, by: Option<Instant>) -> Frame {
+    match by {
+        Some(by) => f.num(tag::TIMEOUT, by.saturating_duration_since(Instant::now()).as_millis() as u64),
+        None => f,
+    }
+}
+
+/// The host's deadline for question `q`: the `TIMEOUT` it carries from
+/// now, or none.
+pub fn deadline_of(q: &Frame) -> Option<Instant> {
+    q.get_num(tag::TIMEOUT).and_then(|ms| Instant::now().checked_add(Duration::from_millis(ms)))
 }
 
 #[cfg(test)]

@@ -16,6 +16,7 @@
 use madcawl_agent::{Frame, kind, tag};
 
 use super::Proxy;
+use crate::serve::link::deadline_of;
 use crate::serve::{code, error_frame};
 
 /// Registrations a session may hold for each page it may open: one a
@@ -26,7 +27,9 @@ const TOKENS_PER_PAGE: usize = 4;
 const JAR_LOST: &str = "note: the network process was restarted, and this session's cookies went with it; sites it was logged in to need logging in again";
 
 impl Proxy<'_> {
-    pub(super) fn net_register(&mut self) -> Frame {
+    /// A registration for the session, given up at the deadline `q`
+    /// carries, when the content process stops waiting.
+    pub(super) fn net_register(&mut self, q: &Frame) -> Frame {
         let Some(net) = self.shared.net.clone() else { return error_frame(code::REFUSED, "this host has no network") };
         let generation = net.generation();
         self.tokens.retain(|_, g| *g == generation);
@@ -38,7 +41,7 @@ impl Proxy<'_> {
             self.content_log("net-register", "error 13 host");
             return error_frame(code::TOO_MANY_PAGES, "the host holds as many network registrations as the network service takes");
         }
-        match net.register(self.id) {
+        match net.register_by(self.id, deadline_of(q)) {
             Ok((token, g)) => {
                 self.saw_jar(g);
                 let r = Frame::new(kind::RESULT).bytes(tag::DATA, &token);
@@ -70,7 +73,7 @@ impl Proxy<'_> {
             return error_frame(code::REFUSED, "not a registration the host made for this session");
         };
         net.give_slots(1, g);
-        match net.unregister(t) {
+        match net.unregister_by(t, deadline_of(q)) {
             Ok(_) => Frame::new(kind::RESULT),
             Err(e) => error_frame(code::IO, &format!("the network service: {e}")),
         }

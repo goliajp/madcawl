@@ -5,6 +5,7 @@
 //! what has arrived kept, so a wait that runs out can be taken up again.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use madcawl_css::style::{SheetSource, sheet_sources};
@@ -13,8 +14,9 @@ use madcawl_html::Encoding;
 use madcawl_net::Url;
 use madcawl_net::wire::{Frame, kind, tag};
 
+use super::cookies::{Cookies, NetCookies};
 use super::doc;
-use super::net::NetConn;
+use super::net::{Net, NetConn};
 use super::reqlog::{Entry, RequestLog};
 use super::scripts::initiator;
 use crate::fetch::charset_of;
@@ -162,6 +164,8 @@ pub(crate) struct Loader {
     sheets: HashMap<String, u64>,
     /// What the scripts stage noted for the request log (`scripts.rs`)
     pub(crate) script_notes: Vec<String>,
+    /// The network and agent session a document's `document.cookie` uses
+    pub(crate) cookies: Option<(Arc<Net>, u32)>,
 }
 
 impl Loader {
@@ -174,8 +178,11 @@ impl Loader {
         self.inflight.iter().filter(|(_, p)| !p.done).map(|(_, p)| p.line()).collect()
     }
 
-    /// A new document request replaces whatever was loading.
-    pub fn begin(&mut self, id: u64, p: Pending, log: &mut RequestLog) {
+    /// A new document request replaces whatever was loading; the
+    /// document's script reaches the cookies of `cookies`' network and
+    /// agent session.
+    pub fn begin(&mut self, id: u64, p: Pending, cookies: (Arc<Net>, u32), log: &mut RequestLog) {
+        self.cookies = Some(cookies);
         for (_, mut old) in self.inflight.drain(..).filter(|(_, p)| !p.done) {
             old.failed = Some("replaced by a new navigation".into());
             log.push(old.entry());
@@ -239,7 +246,9 @@ impl Loader {
                 }
                 let url = p.final_url.map_or(p.url, |u| super::submit::masked(&u, &p.mask));
                 let (masked, status) = (super::submit::is_masked(&url), p.status.unwrap_or(0));
-                if let Some(s) = super::scripts::open(&p.body, &p.content_type, charset_of(&p.content_type), (url.clone(), masked, status)) {
+                let cookies = self.cookies.clone().map(|(net, session)| Box::new(NetCookies::new(net, session)) as Box<dyn Cookies>);
+                let commit = (url.clone(), masked, status);
+                if let Some(s) = super::scripts::open(&p.body, &p.content_type, charset_of(&p.content_type), commit, cookies) {
                     self.stage = Stage::Scripts(Box::new(s));
                     return self.advance(conn);
                 }
