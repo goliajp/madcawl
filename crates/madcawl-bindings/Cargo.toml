@@ -12,6 +12,9 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+# the document's URL, which Location and History read and change, with
+# the parser the network stack uses
+alt-url = { path = "../../../alt/crates/alt-url" }
 # querySelector matches with the cascade's selector matcher
 madcawl-css = { path = "../madcawl-css" }
 madcawl-dom = { path = "../madcawl-dom" }

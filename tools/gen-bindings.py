@@ -25,7 +25,9 @@ lists (only `[HostOps]`, `[Side]` (its objects are not nodes),
 `[Targets]` (nodes, and side objects of its own) and `[ErrorPrototype]`
 (its prototype object inherits from Error.prototype) on an interface, `[Atom]` and `[EnforceRange]` on an argument, and `[CEReactions]`,
 `[NewObject]`, `[RunsScript]` and `[Throws]` on a member are acted on; `[SameObject]` documents the
-implementation's caching).
+implementation's caching). A readonly attribute with `[PutForwards=x]`
+gets a setter that converts the value as attribute `x` of the interface
+it returns takes it and calls `set_<member>`.
 An interface with a `getter` operation of one `unsigned long` argument
 gets interceptors: its index getter calls the operation's
 implementation and gives no property for `None`, and its length calls
@@ -61,6 +63,7 @@ TYPES = {
     '[Atom] DOMString': 'cv::atom(e, h, {v})?',
     '[LegacyNullToEmptyString] DOMString': 'cv::dom_string_null_empty(e, h, {v})?',
     'unsigned long': 'cv::to_uint32(e, h, {v})?',
+    'long': 'cv::to_long(e, h, {v})?',
     'EventListener?': 'cv::callback_or_null(e, {v})?',
     'EventHandler': 'cv::event_handler::<E>(e, {v})',
     '[EnforceRange] unsigned long long': 'cv::enforce_u64(e, h, {v})?',
@@ -99,8 +102,9 @@ def parse(text):
                 iface['consts'].append((c.group(2), c.group(3)))
             elif re.match(r'(readonly\s+)?attribute\s', member):
                 a = re.fullmatch(r'(readonly\s+)?attribute\s+(.+?)\s+(\w+)', member)
-                iface['attrs'].append({'name': a.group(3), 'type': a.group(2), 'readonly': bool(a.group(1)),
-                                       'flags': flags})
+                forwards = re.search(r'PutForwards\s*=\s*(\w+)', ext.group(1)) if ext else None
+                iface['attrs'].append({'name': a.group(3), 'type': a.group(2), 'readonly': bool(a.group(1)) and not forwards,
+                                       'flags': flags, 'forwards': forwards and forwards.group(1)})
             else:
                 ctor = member.startswith('constructor')
                 o = re.fullmatch(r'(.+?)\s+(\w+)\s*\((.*)\)', 'undefined ' * ctor + member, re.S)
@@ -158,8 +162,20 @@ def convert(t, v, names, sides=()):
     sys.exit(f'unsupported IDL type: {t}')
 
 
+def forward(ifaces):
+    """Give each `[PutForwards=x]` attribute the type its setter converts
+    to: that of attribute `x` of the interface it returns."""
+    by_name = {i['name']: i for i in ifaces}
+    for i in ifaces:
+        for a in i['attrs']:
+            if a['forwards']:
+                target = next(t for t in by_name[a['type'].rstrip('?')]['attrs'] if t['name'] == a['forwards'])
+                a['set_type'] = target['type']
+
+
 def emit(ifaces, sources):
     names = number(ifaces)
+    forward(ifaces)
     sides = {i['name'] for i in ifaces if i['side']}
     out = [f"// CODEGEN: tools/gen-bindings.py from {', '.join(sources)}",
            '//! The class tables of the bound interfaces, and the glue between',
@@ -180,7 +196,7 @@ def emit(ifaces, sources):
         attrs = []
         for a in i['attrs']:
             s = 'None' if a['readonly'] else f"Some(unsafe {{ Bound::host_fn({m}_set_{snake(a['name'])}_abi::<E>) }})"
-            set = 'Effects::NONE' if a['readonly'] else setter_effects(a)
+            set = 'Effects::NONE' if a['readonly'] else setter_effects(dict(a, type=a.get('set_type', a['type'])))
             sig = f"AttributeSig {{ ty: IdlType::{idl_type(a['type'], names)}, get: Effects::NONE, set: {set} }}"
             attrs.append(f"Attribute {{ name: \"{a['name']}\", get: unsafe {{ Bound::host_fn({m}_get_{snake(a['name'])}_abi::<E>) }}, set: {s}, sig: {sig} }},")
         ops = {'operations': [], 'statics': []}
@@ -214,7 +230,7 @@ def emit(ifaces, sources):
                         [f"impls::{m}::{ident(a['name'])}(e, h, this)"], 'get')
             if not a['readonly']:
                 out += glue(f"{m}_set_{snake(a['name'])}", i,
-                            [f"let value = {convert(a['type'], 'value', names, sides)};",
+                            [f"let value = {convert(a.get('set_type', a['type']), 'value', names, sides)};",
                              f"impls::{m}::set_{snake(a['name'])}(e, h, this, value)"], 'set')
         members = [(o, 'op') for o in i['ops']] + [(o, 'ctor') for o in i['statics']] + ([(i['ctor'], 'ctor')] if i['ctor'] else [])
         for o, kind in members:

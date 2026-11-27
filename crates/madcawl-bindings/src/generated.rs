@@ -1,4 +1,4 @@
-// CODEGEN: tools/gen-bindings.py from crates/madcawl-bindings/idl/attr.webidl, crates/madcawl-bindings/idl/dom.webidl, crates/madcawl-bindings/idl/html.webidl
+// CODEGEN: tools/gen-bindings.py from crates/madcawl-bindings/idl/attr.webidl, crates/madcawl-bindings/idl/dom.webidl, crates/madcawl-bindings/idl/html.webidl, crates/madcawl-bindings/idl/window.webidl
 //! The class tables of the bound interfaces, and the glue between
 //! script values and the implementations in `impls`.
 
@@ -1421,6 +1421,7 @@ impl<E: Engine> DocumentClass<E> {
         attributes: &[
             Attribute { name: "documentElement", get: unsafe { Bound::host_fn(document_get_document_element_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "currentScript", get: unsafe { Bound::host_fn(document_get_current_script_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "location", get: unsafe { Bound::host_fn(document_get_location_abi::<E>) }, set: Some(unsafe { Bound::host_fn(document_set_location_abi::<E>) }), sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
             Attribute { name: "children", get: unsafe { Bound::host_fn(document_get_children_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Object, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "firstElementChild", get: unsafe { Bound::host_fn(document_get_first_element_child_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
             Attribute { name: "lastElementChild", get: unsafe { Bound::host_fn(document_get_last_element_child_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
@@ -1469,6 +1470,27 @@ fn document_get_current_script<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E
 
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn document_get_current_script_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, document_get_current_script::<E>) } }
+
+fn document_get_location<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
+        impls::document::location(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_get_location_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, document_get_location::<E>) } }
+
+fn document_set_location<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &DocumentClass::<E>::DEF)?;
+        let value = cv::dom_string(e, h, value)?;
+        impls::document::set_location(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn document_set_location_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, document_set_location::<E>) } }
 
 fn document_get_children<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -2654,3 +2676,350 @@ fn html_collection_named_item<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E:
 
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn html_collection_named_item_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, html_collection_named_item::<E>) } }
+
+pub struct LocationClass<E>(PhantomData<E>);
+
+impl<E: Engine> LocationClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "Location",
+        id: ClassId(19),
+        last: ClassId(19),
+        parent: None,
+        attributes: &[
+            Attribute { name: "href", get: unsafe { Bound::host_fn(location_get_href_abi::<E>) }, set: Some(unsafe { Bound::host_fn(location_set_href_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+            Attribute { name: "origin", get: unsafe { Bound::host_fn(location_get_origin_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "protocol", get: unsafe { Bound::host_fn(location_get_protocol_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "host", get: unsafe { Bound::host_fn(location_get_host_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "hostname", get: unsafe { Bound::host_fn(location_get_hostname_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "port", get: unsafe { Bound::host_fn(location_get_port_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "pathname", get: unsafe { Bound::host_fn(location_get_pathname_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "search", get: unsafe { Bound::host_fn(location_get_search_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "hash", get: unsafe { Bound::host_fn(location_get_hash_abi::<E>) }, set: Some(unsafe { Bound::host_fn(location_set_hash_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+        ],
+        operations: &[
+            Operation { name: "assign", length: 1, call: unsafe { Bound::host_fn(location_assign_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "replace", length: 1, call: unsafe { Bound::host_fn(location_replace_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "reload", length: 0, call: unsafe { Bound::host_fn(location_reload_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Undefined, effects: Effects::NONE } },
+            Operation { name: "toString", length: 0, call: unsafe { Bound::host_fn(location_to_string_abi::<E>) }, sig: Signature { args: &[], result: IdlType::String, effects: Effects::NONE } },
+        ],
+        statics: &[],
+        constants: &[],
+        interceptors: None,
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: None,
+        length: 0,
+        error_prototype: false,
+    };
+}
+
+fn location_get_href<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &LocationClass::<E>::DEF)?;
+        impls::location::href(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn location_get_href_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, location_get_href::<E>) } }
+
+fn location_set_href<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &LocationClass::<E>::DEF)?;
+        let value = cv::dom_string(e, h, value)?;
+        impls::location::set_href(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn location_set_href_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, location_set_href::<E>) } }
+
+fn location_get_origin<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &LocationClass::<E>::DEF)?;
+        impls::location::origin(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn location_get_origin_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, location_get_origin::<E>) } }
+
+fn location_get_protocol<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &LocationClass::<E>::DEF)?;
+        impls::location::protocol(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn location_get_protocol_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, location_get_protocol::<E>) } }
+
+fn location_get_host<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &LocationClass::<E>::DEF)?;
+        impls::location::host(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn location_get_host_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, location_get_host::<E>) } }
+
+fn location_get_hostname<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &LocationClass::<E>::DEF)?;
+        impls::location::hostname(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn location_get_hostname_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, location_get_hostname::<E>) } }
+
+fn location_get_port<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &LocationClass::<E>::DEF)?;
+        impls::location::port(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn location_get_port_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, location_get_port::<E>) } }
+
+fn location_get_pathname<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &LocationClass::<E>::DEF)?;
+        impls::location::pathname(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn location_get_pathname_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, location_get_pathname::<E>) } }
+
+fn location_get_search<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &LocationClass::<E>::DEF)?;
+        impls::location::search(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn location_get_search_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, location_get_search::<E>) } }
+
+fn location_get_hash<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &LocationClass::<E>::DEF)?;
+        impls::location::hash(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn location_get_hash_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, location_get_hash::<E>) } }
+
+fn location_set_hash<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &LocationClass::<E>::DEF)?;
+        let value = cv::dom_string(e, h, value)?;
+        impls::location::set_hash(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn location_set_hash_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, location_set_hash::<E>) } }
+
+fn location_assign<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &LocationClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        impls::location::assign(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn location_assign_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, location_assign::<E>) } }
+
+fn location_replace<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &LocationClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        impls::location::replace(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn location_replace_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, location_replace::<E>) } }
+
+fn location_reload<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &LocationClass::<E>::DEF)?;
+        impls::location::reload(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn location_reload_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, location_reload::<E>) } }
+
+fn location_to_string<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &LocationClass::<E>::DEF)?;
+        impls::location::to_string(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn location_to_string_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, location_to_string::<E>) } }
+
+pub struct HistoryClass<E>(PhantomData<E>);
+
+impl<E: Engine> HistoryClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "History",
+        id: ClassId(20),
+        last: ClassId(20),
+        parent: None,
+        attributes: &[
+            Attribute { name: "length", get: unsafe { Bound::host_fn(history_get_length_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "state", get: unsafe { Bound::host_fn(history_get_state_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Any, get: Effects::NONE, set: Effects::NONE } },
+        ],
+        operations: &[
+            Operation { name: "go", length: 0, call: unsafe { Bound::host_fn(history_go_abi::<E>) }, sig: Signature { args: &[IdlType::Number], result: IdlType::Undefined, effects: Effects::THROWS } },
+            Operation { name: "back", length: 0, call: unsafe { Bound::host_fn(history_back_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Undefined, effects: Effects::NONE } },
+            Operation { name: "forward", length: 0, call: unsafe { Bound::host_fn(history_forward_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Undefined, effects: Effects::NONE } },
+            Operation { name: "pushState", length: 2, call: unsafe { Bound::host_fn(history_push_state_abi::<E>) }, sig: Signature { args: &[IdlType::Any, IdlType::String, IdlType::NullableString], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "replaceState", length: 2, call: unsafe { Bound::host_fn(history_replace_state_abi::<E>) }, sig: Signature { args: &[IdlType::Any, IdlType::String, IdlType::NullableString], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+        ],
+        statics: &[],
+        constants: &[],
+        interceptors: None,
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: None,
+        length: 0,
+        error_prototype: false,
+    };
+}
+
+fn history_get_length<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &HistoryClass::<E>::DEF)?;
+        impls::history::length(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn history_get_length_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, history_get_length::<E>) } }
+
+fn history_get_state<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &HistoryClass::<E>::DEF)?;
+        impls::history::state(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn history_get_state_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, history_get_state::<E>) } }
+
+fn history_go<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &HistoryClass::<E>::DEF)?;
+        let a0 = cv::to_long(e, h, cv::arg::<E>(args, 0))?;
+        impls::history::go(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn history_go_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, history_go::<E>) } }
+
+fn history_back<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &HistoryClass::<E>::DEF)?;
+        impls::history::back(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn history_back_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, history_back::<E>) } }
+
+fn history_forward<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &HistoryClass::<E>::DEF)?;
+        impls::history::forward(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn history_forward_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, history_forward::<E>) } }
+
+fn history_push_state<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &HistoryClass::<E>::DEF)?;
+        cv::need(e, args, 2)?;
+        let a0 = cv::arg::<E>(args, 0);
+        let a1 = cv::dom_string(e, h, cv::arg::<E>(args, 1))?;
+        let a2 = cv::dom_string_or_null(e, h, cv::arg::<E>(args, 2))?;
+        impls::history::push_state(e, h, this, a0, a1, a2)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn history_push_state_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, history_push_state::<E>) } }
+
+fn history_replace_state<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &HistoryClass::<E>::DEF)?;
+        cv::need(e, args, 2)?;
+        let a0 = cv::arg::<E>(args, 0);
+        let a1 = cv::dom_string(e, h, cv::arg::<E>(args, 1))?;
+        let a2 = cv::dom_string_or_null(e, h, cv::arg::<E>(args, 2))?;
+        impls::history::replace_state(e, h, this, a0, a1, a2)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn history_replace_state_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, history_replace_state::<E>) } }
+
+pub struct CryptoClass<E>(PhantomData<E>);
+
+impl<E: Engine> CryptoClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "Crypto",
+        id: ClassId(21),
+        last: ClassId(21),
+        parent: None,
+        attributes: &[],
+        operations: &[
+            Operation { name: "getRandomValues", length: 1, call: unsafe { Bound::host_fn(crypto_get_random_values_abi::<E>) }, sig: Signature { args: &[IdlType::Any], result: IdlType::Any, effects: Effects::THROWS } },
+            Operation { name: "randomUUID", length: 0, call: unsafe { Bound::host_fn(crypto_random_uuid_abi::<E>) }, sig: Signature { args: &[], result: IdlType::String, effects: Effects::NONE } },
+        ],
+        statics: &[],
+        constants: &[],
+        interceptors: None,
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: None,
+        length: 0,
+        error_prototype: false,
+    };
+}
+
+fn crypto_get_random_values<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &CryptoClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::arg::<E>(args, 0);
+        impls::crypto::get_random_values(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn crypto_get_random_values_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, crypto_get_random_values::<E>) } }
+
+fn crypto_random_uuid<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &CryptoClass::<E>::DEF)?;
+        impls::crypto::random_uuid(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn crypto_random_uuid_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, crypto_random_uuid::<E>) } }

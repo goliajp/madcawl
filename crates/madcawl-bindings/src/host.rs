@@ -5,9 +5,9 @@ use std::collections::HashMap;
 
 use madcawl_dom::{Dom, NodeId, NodeKind};
 use madcawl_js::{
-    ClassDef, Deadline, Engine, ErrorKind, Halt, Host, HostRef, Member, ModuleRequest, Owned, Root, Step,
+    ClassDef, Deadline, Engine, ErrorKind, Host, HostRef, Member, ModuleRequest, Owned, Step,
 };
-use madcawl_str::{Atom, HeldAtoms};
+use madcawl_str::HeldAtoms;
 
 use crate::event_loop::EventLoop;
 use crate::listeners::Listener;
@@ -64,6 +64,11 @@ pub struct DomHost<E: Engine> {
     pub(crate) fixed: crate::fixed::FixedLists<E>,
     /// The `Attr`s and `attributes` maps script has (`attr.rs`).
     pub(crate) attrs: crate::attr::Attrs<E>,
+    /// The document's URL, its session history and the window's own
+    /// objects (`nav.rs`).
+    pub(crate) nav: crate::nav::Nav<E>,
+    /// The last exceptions and navigations not followed (`notes.rs`).
+    pub(crate) notes: crate::notes::Notes,
 }
 
 impl<E: Engine> DomHost<E> {
@@ -104,6 +109,8 @@ impl<E: Engine> DomHost<E> {
             list_rebuilds: 0,
             fixed: Default::default(),
             attrs: Default::default(),
+            nav: crate::nav::Nav::new(),
+            notes: Default::default(),
         };
         if E::PLACES_WRAPPERS {
             h.dom.track_moves();
@@ -180,57 +187,6 @@ impl<E: Engine> DomHost<E> {
         step
     }
 
-    /// Call the listeners of type `ty` on `target`, each held by a root
-    /// handle for the call, with a microtask checkpoint after each when
-    /// no script is on the stack (a dispatch the user started, not one
-    /// script started). The dispatch stops when script is being ended.
-    /// The host's own firing, not yet an Event dispatch (that is
-    /// `dispatchEvent`'s, `event.rs`): the listener gets the type as its
-    /// argument.
-    pub fn fire(&mut self, e: &mut E, target: NodeId, ty: Atom) -> usize {
-        let roots: Vec<Root<E>> = self
-            .listeners_of(target)
-            .filter(|l| l.ty == ty)
-            .filter_map(|l| l.callback.get())
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|cb| Root::new(e.retain(cb)))
-            .collect();
-        let this = self.wrap(e, target);
-        let arg = e.string(ty.to_dom_string());
-        let checkpoints = !e.in_script();
-        let (mut called, mut ended) = (0, false);
-        for r in roots {
-            if !ended {
-                called += 1;
-                let res = e.call(self, r.get(), this.get(), &[arg.get()]);
-                if !E::is_thrown(res.get()) {
-                    e.release(res);
-                } else {
-                    let _sentinel = res.into_raw();
-                    ended = e.halt() != Halt::Running;
-                    if !ended {
-                        let ex = e.take_exception().expect("a thrown exception");
-                        self.report_exception(e, ex);
-                    }
-                }
-                // halted script skips the task's checkpoint
-                if checkpoints && !ended {
-                    e.run_microtasks(self);
-                }
-            }
-            r.release(e);
-        }
-        e.release(this);
-        e.release(arg);
-        self.settle(e);
-        called
-    }
-
-    pub fn listener_count(&self, n: NodeId) -> usize {
-        self.listeners_of(n).count()
-    }
-
     /// Give back everything this host holds in the engine: listeners,
     /// preserved wrappers (of nodes in the document and out of it), the
     /// realm. What script still holds is the engine's to free; the
@@ -284,6 +240,7 @@ impl<E: Engine> Host<E> for DomHost<E> {
 
     fn report_exception(&mut self, e: &mut E, exception: Owned<E::Value>) {
         self.reported += 1;
+        self.record_exception(e, exception.get());
         e.release(exception);
     }
 

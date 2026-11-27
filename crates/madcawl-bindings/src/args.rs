@@ -22,6 +22,13 @@ pub(crate) fn to_uint32<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Value) -
     Ok(to_int32(n) as u32)
 }
 
+/// A Web IDL `long`: undefined converts to 0, an optional argument's
+/// usual default.
+pub(crate) fn to_long<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Value) -> Result<i32, Thrown> {
+    let n = e.to_number(h, v).ok_or(Thrown)?;
+    Ok(to_int32(n))
+}
+
 /// A Web IDL `[EnforceRange] unsigned long long`: a TypeError for a
 /// number that is not finite or, truncated, is outside 0 to 2^53 - 1.
 pub(crate) fn enforce_u64<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Value) -> Result<u64, Thrown> {

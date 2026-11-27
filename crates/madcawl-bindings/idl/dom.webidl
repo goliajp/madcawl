@@ -205,6 +205,7 @@ interface Document : Node {
   readonly attribute Element? documentElement;
   // the HTML Standard's, from its partial Document interface
   readonly attribute Element? currentScript;
+  [PutForwards=href] readonly attribute Location? location;
 
   [NewObject] Element createElement(DOMString localName);
   [NewObject] DocumentFragment createDocumentFragment();

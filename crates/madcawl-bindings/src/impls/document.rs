@@ -19,6 +19,21 @@ pub(crate) fn current_script<E: Engine>(_: &mut E, h: &mut DomHost<E>, _this: No
     Ok(h.current_script())
 }
 
+/// The window's Location, for the window's own document; null for any
+/// other, which has no browsing context.
+pub(crate) fn location<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<Option<crate::side::SideRef>, Thrown> {
+    Ok(h.location_object().filter(|_| this == h.dom.document()))
+}
+
+/// `document.location = url`, forwarded to the Location's `href`; a
+/// TypeError for a document with no Location.
+pub(crate) fn set_location<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, url: DomString) -> Result<(), Thrown> {
+    match location(e, h, this)? {
+        Some(r) => crate::impls::location::set_href(e, h, r, url),
+        None => Err(crate::convert::throw(e, madcawl_js::ErrorKind::Type, "the document has no Location to set")),
+    }
+}
+
 /// The names `createElement` refuses: empty, or holding a character
 /// no element name can (whitespace, `/`, `>`, NUL).
 fn bad_name(b: &[u8]) -> bool {

@@ -1,19 +1,20 @@
 //! The window's own members, put on the realm's global object: `window`
 //! and `self`, `parent` and `top` (a top-level window's own), `opener`,
-//! `document`, the interface objects, the timers, `queueMicrotask`, and
-//! the window's listeners. The global is not yet a host object of a
-//! bound `Window` interface: these are plain properties, and the
-//! functions host functions made at run time.
+//! `document`, `location`, `history` and `crypto` (`objects.rs`), the
+//! interface objects, the timers, `queueMicrotask`, `atob` and `btoa`,
+//! and the window's listeners. The global is not yet a host object of a
+//! bound `Window` interface: these are plain properties, but for the
+//! accessors of `objects.rs`, and the functions host functions made at
+//! run time.
 
 use madcawl_js::{Bound, ClassDef, Ctx, Engine, ErrorKind, Halt, HostFn, Key, Owned, Root};
 use madcawl_str::{Atom, DomString};
 
 use crate::convert::{Thrown, arg, run, throw};
 use crate::generated::{
-    AbortControllerClass, AbortSignalClass, AttrClass, CharacterDataClass, CommentClass, CustomEventClass, DOMExceptionClass,
-    DocumentClass, DocumentFragmentClass, ElementClass, EventClass, EventTargetClass, HTMLCollectionClass, HTMLScriptElementClass,
-    NamedNodeMapClass,
-    NodeClass, NodeListClass, TextClass,
+    AbortControllerClass, AbortSignalClass, AttrClass, CharacterDataClass, CommentClass, CryptoClass, CustomEventClass,
+    DOMExceptionClass, DocumentClass, DocumentFragmentClass, ElementClass, EventClass, EventTargetClass, HTMLCollectionClass,
+    HTMLScriptElementClass, HistoryClass, LocationClass, NamedNodeMapClass, NodeClass, NodeListClass, TextClass,
 };
 use crate::event::Target;
 use crate::host::DomHost;
@@ -39,7 +40,7 @@ impl<E: Engine> DomHost<E> {
         let d = self.wrap(e, doc);
         put(e, self, global.get(), "document", d.get());
         e.release(d);
-        let classes: [&'static ClassDef<E, DomHost<E>>; 18] = [
+        let classes: [&'static ClassDef<E, DomHost<E>>; 21] = [
             &AbortControllerClass::<E>::DEF,
             &AbortSignalClass::<E>::DEF,
             &AttrClass::<E>::DEF,
@@ -58,13 +59,23 @@ impl<E: Engine> DomHost<E> {
             &EventClass::<E>::DEF,
             &NodeListClass::<E>::DEF,
             &HTMLCollectionClass::<E>::DEF,
+            &LocationClass::<E>::DEF,
+            &HistoryClass::<E>::DEF,
+            &CryptoClass::<E>::DEF,
         ];
         for c in classes {
             let i = e.interface_object(self.realm, c);
             put(e, self, global.get(), c.name, i.get());
             e.release(i);
         }
-        let functions: [(&'static str, u8, HostFn); 7] = [
+        self.install_functions(e, global.get());
+        self.install_objects(e, global.get());
+        e.release(global);
+        self.settle(e);
+    }
+
+    fn install_functions(&mut self, e: &mut E, global: Value<E>) {
+        let functions: [(&'static str, u8, HostFn); 9] = [
             ("addEventListener", 2, add_listener_abi::<E>),
             ("removeEventListener", 2, remove_listener_abi::<E>),
             ("setTimeout", 1, set_timeout_abi::<E>),
@@ -72,16 +83,16 @@ impl<E: Engine> DomHost<E> {
             ("clearTimeout", 0, clear_timer_abi::<E>),
             ("clearInterval", 0, clear_timer_abi::<E>),
             ("queueMicrotask", 1, queue_microtask_abi::<E>),
+            ("atob", 1, crate::base64::atob_abi::<E>),
+            ("btoa", 1, crate::base64::btoa_abi::<E>),
         ];
         for (name, length, f) in functions {
             // SAFETY: every function here reads its context as E and DomHost<E>
             let bound = unsafe { Bound::<HostFn, E, DomHost<E>>::host_fn(f) };
             let v = e.new_function(self.realm, name, length, bound, 0);
-            put(e, self, global.get(), name, v.get());
+            put(e, self, global, name, v.get());
             e.release(v);
         }
-        e.release(global);
-        self.settle(e);
     }
 }
 
@@ -115,6 +126,7 @@ impl<E: Engine> DomHost<E> {
     }
 
     pub(crate) fn close_window(&mut self, e: &mut E) {
+        self.close_nav(e);
         for mut l in std::mem::take(&mut self.window_listeners) {
             l.callback.clear(e);
         }
