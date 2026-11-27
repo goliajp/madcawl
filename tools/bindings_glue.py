@@ -9,7 +9,15 @@ import sys
 KEYWORDS = {'type', 'async', 'match', 'move', 'ref', 'loop', 'fn', 'use', 'mod', 'impl', 'self', 'super', 'where', 'as'}
 
 
+# initials HTML's interface names run into the next word, as one word
+RUN_TOGETHER = {'IFrame': 'Iframe', 'UList': 'Ulist', 'OList': 'Olist', 'DList': 'Dlist', 'LI': 'Li', 'BR': 'Br',
+                'HR': 'Hr'}
+
+
 def snake(name):
+    for k, v in RUN_TOGETHER.items():
+        if name.startswith('HTML' + k):
+            name = 'HTML' + v + name[4 + len(k):]
     name = re.sub(r'(?<=[A-Z])([A-Z])(?=[a-z])', r'_\1', name)
     return re.sub(r'(?<=[a-z0-9])([A-Z])', r'_\1', name).lower()
 
