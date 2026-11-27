@@ -126,8 +126,7 @@ impl Watch {
         let now = Instant::now();
         let mut s = self.lock();
         s.seq += 1;
-        let b = Busy { seq: s.seq, what, started: now, stage: "request", stage_at: now, stages: [("", Duration::ZERO); MAX_STAGES], n: 0, told: 0 };
-        s.busy = Some(b);
+        s.busy = Some(Busy::new(s.seq, what, now));
         drop(s);
         self.0.cv.notify_all();
     }
@@ -135,9 +134,7 @@ impl Watch {
     pub fn stage(&self, name: &'static str) {
         let now = Instant::now();
         if let Some(b) = self.lock().busy.as_mut() {
-            close_stage(b, now);
-            b.stage = name;
-            b.stage_at = now;
+            enter(b, name, now);
         }
     }
 
@@ -151,17 +148,38 @@ impl Watch {
     /// The request ends; a line on it when it was slow.
     pub fn end(&self) {
         let now = Instant::now();
-        let Some(mut b) = self.lock().busy.take() else { return };
-        close_stage(&mut b, now);
-        let took = now - b.started;
-        if took < self.0.limits.slow {
-            return;
+        let Some(b) = self.lock().busy.take() else { return };
+        if let Some(line) = slow_line(b, now, self.0.limits.slow) {
+            (self.0.sink)(&line);
         }
-        let mut stages: Vec<_> = b.stages[..b.n].to_vec();
-        stages.sort_by_key(|s| std::cmp::Reverse(s.1));
-        let parts: Vec<String> = stages.iter().map(|(n, d)| format!("{n} {} ms", d.as_millis())).collect();
-        (self.0.sink)(&format!("slow request {}: {} ms ({})", b.what, took.as_millis(), parts.join(", ")));
     }
+}
+
+impl Busy {
+    fn new(seq: u64, what: &'static str, now: Instant) -> Busy {
+        Busy { seq, what, started: now, stage: "request", stage_at: now, stages: [("", Duration::ZERO); MAX_STAGES], n: 0, told: 0 }
+    }
+}
+
+/// Stage `name` begins at `now`.
+fn enter(b: &mut Busy, name: &'static str, now: Instant) {
+    close_stage(b, now);
+    b.stage = name;
+    b.stage_at = now;
+}
+
+/// The line on a request that ends at `now`, naming its stages longest
+/// first; none when it took less than `slow`.
+fn slow_line(mut b: Busy, now: Instant, slow: Duration) -> Option<String> {
+    close_stage(&mut b, now);
+    let took = now - b.started;
+    if took < slow {
+        return None;
+    }
+    let mut stages: Vec<_> = b.stages[..b.n].to_vec();
+    stages.sort_by_key(|s| std::cmp::Reverse(s.1));
+    let parts: Vec<String> = stages.iter().map(|(n, d)| format!("{n} {} ms", d.as_millis())).collect();
+    Some(format!("slow request {}: {} ms ({})", b.what, took.as_millis(), parts.join(", ")))
 }
 
 /// Adds the time since the stage began to that stage's total.
@@ -245,22 +263,49 @@ mod tests {
     }
 
     #[test]
-    fn a_running_request_is_reported_with_its_stage_then_summed_by_stage() {
-        let (w, rx) = watch(40, 120);
+    fn a_running_request_is_reported_with_its_stage() {
+        // the sink holds the watchdog until the test answers, so a stage
+        // entered before the answer is the one the next line names
+        let (tx, rx) = mpsc::channel();
+        let (go, wait) = mpsc::channel::<()>();
+        let (tx, wait) = (Mutex::new(tx), Mutex::new(wait));
+        let sink: Sink = Box::new(move |l| {
+            tx.lock().unwrap().send(l.to_owned()).unwrap();
+            wait.lock().unwrap().recv().unwrap();
+        });
+        let limits = Limits { slow: Duration::from_millis(40), stuck: Duration::from_millis(120) };
+        let w = Watch::start(limits, sink, None).unwrap();
         w.install();
         w.begin("open");
-        stage("parse");
-        std::thread::sleep(Duration::from_millis(20));
-        stage("style");
         let still = rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert!(still.starts_with("still running: request open for ") && still.ends_with("in stage style"), "{still}");
+        assert!(still.starts_with("still running: request open for ") && still.ends_with("in stage request"), "{still}");
+        stage("parse");
+        stage("style");
+        go.send(()).unwrap();
         let stuck = rx.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(stuck.starts_with("not responding: request open") && stuck.ends_with("in stage style"), "{stuck}");
+        go.send(()).unwrap();
+        go.send(()).unwrap();
         w.end();
         let slow = rx.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(slow.starts_with("slow request open: "), "{slow}");
-        let at = |s: &str| slow.find(s).unwrap();
-        assert!(at("style") < at("parse"), "the stage that took longest first: {slow}");
+        let (_, parts) = slow.split_once('(').unwrap();
+        assert!(["request", "parse", "style"].iter().all(|s| parts.contains(&format!("{s} "))), "{slow}");
+    }
+
+    #[test]
+    fn a_slow_request_is_summed_by_stage_longest_first() {
+        let t0 = Instant::now();
+        let at = |ms| t0 + Duration::from_millis(ms);
+        let mut b = Busy::new(1, "open", t0);
+        enter(&mut b, "parse", at(5));
+        enter(&mut b, "style", at(25));
+        enter(&mut b, "parse", at(125));
+        let slow = Duration::from_millis(40);
+        assert_eq!(slow_line(b, at(160), slow).unwrap(), "slow request open: 160 ms (style 100 ms, parse 55 ms, request 5 ms)");
+        let mut b = Busy::new(2, "read", t0);
+        enter(&mut b, "parse", at(1));
+        assert_eq!(slow_line(b, at(39), slow), None);
     }
 
     #[test]
