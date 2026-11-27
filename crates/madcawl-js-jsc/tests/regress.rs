@@ -135,8 +135,11 @@ fn an_abort_ends_the_outer_script_too_and_the_isolate_resumes() {
         &mut e,
         b"<script>for (;;) { try { document.write('<script>for (;;) {}<\\/script>'); } catch (x) {} }</script>",
     );
-    assert_eq!(e.halt(), madcawl_js::Halt::Aborted);
-    assert_eq!(e.resume(), Ok(madcawl_js::Halt::Running));
+    // the host resumes it once no script is on the stack and notes it
+    // once, as a stop no time limit made
+    assert_eq!(e.halt(), madcawl_js::Halt::Running);
+    let notes: Vec<String> = h.take_notes().iter().map(ToString::to_string).collect();
+    assert_eq!(notes, ["uncaught exception: script stopped"]);
     assert_eq!(eval(&mut e, &mut h, "6 * 7"), 42.0);
     h.close(&mut e);
 }

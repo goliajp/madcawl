@@ -50,6 +50,7 @@ impl<E: Engine> DomHost<E> {
         }
         e.release(this);
         e.release(arg);
+        self.recover(e);
         self.settle(e);
         called
     }

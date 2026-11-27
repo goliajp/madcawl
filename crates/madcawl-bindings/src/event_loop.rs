@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::time::Instant;
 
-use madcawl_js::{Deadline, Engine, Halt, Host, Owned, Root, ScriptOrigin};
+use madcawl_js::{Engine, Halt, Owned, Root, ScriptOrigin};
 use madcawl_str::DomString;
 
 use crate::host::DomHost;
@@ -19,7 +19,7 @@ const NESTING_CLAMP: u32 = 5;
 const MIN_NESTED_MS: u32 = 4;
 const NS_PER_MS: u64 = 1_000_000;
 /// How long the collection after a task may take before it yields.
-const COLLECT_SLICE_NS: u64 = 2 * NS_PER_MS;
+pub(crate) const COLLECT_SLICE_NS: u64 = 2 * NS_PER_MS;
 /// The first id of the abort timers; those of script's are below.
 const ABORT_IDS: u32 = 1 << 31;
 
@@ -173,7 +173,7 @@ impl<E: Engine> DomHost<E> {
     /// none is ready or `max` have run; how many ran.
     pub fn run_tasks(&mut self, e: &mut E, max: usize) -> usize {
         let mut n = 0;
-        while n < max && e.halt() == Halt::Running {
+        while n < max && (self.recover(e) || e.halt() == Halt::Running) {
             if let Some(t) = self.event_loop.tasks.pop_front() {
                 match t {
                     Task::Call(cb) => {
@@ -199,7 +199,8 @@ impl<E: Engine> DomHost<E> {
             self.timed_out(e, t.handler.get());
             t.handler.release(e);
             // SAFETY: undefined carries no count
-            return self.finish_task(e, unsafe { Owned::from_raw(E::undefined()) });
+            self.finish_task(e, unsafe { Owned::from_raw(E::undefined()) });
+            return;
         }
         let saved = std::mem::replace(&mut self.event_loop.nesting, t.nesting);
         let r = if e.is_callable(t.handler.get()) {
@@ -214,11 +215,11 @@ impl<E: Engine> DomHost<E> {
             e.evaluate(self, self.realm, &src, &ScriptOrigin { url: &url, line: 1, column: 0 })
         };
         self.event_loop.nesting = saved;
-        self.finish_task(e, r);
-        // cleared by its own callback when its entry is gone
+        let stopped = self.finish_task(e, r);
+        // cleared by its own callback when its entry is gone; one stopped could take every turn
         let live = self.event_loop.by_id.remove(&t.id).is_some();
         match t.repeat {
-            Some(ms) if live && e.halt() == Halt::Running => {
+            Some(ms) if live && !stopped && e.halt() == Halt::Running => {
                 // each run nests one deeper, so a fast interval is clamped
                 // after the first few as nested timeouts are
                 let t = Timer { nesting: t.nesting + 1, ..t };
@@ -230,29 +231,6 @@ impl<E: Engine> DomHost<E> {
                     a.release(e);
                 }
             }
-        }
-    }
-
-    /// What follows every task: its exception reported, a checkpoint.
-    pub(crate) fn finish_task(&mut self, e: &mut E, r: Owned<E::Value>) {
-        if E::is_thrown(r.get()) {
-            let _sentinel = r.into_raw();
-            if e.halt() == Halt::Running
-                && let Some(x) = e.take_exception()
-            {
-                self.report_exception(e, x);
-            }
-        } else {
-            e.release(r);
-        }
-        if e.halt() == Halt::Running {
-            e.run_microtasks(self);
-        }
-        self.settle(e);
-        // the trees whose last wrapper died since are freed here
-        if self.collect_due {
-            let deadline = Deadline::At(self.now().saturating_add(COLLECT_SLICE_NS));
-            self.collect(e, deadline);
         }
     }
 

@@ -1,8 +1,8 @@
 //! Script halted inside a listener and inside a class table's host
 //! function. A dispatch that meets a halt calls no further listener,
 //! reports nothing and runs no checkpoint; a terminated isolate runs no
-//! script again, and an aborted one goes on with the next task once the
-//! host resumes it.
+//! script again, and an aborted one the host resumes once no script is
+//! on the stack, noted as an uncaught exception, for the next task.
 
 mod support;
 
@@ -94,11 +94,12 @@ fn an_abort_in_a_listener_ends_the_dispatch_and_the_next_task_runs_after_resume(
     let div = two_listeners(&mut js, aborts, vec![j, s], log.get());
     let n = js.node(div.get());
     assert_eq!(js.h.fire(&mut js.e, n, atom!("click")), 1);
-    assert_eq!(js.e.halt(), Halt::Aborted);
+    assert_eq!(js.e.halt(), Halt::Running, "the host resumes once the dispatch is done");
     assert_eq!(js.h.reported, 0);
+    let notes: Vec<String> = js.h.take_notes().iter().map(ToString::to_string).collect();
+    assert_eq!(notes, ["uncaught exception: script stopped"]);
     assert_eq!(js.e.queued_microtasks(), 1, "an abort keeps the queue");
     assert_eq!(js.number(log.get(), "job"), 0.0, "no checkpoint after the halted listener");
-    assert_eq!(js.e.resume(), Ok(Halt::Running));
     js.set(state.get(), "armed", Stub::boolean(false));
     assert_eq!(js.h.fire(&mut js.e, n, atom!("click")), 2, "the same isolate runs the next task");
     assert_eq!(js.number(log.get(), "calls"), 1.0);

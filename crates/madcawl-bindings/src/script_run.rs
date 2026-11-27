@@ -6,11 +6,11 @@
 //! gives a `src` are prepared.
 
 use madcawl_dom::{HeldNode, NodeId};
-use madcawl_js::Engine;
+use madcawl_js::{Deadline, Engine, Halt, Host, Owned};
 use madcawl_str::{Atom, DomString, atom};
 
 use crate::event::{EventState, Target};
-use crate::event_loop::Task;
+use crate::event_loop::{COLLECT_SLICE_NS, Task};
 use crate::host::DomHost;
 use crate::scripts::{Phase, ScriptTask, Wait, is_script};
 use crate::side::SideData;
@@ -39,6 +39,32 @@ impl<E: Engine> DomHost<E> {
         self.settle(e);
     }
 
+    /// What follows every task: its exception reported, a checkpoint;
+    /// whether its script, or a promise job it queued, was aborted.
+    pub(crate) fn finish_task(&mut self, e: &mut E, r: Owned<E::Value>) -> bool {
+        if E::is_thrown(r.get()) {
+            let _sentinel = r.into_raw();
+            if e.halt() == Halt::Running
+                && let Some(x) = e.take_exception()
+            {
+                self.report_exception(e, x);
+            }
+        } else {
+            e.release(r);
+        }
+        let stopped = self.recover(e);
+        if e.halt() == Halt::Running {
+            self.checkpoint(e);
+        }
+        self.settle(e);
+        // the trees whose last wrapper died since are freed here
+        if self.collect_due {
+            let deadline = Deadline::At(self.now().saturating_add(COLLECT_SLICE_NS));
+            self.collect(e, deadline);
+        }
+        stopped
+    }
+
     /// Fire a trusted event of type `ty` that cannot be canceled at
     /// `target`, with a checkpoint after it when no script is running.
     pub(crate) fn fire_simple(&mut self, e: &mut E, target: Target, ty: Atom, bubbles: bool) {
@@ -46,8 +72,9 @@ impl<E: Engine> DomHost<E> {
         (ev.trusted, ev.bubbles) = (true, bubbles);
         let r = self.sides.add(SideData::Event(ev));
         let _not_canceled = self.dispatch(e, r, target);
-        if !e.in_script() && e.halt() == madcawl_js::Halt::Running {
-            e.run_microtasks(self);
+        self.recover(e);
+        if !e.in_script() && e.halt() == Halt::Running {
+            self.checkpoint(e);
         }
         self.settle(e);
     }

@@ -113,7 +113,7 @@ impl<E: Engine> DomHost<E> {
 
     fn parser_script(&mut self, e: &mut E, script: madcawl_dom::NodeId) {
         if !e.in_script() {
-            e.run_microtasks(self);
+            self.checkpoint(e);
         }
         let p = self.scripts.parser.as_mut().expect("the parser");
         p.tok.begin_script();
