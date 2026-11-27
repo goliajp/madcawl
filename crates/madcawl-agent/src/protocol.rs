@@ -30,7 +30,7 @@ pub mod kind {
     pub const OPENED: u16 = 31;
     pub const CLOSE: u16 = 32;
     pub const PAGES: u16 = 33;
-    /// A page's log of requests and load errors
+    /// A page's log of requests, load errors and script notes
     pub const REQUESTS: u16 = 34;
     /// the host's own counters, process-wide; answered only by a host
     /// started to answer them

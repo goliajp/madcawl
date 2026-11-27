@@ -1,8 +1,12 @@
 //! A page's log of requests: a bounded ring of what each
 //! request was — method, URL, status, size, how long to the response
-//! head and to the end — and a bounded ring of load errors. No bodies,
-//! no headers: the URLs come in with the values of password fields
-//! already masked by the page.
+//! head and to the end — a bounded ring of load errors, and one of what
+//! the page's scripts did that an agent needs to see (uncaught
+//! exceptions, navigations not followed). No bodies, no headers: the
+//! URLs come in with the values of password fields already masked by
+//! the page. Script notes may hold URLs and what a page wrote into its
+//! messages, so they go to this log only, read by the `requests` call,
+//! and never to the audit log or standard error.
 
 use std::collections::VecDeque;
 use std::fmt::Write as _;
@@ -11,6 +15,8 @@ use std::fmt::Write as _;
 pub const LOG_CAP: usize = 256;
 /// Load errors a page keeps.
 pub const ERROR_CAP: usize = 64;
+/// Script notes a page keeps.
+pub const SCRIPT_CAP: usize = 64;
 /// The longest URL written to the log.
 const MAX_URL: usize = 2048;
 
@@ -31,6 +37,7 @@ pub struct Entry {
 pub struct RequestLog {
     entries: VecDeque<Entry>,
     errors: VecDeque<String>,
+    script: VecDeque<String>,
     dropped: u64,
     total: u64,
 }
@@ -71,7 +78,15 @@ impl RequestLog {
         self.errors.push_back(cut(&line));
     }
 
-    /// The last `limit` requests, oldest first, then the errors.
+    pub fn script(&mut self, line: String) {
+        if self.script.len() == SCRIPT_CAP {
+            self.script.pop_front();
+        }
+        self.script.push_back(cut(&line));
+    }
+
+    /// The last `limit` requests, oldest first, then the errors, then
+    /// the script notes, when there are any.
     pub fn text(&self, limit: usize, in_flight: &[String]) -> String {
         let mut out = format!("{} requests ({} dropped from the log)\n", self.total, self.dropped);
         let skip = self.entries.len().saturating_sub(limit.max(1));
@@ -96,6 +111,9 @@ impl RequestLog {
         }
         for e in &self.errors {
             let _ = writeln!(out, "error: {e}");
+        }
+        for s in &self.script {
+            let _ = writeln!(out, "script: {s}");
         }
         out
     }
@@ -137,5 +155,18 @@ mod tests {
         assert!(t.contains("error: certificate error: GET https://x/aaa"), "{t}");
         assert!(t.contains("in flight: GET http://127.0.0.1/slow"));
         assert!(t.lines().all(|line| line.len() < 4 * MAX_URL));
+    }
+
+    #[test]
+    fn script_notes_are_a_bounded_ring_after_the_errors() {
+        let mut l = RequestLog::default();
+        assert!(!l.text(10, &[]).contains("script:"), "no notes, no lines");
+        for n in 0..SCRIPT_CAP + 3 {
+            l.script(format!("uncaught exception: Error: e{n}\nnext"));
+        }
+        let t = l.text(10, &[]);
+        assert_eq!(t.lines().filter(|x| x.starts_with("script: ")).count(), SCRIPT_CAP);
+        assert!(!t.contains("Error: e2n") && t.contains("script: uncaught exception: Error: e3next"), "{t}");
+        assert!(t.find("no load errors").unwrap() < t.find("script:").unwrap());
     }
 }

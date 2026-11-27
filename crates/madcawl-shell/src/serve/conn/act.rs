@@ -97,7 +97,7 @@ impl Conn<'_> {
         reply
     }
 
-    /// A page's request log and load errors.
+    /// A page's request log, load errors and script notes.
     pub(super) fn requests(&mut self, f: &Frame) -> Frame {
         let i = match self.page_for(f, "requests") {
             Ok(i) => i,

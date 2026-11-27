@@ -18,7 +18,7 @@ use madcawl_html::{Decoder, Encoding};
 use madcawl_net::Url;
 use madcawl_net::wire::{Frame, kind, tag};
 
-use super::loader::{Loaded, Loader, Parsed, Pending, Stage, initiator};
+use super::loader::{Loaded, Loader, Parsed, Pending, Stage};
 use super::net::NetConn;
 
 /// The most script sources one document fetches; past it a script's
@@ -41,6 +41,10 @@ pub trait ScriptPage {
     /// or a source to ask for, the next timer otherwise; `None` with
     /// neither.
     fn due(&self) -> Option<Duration>;
+    /// What happened since the last call that the page's request log
+    /// shows: exceptions nothing caught, navigations script asked for
+    /// that were not followed; a line each.
+    fn take_notes(&mut self) -> Vec<String>;
     /// The document as script left it; the engine is done with it.
     fn into_dom(self: Box<Self>) -> Dom;
 }
@@ -107,7 +111,9 @@ impl Loader {
     pub(crate) fn scripts_step(&mut self, conn: &mut NetConn) -> std::io::Result<Option<Loaded>> {
         let Stage::Scripts(mut s) = std::mem::take(&mut self.stage) else { unreachable!("the scripts stage") };
         let base = s.url.clone();
-        if !s.advance(conn, &base, &mut self.inflight)? {
+        let loaded = s.advance(conn, &base, &mut self.inflight)?;
+        self.script_notes.extend(s.page.take_notes());
+        if !loaded {
             self.stage = Stage::Scripts(s);
             return Ok(None);
         }
@@ -172,5 +178,22 @@ impl Scripting {
         let mut dom = self.page.into_dom();
         dom.trim();
         dom
+    }
+}
+
+/// The document's URL as its subresource requests name it: no query or
+/// fragment, which may hold what a form sent.
+pub(crate) fn initiator(doc: &str) -> String {
+    doc[..doc.find(['?', '#']).unwrap_or(doc.len())].to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_subresource_initiator_has_no_query() {
+        let u = Url::parse("http://127.0.0.1:8/gate?user=al&pin=s3cret#top").unwrap();
+        assert_eq!(initiator(u.as_str()), "http://127.0.0.1:8/gate");
     }
 }

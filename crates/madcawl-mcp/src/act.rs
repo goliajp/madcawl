@@ -49,7 +49,7 @@ pub(crate) fn tools(page: (&'static str, Value)) -> Vec<Value> {
         crate::tools::tool("wait", "Wait until the page is stable; returns what is still missing.", wait, &["page"]),
         crate::tools::tool(
             "requests",
-            "The page's requests (method, URL, status, size, timings) and load errors.",
+            "The page's requests (method, URL, status, size, timings), load errors, and what its scripts did that needs a look (uncaught exceptions, navigations not followed).",
             vec![page, ("limit", p("integer", "Most recent requests (default 50)"))],
             &["page"],
         ),

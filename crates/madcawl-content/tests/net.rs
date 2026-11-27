@@ -35,6 +35,13 @@ s.onerror = () => { s.remove(); f(); }; document.querySelector('head').appendChi
 f();
 </script>"#;
 
+/// A page whose script reads its URL, asks to navigate away and throws.
+const ERRORS: &str = r#"<!doctype html><title>Errors</title><p id=out></p><script>
+document.getElementById('out').textContent = location.pathname + location.search + '|' + atob(btoa('ok'));
+location.assign('/elsewhere?token=t1');
+throw new TypeError('boom at ' + location.hostname);
+</script>"#;
+
 fn respond(s: &mut TcpStream, status: &str, extra: &str, body: &[u8]) {
     let head = format!("HTTP/1.1 {status}\r\nConnection: close\r\n{extra}Content-Length: {}\r\n\r\n", body.len());
     let _ = s.write_all(head.as_bytes());
@@ -60,6 +67,8 @@ fn handle(mut s: TcpStream) {
         "/blocking.js" => respond(&mut s, "200 OK", JS, b"log('blocking-without-the-cookie')"),
         "/spin" => respond(&mut s, "200 OK", "Content-Type: text/html\r\n", b"<p>spin</p><script>while (true) {}</script>"),
         "/endless" => respond(&mut s, "200 OK", "Content-Type: text/html\r\n", ENDLESS.as_bytes()),
+        "/moved" => respond(&mut s, "302 Found", "Location: /errors?from=moved\r\n", b""),
+        "/errors?from=moved" => respond(&mut s, "200 OK", "Content-Type: text/html\r\n", ERRORS.as_bytes()),
         "/defer.js" => respond(&mut s, "200 OK", JS, b"log('defer')"),
         "/slow.js" => {
             std::thread::sleep(Duration::from_millis(300));
@@ -146,6 +155,22 @@ fn a_page_s_scripts_come_over_its_connection_and_run_in_order_before_it_is_read(
     for js in ["/blocking.js", "/slow.js", "/defer.js", "/missing.js"] {
         assert!(log.lines().any(|l| l.contains("script") && l.contains(js)), "{js} in the request log: {log}");
     }
+}
+
+/// The page's URL is where the redirect led; what its script threw and
+/// the navigation it asked for show in the page's request log.
+#[test]
+fn a_page_s_uncaught_exceptions_and_unfollowed_navigations_show_in_its_request_log() {
+    let origin = site();
+    let mut h = Host::start();
+    let opened = h.call("open", &format!("{{\"path\":{}}}", json::s(&format!("{origin}/moved")).to_json()));
+    let page = opened.split_whitespace().nth(1).unwrap().to_owned();
+    let text = h.call("read", &format!(r#"{{"page":"{page}"}}"#));
+    assert!(text.contains("/errors?from=moved|ok"), "{text}");
+    let log = h.call("requests", &format!(r#"{{"page":"{page}"}}"#));
+    assert!(log.contains("script: uncaught exception: TypeError: boom at 127.0.0.1 @inline:4:"), "{log}");
+    // the document is still loading, so the navigation would replace it
+    assert!(log.contains(&format!("script: navigation not followed: replace {origin}/elsewhere?token=t1")), "{log}");
 }
 
 #[test]

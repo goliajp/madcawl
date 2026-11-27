@@ -16,6 +16,7 @@ use madcawl_net::wire::{Frame, kind, tag};
 use super::doc;
 use super::net::NetConn;
 use super::reqlog::{Entry, RequestLog};
+use super::scripts::initiator;
 use crate::fetch::charset_of;
 use crate::load::MAX_FILE;
 
@@ -159,6 +160,8 @@ pub(crate) struct Loader {
     pub inflight: Vec<(u64, Pending)>,
     /// `href` as written, to the bytes
     sheets: HashMap<String, u64>,
+    /// What the scripts stage noted for the request log (`scripts.rs`)
+    pub(crate) script_notes: Vec<String>,
 }
 
 impl Loader {
@@ -185,7 +188,11 @@ impl Loader {
     /// Reads what arrives until the load moves on or `deadline` passes.
     pub fn pump(&mut self, conn: &mut NetConn, deadline: Instant, log: &mut RequestLog) -> std::io::Result<Loaded> {
         loop {
-            if let Some(out) = self.advance(conn)? {
+            let out = self.advance(conn)?;
+            for n in self.script_notes.drain(..) {
+                log.script(n);
+            }
+            if let Some(out) = out {
                 return Ok(out);
             }
             if matches!(self.stage, Stage::Idle) {
@@ -279,22 +286,5 @@ impl Loader {
             self.sheets.insert(href, id);
         }
         Ok(())
-    }
-}
-
-/// The document's URL as its subresource requests name it: no query or
-/// fragment, which may hold what a form sent.
-pub(crate) fn initiator(doc: &str) -> String {
-    doc[..doc.find(['?', '#']).unwrap_or(doc.len())].to_owned()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_subresource_initiator_has_no_query() {
-        let u = Url::parse("http://127.0.0.1:8/gate?user=al&pin=s3cret#top").unwrap();
-        assert_eq!(initiator(u.as_str()), "http://127.0.0.1:8/gate");
     }
 }

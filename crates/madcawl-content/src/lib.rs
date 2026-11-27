@@ -20,9 +20,12 @@ pub struct JscPage {
 
 /// A document of WTF-8 `html` with its scripts run on that engine,
 /// parsed as far as its scripts let it.
-pub fn open(html: &[u8], _url: &str) -> Box<dyn ScriptPage> {
+pub fn open(html: &[u8], url: &str) -> Box<dyn ScriptPage> {
     let mut e = Jsc::new();
     let mut h = DomHost::new(&mut e, Dom::new());
+    // a URL the network service fetched always parses
+    let parsed = h.set_url(url);
+    debug_assert!(parsed, "a document URL that does not parse");
     h.install_window(&mut e);
     h.parse_document(&mut e, html);
     Box::new(JscPage { e, h: Some(h) })
@@ -61,6 +64,11 @@ impl ScriptPage for JscPage {
     fn due(&self) -> Option<Duration> {
         let h = self.h.as_ref().expect("a host until the DOM is taken");
         h.next_work_in().map(Duration::from_nanos)
+    }
+
+    fn take_notes(&mut self) -> Vec<String> {
+        let (_, h) = self.host();
+        h.take_notes().iter().map(ToString::to_string).collect()
     }
 
     fn into_dom(mut self: Box<Self>) -> Dom {
