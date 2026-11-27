@@ -166,6 +166,7 @@ interface Element : Node {
 
   [CEReactions] attribute DOMString id;
   [CEReactions] attribute DOMString className;
+  [SameObject, PutForwards=value] readonly attribute DOMTokenList classList;
 
   boolean hasAttributes();
   [SameObject] readonly attribute NamedNodeMap attributes;
@@ -206,6 +207,11 @@ interface Document : Node {
   // the HTML Standard's, from its partial Document interface
   readonly attribute Element? currentScript;
   [PutForwards=href] readonly attribute Location? location;
+  // USVString in the standard: the implementation converts the value
+  attribute [LegacyNullToEmptyString] DOMString cookie;
+  // HTMLElement in the standard, until it is bound
+  [CEReactions] attribute Element? body;
+  readonly attribute Element? head;
 
   [NewObject] Element createElement(DOMString localName);
   [NewObject] DocumentFragment createDocumentFragment();
@@ -291,4 +297,21 @@ interface HTMLCollection {
   readonly attribute unsigned long length;
   getter Element? item(unsigned long index);
   getter Element? namedItem(DOMString name);
+};
+
+// toggle's optional force is given as any, so that leaving it out is
+// told from false; the stringifier is the toString operation
+[Exposed=Window, Side]
+interface DOMTokenList {
+  readonly attribute unsigned long length;
+  getter DOMString? item(unsigned long index);
+  boolean contains(DOMString token);
+  [CEReactions] undefined add(DOMString... tokens);
+  [CEReactions] undefined remove(DOMString... tokens);
+  [CEReactions] boolean toggle(DOMString token, optional any force);
+  [CEReactions] boolean replace(DOMString token, DOMString newToken);
+  boolean supports(DOMString token);
+  [CEReactions] attribute DOMString value;
+  DOMString toString();
+  iterable<DOMString>;
 };

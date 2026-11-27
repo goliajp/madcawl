@@ -154,6 +154,25 @@ pub(crate) fn remove_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeI
     Ok(child)
 }
 
+/// The DOM Standard's replace of `child` of `this` by `node`, where
+/// `this` is no document (whose own rules on element and doctype
+/// children are not checked here) and `node` no fragment: one removal and
+/// one insertion, with inserted scripts run once both are done.
+pub(crate) fn replace_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, node: NodeId, child: NodeId) -> Result<NodeId, Thrown> {
+    if let Err((name, why)) = pre_insert_check(&h.dom, this, node, Some(child)) {
+        return Err(throw_dom(e, h, name, why));
+    }
+    let dom = &mut h.dom;
+    let before = match dom.next_sibling(child) {
+        Some(n) if n == node => dom.next_sibling(node),
+        n => n,
+    };
+    dom.remove_node(child);
+    dom.insert_node(this, node, before);
+    h.scripts_inserted(e, this, &[node]);
+    Ok(child)
+}
+
 fn full<E: Engine>(e: &mut E, h: &mut DomHost<E>) -> Thrown {
     throw_dom(e, h, "QuotaExceededError", "the document holds all the nodes it may")
 }

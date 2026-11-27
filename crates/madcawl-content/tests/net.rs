@@ -4,14 +4,13 @@
 //! order before the agent reads the page. The site is a small server on
 //! 127.0.0.1.
 
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+mod common;
+
+use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
-use madcawl_mcp::json::{self, Value};
-use madcawl_shell::serve::{Config, Server};
+use common::{Host, JS, executable, open_at, respond, site};
+use madcawl_mcp::json;
 
 const PAGE: &str = r#"<!doctype html><title>Scripts</title><body><p id=out>log:</p>
 <script>
@@ -42,109 +41,28 @@ location.assign('/elsewhere?token=t1');
 throw new TypeError('boom at ' + location.hostname);
 </script>"#;
 
-fn respond(s: &mut TcpStream, status: &str, extra: &str, body: &[u8]) {
-    let head = format!("HTTP/1.1 {status}\r\nConnection: close\r\n{extra}Content-Length: {}\r\n\r\n", body.len());
-    let _ = s.write_all(head.as_bytes());
-    let _ = s.write_all(body);
-}
-
-fn handle(mut s: TcpStream) {
-    let mut buf = Vec::new();
-    let mut b = [0u8; 4096];
-    while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
-        match s.read(&mut b) {
-            Ok(0) | Err(_) => return,
-            Ok(n) => buf.extend_from_slice(&b[..n]),
-        }
-    }
-    let req = String::from_utf8_lossy(&buf).to_ascii_lowercase();
-    let path = req.split_whitespace().nth(1).unwrap_or("").to_owned();
-    let cookie = req.lines().find_map(|l| l.strip_prefix("cookie:")).unwrap_or("").to_owned();
-    const JS: &str = "Content-Type: text/javascript\r\n";
-    match path.as_str() {
-        "/" => respond(&mut s, "200 OK", "Content-Type: text/html; charset=utf-8\r\nSet-Cookie: sid=k1; Path=/\r\n", PAGE.as_bytes()),
-        "/blocking.js" if cookie.contains("sid=k1") => respond(&mut s, "200 OK", JS, b"log('blocking:' + document.currentScript.getAttribute('src'))"),
-        "/blocking.js" => respond(&mut s, "200 OK", JS, b"log('blocking-without-the-cookie')"),
-        "/spin" => respond(&mut s, "200 OK", "Content-Type: text/html\r\n", b"<p>spin</p><script>while (true) {}</script>"),
-        "/endless" => respond(&mut s, "200 OK", "Content-Type: text/html\r\n", ENDLESS.as_bytes()),
-        "/moved" => respond(&mut s, "302 Found", "Location: /errors?from=moved\r\n", b""),
-        "/errors?from=moved" => respond(&mut s, "200 OK", "Content-Type: text/html\r\n", ERRORS.as_bytes()),
-        "/defer.js" => respond(&mut s, "200 OK", JS, b"log('defer')"),
+fn route(s: &mut TcpStream, path: &str, cookie: &str) -> bool {
+    match path {
+        "/" => respond(s, "200 OK", "Content-Type: text/html; charset=utf-8\r\nSet-Cookie: sid=k1; Path=/\r\n", PAGE.as_bytes()),
+        "/blocking.js" if cookie.contains("sid=k1") => respond(s, "200 OK", JS, b"log('blocking:' + document.currentScript.getAttribute('src'))"),
+        "/blocking.js" => respond(s, "200 OK", JS, b"log('blocking-without-the-cookie')"),
+        "/spin" => respond(s, "200 OK", "Content-Type: text/html\r\n", b"<p>spin</p><script>while (true) {}</script>"),
+        "/endless" => respond(s, "200 OK", "Content-Type: text/html\r\n", ENDLESS.as_bytes()),
+        "/moved" => respond(s, "302 Found", "Location: /errors?from=moved\r\n", b""),
+        "/errors?from=moved" => respond(s, "200 OK", "Content-Type: text/html\r\n", ERRORS.as_bytes()),
+        "/defer.js" => respond(s, "200 OK", JS, b"log('defer')"),
         "/slow.js" => {
             std::thread::sleep(Duration::from_millis(300));
-            respond(&mut s, "200 OK", JS, b"log('async')");
+            respond(s, "200 OK", JS, b"log('async')");
         }
-        _ => respond(&mut s, "404 Not Found", JS, b"log('a 404 body ran')"),
+        _ => return false,
     }
-}
-
-fn site() -> String {
-    let l = TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = l.local_addr().unwrap();
-    std::thread::spawn(move || {
-        for s in l.incoming().flatten() {
-            std::thread::spawn(move || handle(s));
-        }
-    });
-    format!("http://{addr}")
-}
-
-struct Host {
-    dir: PathBuf,
-    mcp: madcawl_mcp::server::Server,
-}
-
-impl Host {
-    fn start() -> Host {
-        static N: AtomicUsize = AtomicUsize::new(0);
-        let n = N.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir().canonicalize().unwrap().join(format!("mcc-{}-{n}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        madcawl_shell::serve::scripts::set_scripts(madcawl_content::open);
-        let mut config = Config::new(dir.join("s"));
-        config.allow = vec![dir.clone()];
-        config.net = true;
-        let server = Server::bind(config.clone()).unwrap();
-        std::thread::spawn(move || server.run());
-        let mcp = madcawl_mcp::server::Server::new(config.socket.clone(), dir.clone());
-        Host { dir, mcp }
-    }
-
-    /// The reply's text, and whether it is an error.
-    fn call_any(&mut self, tool: &str, args: &str) -> (String, bool) {
-        let line = format!(r#"{{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{{"name":"{tool}","arguments":{args}}}}}"#);
-        let v = self.mcp.handle(&line).unwrap();
-        let r = v.get("result").unwrap();
-        let Some(Value::Arr(c)) = r.get("content") else { panic!("{}", v.to_json()) };
-        (c[0].str_at("text").unwrap().to_owned(), r.bool_at("isError").unwrap())
-    }
-
-    fn call(&mut self, tool: &str, args: &str) -> String {
-        let (text, error) = self.call_any(tool, args);
-        assert!(!error, "{tool} {args}: {text}");
-        text
-    }
-}
-
-/// A host process, ended when the test ends, a failed one too.
-struct Child(std::process::Child);
-
-impl Drop for Child {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-impl Drop for Host {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
+    true
 }
 
 #[test]
 fn a_page_s_scripts_come_over_its_connection_and_run_in_order_before_it_is_read() {
-    let origin = site();
+    let origin = site(route);
     let mut h = Host::start();
     let opened = h.call("open", &format!("{{\"path\":{}}}", json::s(&format!("{origin}/")).to_json()));
     let page = opened.split_whitespace().nth(1).unwrap().to_owned();
@@ -161,7 +79,7 @@ fn a_page_s_scripts_come_over_its_connection_and_run_in_order_before_it_is_read(
 /// the navigation it asked for show in the page's request log.
 #[test]
 fn a_page_s_uncaught_exceptions_and_unfollowed_navigations_show_in_its_request_log() {
-    let origin = site();
+    let origin = site(route);
     let mut h = Host::start();
     let opened = h.call("open", &format!("{{\"path\":{}}}", json::s(&format!("{origin}/moved")).to_json()));
     let page = opened.split_whitespace().nth(1).unwrap().to_owned();
@@ -175,7 +93,7 @@ fn a_page_s_uncaught_exceptions_and_unfollowed_navigations_show_in_its_request_l
 
 #[test]
 fn a_page_whose_scripts_never_let_it_load_still_returns_each_call_in_time() {
-    let origin = site();
+    let origin = site(route);
     let mut h = Host::start();
     let opened = h.call("open", &format!("{{\"path\":{}}}", json::s(&format!("{origin}/")).to_json()));
     let page = opened.split_whitespace().nth(1).unwrap().to_owned();
@@ -188,36 +106,12 @@ fn a_page_whose_scripts_never_let_it_load_still_returns_each_call_in_time() {
     assert!(t0.elapsed() < Duration::from_secs(10), "two calls of 1.5 s and 0.5 s took {:?}", t0.elapsed());
 }
 
-/// The executable, listening on a socket in `dir`, and an agent session
-/// on it.
-fn executable(dir: &std::path::Path, extra: &[&str]) -> (Child, Host) {
-    std::fs::create_dir_all(dir).unwrap();
-    let sock = dir.join("s");
-    let child = Child(
-        std::process::Command::new(env!("CARGO_BIN_EXE_madcawl-content"))
-            .args(["--serve", sock.to_str().unwrap(), "--net", "--exit-idle", "30"])
-            .args(extra)
-            .spawn()
-            .unwrap(),
-    );
-    let t0 = Instant::now();
-    while !sock.exists() {
-        assert!(t0.elapsed() < Duration::from_secs(10), "the host never listened");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    (child, Host { dir: dir.to_owned(), mcp: madcawl_mcp::server::Server::new(sock, dir.to_owned()) })
-}
-
-fn open_at(h: &mut Host, url: &str) -> (String, bool) {
-    h.call_any("open", &format!("{{\"path\":{}}}", json::s(url).to_json()))
-}
-
 /// The executable, which isolates without being asked: the page lives in
 /// a content process (this executable again), which fetches its scripts
 /// the same way.
 #[test]
 fn the_executable_runs_a_page_s_scripts_in_its_content_process() {
-    let origin = site();
+    let origin = site(route);
     let dir = std::env::temp_dir().canonicalize().unwrap().join(format!("mcc-exe-{}", std::process::id()));
     let (_child, mut h) = executable(&dir, &[]);
     let (opened, _) = open_at(&mut h, &format!("{origin}/"));
@@ -230,7 +124,7 @@ fn the_executable_runs_a_page_s_scripts_in_its_content_process() {
 /// the host kills; another session on the same host is answered meanwhile.
 #[test]
 fn a_script_that_never_returns_ends_its_content_process_and_not_the_host() {
-    let origin = site();
+    let origin = site(route);
     let dir = std::env::temp_dir().canonicalize().unwrap().join(format!("mcc-spin-{}", std::process::id()));
     let (_child, mut spun) = executable(&dir, &["--hang-secs", "2"]);
     let mut other = Host { dir: dir.join("other"), mcp: madcawl_mcp::server::Server::new(dir.join("s"), dir.clone()) };

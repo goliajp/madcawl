@@ -1,8 +1,8 @@
-//! The window's Location, History and Crypto, side objects the host
+//! The window's Location, History, Crypto and Performance, side objects the host
 //! holds from install to its end, and the global's accessors for them.
 //! `location` is the standard's [LegacyUnforgeable] and [PutForwards]:
 //! a non-configurable accessor whose setter sets `href`, so that
-//! `location = url` navigates; `history` and `crypto` are readonly.
+//! `location = url` navigates; the others are readonly.
 //! They are defined through the realm's own builtins, before any page
 //! script runs.
 
@@ -12,7 +12,7 @@ use crate::convert::{arg, dom_string, need, run};
 use crate::host::DomHost;
 use crate::side::{SideData, SideRef};
 
-/// The object `I` of the three, by its accessor's getter.
+/// The object `I` of the four, by its accessor's getter.
 fn object<E: Engine, const I: usize>(e: &mut E, h: &mut DomHost<E>, _: E::Value, _: &[E::Value]) -> Owned<E::Value> {
     let r = h.nav.objects.expect("the window's objects, installed with their accessors")[I];
     h.wrap_side(e, r)
@@ -38,16 +38,16 @@ unsafe extern "C" fn set_location_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv:
 }
 
 impl<E: Engine> DomHost<E> {
-    /// Make the three objects and define their accessors on `global`.
+    /// Make the four objects and define their accessors on `global`.
     pub(crate) fn install_objects(&mut self, e: &mut E, global: E::Value) {
-        let objects = [SideData::Location, SideData::History, SideData::Crypto].map(|d| {
+        let objects = [SideData::Location, SideData::History, SideData::Crypto, SideData::Performance].map(|d| {
             let r = self.sides.add(d);
             self.sides.inc(r);
             r
         });
         self.nav.objects = Some(objects);
-        let getters: [HostFn; 3] = [object_abi::<E, 0>, object_abi::<E, 1>, object_abi::<E, 2>];
-        for (i, (name, get)) in ["location", "history", "crypto"].into_iter().zip(getters).enumerate() {
+        let getters: [HostFn; 4] = [object_abi::<E, 0>, object_abi::<E, 1>, object_abi::<E, 2>, object_abi::<E, 3>];
+        for (i, (name, get)) in ["location", "history", "crypto", "performance"].into_iter().zip(getters).enumerate() {
             let get = self.host_function(e, name, 0, get);
             let set = (i == 0).then(|| self.host_function(e, name, 1, set_location_abi::<E>));
             let set_value = set.as_ref().map_or(E::undefined(), Owned::get);

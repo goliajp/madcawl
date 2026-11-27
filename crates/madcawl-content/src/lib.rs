@@ -6,9 +6,10 @@
 
 use std::time::Duration;
 
-use madcawl_bindings::DomHost;
+use madcawl_bindings::{CookieStore, DomHost};
 use madcawl_dom::Dom;
 use madcawl_js_jsc::Jsc;
+use madcawl_shell::serve::cookies::Cookies;
 use madcawl_shell::serve::scripts::ScriptPage;
 use madcawl_str::DomString;
 
@@ -18,16 +19,37 @@ pub struct JscPage {
     h: Option<DomHost<Jsc>>,
 }
 
+/// The page's cookie jar as `document.cookie` reaches it.
+struct Jar(Box<dyn Cookies>);
+
+impl CookieStore for Jar {
+    fn cookies(&mut self, url: &str) -> String {
+        self.0.get(url)
+    }
+
+    fn set_cookie(&mut self, url: &str, line: &str) {
+        self.0.set(url, line);
+    }
+
+    fn idle(&mut self) {
+        self.0.idle();
+    }
+}
+
 /// A document of WTF-8 `html` with its scripts run on that engine,
 /// parsed as far as its scripts let it.
-pub fn open(html: &[u8], url: &str) -> Box<dyn ScriptPage> {
+pub fn open(html: &[u8], url: &str, cookies: Option<Box<dyn Cookies>>) -> Box<dyn ScriptPage> {
     let mut e = Jsc::new();
     let mut h = DomHost::new(&mut e, Dom::new());
     // a URL the network service fetched always parses
     let parsed = h.set_url(url);
     debug_assert!(parsed, "a document URL that does not parse");
+    if let Some(c) = cookies {
+        h.set_cookie_store(Box::new(Jar(c)));
+    }
     h.install_window(&mut e);
     h.parse_document(&mut e, html);
+    h.cookies_idle();
     Box::new(JscPage { e, h: Some(h) })
 }
 
@@ -58,6 +80,7 @@ impl ScriptPage for JscPage {
             }
             ran += n;
         }
+        h.cookies_idle();
         h.is_loaded()
     }
 

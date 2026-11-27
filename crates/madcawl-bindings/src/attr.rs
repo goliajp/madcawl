@@ -54,8 +54,9 @@ fn key(el: NodeId, ns: AttrNamespace, local: Atom) -> Key {
 
 pub(crate) struct Attrs<E: Engine> {
     by_attr: HashMap<Key, SideRef>,
-    /// The `attributes` map of each element that has one.
-    maps: HashMap<u32, SideRef>,
+    /// The `attributes` map and the `classList` of each element that has
+    /// one, by element index and whether it is the list.
+    maps: HashMap<(u32, bool), SideRef>,
     /// The side objects whose wrappers are members of each element's
     /// wrapper, and those members.
     owned: HashMap<u32, Vec<SideRef>>,
@@ -160,28 +161,38 @@ impl<E: Engine> DomHost<E> {
 
     /// The `attributes` map of `el`: the same object while it lives.
     pub(crate) fn attr_map(&mut self, el: NodeId) -> SideRef {
-        if let Some(&r) = self.attrs.maps.get(&el.index()) {
+        self.element_object(el, false)
+    }
+
+    /// The `classList` of `el`: the same object while it lives.
+    pub(crate) fn token_list(&mut self, el: NodeId) -> SideRef {
+        self.element_object(el, true)
+    }
+
+    fn element_object(&mut self, el: NodeId, list: bool) -> SideRef {
+        if let Some(&r) = self.attrs.maps.get(&(el.index(), list)) {
             return r;
         }
         let held = self.hold_target(Target::Node(el));
-        let r = self.sides.add(SideData::AttrMap(held));
-        self.attrs.maps.insert(el.index(), r);
+        let r = self.sides.add(if list { SideData::TokenList(held) } else { SideData::AttrMap(held) });
+        self.attrs.maps.insert((el.index(), list), r);
         self.attrs.owned.entry(el.index()).or_default().push(r);
         r
     }
 
-    /// The element an `Attr` or an `attributes` map belongs to.
+    /// The element an `Attr`, an `attributes` map or a `classList`
+    /// belongs to.
     pub(crate) fn owning_element(&self, r: SideRef) -> Option<NodeId> {
         match &self.sides.get(r).data {
             SideData::Attr(a) => a.element(),
-            SideData::AttrMap(Held::Node(n)) => Some(n.id()),
+            SideData::AttrMap(Held::Node(n)) | SideData::TokenList(Held::Node(n)) => Some(n.id()),
             _ => None,
         }
     }
 
     /// On an engine that places wrappers, the wrapper `v` just made for
-    /// `r`, an element's `Attr` or `attributes` map, is a member of the
-    /// element's wrapper.
+    /// `r`, an element's `Attr`, `attributes` map or `classList`, is a
+    /// member of the element's wrapper.
     pub(crate) fn keep_owned(&mut self, e: &mut E, r: SideRef, v: E::Value) {
         if !E::PLACES_WRAPPERS {
             return;
@@ -210,13 +221,19 @@ impl<E: Engine> DomHost<E> {
                 Some(el) => (el, Some(key(el, a.ns, a.local))),
                 None => return,
             },
-            SideData::AttrMap(Held::Node(n)) => (n.id(), None),
+            SideData::AttrMap(Held::Node(n)) | SideData::TokenList(Held::Node(n)) => (n.id(), None),
             _ => return,
         };
         match k {
             Some(k) if self.attrs.by_attr.get(&k) == Some(&r) => drop(self.attrs.by_attr.remove(&k)),
-            None if self.attrs.maps.get(&el.index()) == Some(&r) => drop(self.attrs.maps.remove(&el.index())),
-            _ => {}
+            Some(_) => {}
+            None => {
+                for k in [(el.index(), false), (el.index(), true)] {
+                    if self.attrs.maps.get(&k) == Some(&r) {
+                        self.attrs.maps.remove(&k);
+                    }
+                }
+            }
         }
         self.disown(el, r);
     }

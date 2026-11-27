@@ -15,6 +15,7 @@ mod args;
 mod attr;
 mod base64;
 mod convert;
+mod cookie;
 mod event;
 mod event_loop;
 mod fire;
@@ -44,6 +45,7 @@ mod window;
 mod generated;
 
 pub use convert::Thrown;
+pub use cookie::CookieStore;
 pub use event_loop::{Clock, EventLoop};
 pub use gc::NodeOps;
 pub use generated::{DOMExceptionClass, DocumentClass, ElementClass, EventClass, EventTargetClass, NodeClass};

@@ -62,13 +62,19 @@ pub struct DomHost<E: Engine> {
     pub(crate) list_rebuilds: u64,
     /// What fixed collections keep of nodes that leave the document.
     pub(crate) fixed: crate::fixed::FixedLists<E>,
-    /// The `Attr`s and `attributes` maps script has (`attr.rs`).
+    /// The `Attr`s, `attributes` maps and `classList`s script has
+    /// (`attr.rs`).
     pub(crate) attrs: crate::attr::Attrs<E>,
     /// The document's URL, its session history and the window's own
     /// objects (`nav.rs`).
     pub(crate) nav: crate::nav::Nav<E>,
     /// The last exceptions and navigations not followed (`notes.rs`).
     pub(crate) notes: crate::notes::Notes,
+    /// Unix milliseconds when the event loop's clock started: the time
+    /// origin `performance` counts from.
+    pub(crate) time_origin_ms: f64,
+    /// Where `document.cookie` goes (`cookie.rs`).
+    pub(crate) cookies: Option<Box<dyn crate::cookie::CookieStore>>,
 }
 
 impl<E: Engine> DomHost<E> {
@@ -111,6 +117,8 @@ impl<E: Engine> DomHost<E> {
             attrs: Default::default(),
             nav: crate::nav::Nav::new(),
             notes: Default::default(),
+            cookies: None,
+            time_origin_ms: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("a clock after 1970").as_secs_f64() * 1e3,
         };
         if E::PLACES_WRAPPERS {
             h.dom.track_moves();

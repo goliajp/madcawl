@@ -52,9 +52,9 @@ pub(crate) struct Nav<E: Engine> {
     /// The current entry's state, as script gave it: not a structured
     /// clone
     pub state: Option<Root<E>>,
-    /// The window's Location, History and Crypto, each held by a count
-    /// from install to the host's end
-    pub objects: Option<[SideRef; 3]>,
+    /// The window's Location, History, Crypto and Performance, each held
+    /// by a count from install to the host's end
+    pub objects: Option<[SideRef; 4]>,
 }
 
 impl<E: Engine> Nav<E> {

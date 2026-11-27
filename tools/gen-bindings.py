@@ -18,7 +18,8 @@ glue (`shell.rs`).
 The parser reads the subset of Web IDL the files use: interfaces with
 a parent, a constructor, constants, attributes, operations (static
 ones too) with optional arguments and defaults (boolean, string
-literals, and null for `any`),
+literals, and null for `any`), a variadic last argument (the
+implementation gets a `Vec` of the converted values),
 nullable types, an indexed `getter` operation with an `iterable<T>`
 declaration, and extended attribute
 lists (only `[HostOps]`, `[Side]` (its objects are not nodes),
@@ -111,8 +112,9 @@ def parse(text):
                 args = []
                 for arg in filter(None, (x.strip() for x in o.group(3).split(','))):
                     a = re.fullmatch(r'(?:\[\s*(Atom|EnforceRange)\s*\]\s*)?(optional\s+)?(.+?)\s+(\w+)(?:\s*=\s*(\S+))?', arg)
-                    args.append({'type': (f'[{a.group(1)}] ' if a.group(1) else '') + a.group(3), 'name': a.group(4),
-                                 'optional': bool(a.group(2)), 'default': a.group(5)})
+                    ty, variadic = a.group(3), a.group(3).endswith('...')
+                    args.append({'type': (f'[{a.group(1)}] ' if a.group(1) else '') + ty.removesuffix('...'), 'name': a.group(4),
+                                 'optional': bool(a.group(2)) or variadic, 'default': a.group(5), 'variadic': variadic})
                 op = {'name': o.group(2), 'ret': o.group(1), 'args': args, 'flags': flags}
                 if getter:
                     kind = {'unsigned long': 'getter', 'DOMString': 'named'}.get(' '.join(a['type'] for a in args))
@@ -240,7 +242,10 @@ def emit(ifaces, sources):
                 body.append(f'cv::need(e, args, {required})?;')
             for k, a in enumerate(o['args']):
                 v = f'cv::arg::<E>(args, {k})'
-                if a['default'] is not None and a['type'] == 'DOMString' and re.fullmatch(r'"[^"\\]*"', a['default']):
+                if a['variadic']:
+                    body.append(f"let mut a{k} = Vec::with_capacity(args.len().saturating_sub({k}));")
+                    body.append(f"for &v in args.get({k}..).unwrap_or(&[]) {{ a{k}.push({convert(a['type'], 'v', names, sides)}); }}")
+                elif a['default'] is not None and a['type'] == 'DOMString' and re.fullmatch(r'"[^"\\]*"', a['default']):
                     body.append(f"let a{k} = cv::dom_string_or(e, h, {v}, b{a['default']})?;")
                 elif a['default'] == 'null' and a['type'] == 'any':
                     body.append(f"let a{k} = cv::any_or_null::<E>(e, {v});")

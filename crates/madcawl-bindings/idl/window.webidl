@@ -46,3 +46,28 @@ interface Crypto {
   any getRandomValues(any array);
   DOMString randomUUID();
 };
+
+// The High Resolution Time Standard's Performance, with the Performance
+// Timeline's entry getters; it is not an EventTarget here. No entry type
+// is supported yet, so the entry buffer stays empty; the entry lists
+// (sequence<PerformanceEntry>) are arrays, given as any
+[Exposed=*, Side]
+interface Performance {
+  double now();
+  readonly attribute double timeOrigin;
+  any getEntries();
+  any getEntriesByType(DOMString type);
+  any getEntriesByName(DOMString name, optional DOMString? type);
+};
+
+// The Performance Timeline's observer. With no supported entry type its
+// callback is never called and observe only checks its options. The
+// callback and the PerformanceObserverInit dictionary are given as any;
+// the static supportedEntryTypes is not bound yet
+[Exposed=*, Side]
+interface PerformanceObserver {
+  constructor(any callback);
+  undefined observe(optional any options);
+  undefined disconnect();
+  any takeRecords();
+};

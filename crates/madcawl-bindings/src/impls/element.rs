@@ -16,6 +16,17 @@ pub(crate) use super::attributes::{
 };
 pub(crate) use super::parent::{query_selector, query_selector_all};
 
+/// The element's `classList`: the same object while the element lives.
+pub(crate) fn class_list<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<crate::side::SideRef, Thrown> {
+    Ok(h.token_list(this))
+}
+
+/// `el.classList = v`, forwarded to the list's `value`.
+pub(crate) fn set_class_list<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, v: DomString) -> Result<(), Thrown> {
+    let r = h.token_list(this);
+    super::dom_token_list::set_value(e, h, r, v)
+}
+
 /// An HTML element's name in ASCII upper case; others' as they are.
 pub(crate) fn html_upper(dom: &Dom, el: NodeId) -> DomString {
     let mut b = Vec::new();

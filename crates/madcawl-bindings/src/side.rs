@@ -41,11 +41,17 @@ pub(crate) enum SideData {
     Attr(crate::attr::AttrState),
     /// An element's `attributes`: the element, by a count.
     AttrMap(Held),
+    /// An element's `classList`: the element, by a count.
+    TokenList(Held),
     /// The window's `Location`, `History` and `Crypto`: what they read is
     /// the host's (`nav.rs`).
     Location,
     History,
     Crypto,
+    Performance,
+    /// A `PerformanceObserver`: the kind its first `observe` gave it; its
+    /// callback is in the host's `details`.
+    Observer(Option<crate::impls::performance_observer::Kind>),
 }
 
 impl SideData {
@@ -54,7 +60,7 @@ impl SideData {
         match self {
             SideData::Event(ev) => ev.held(f),
             SideData::List(l) => l.held(f),
-            SideData::Controller(s) | SideData::AttrMap(s) => f(s),
+            SideData::Controller(s) | SideData::AttrMap(s) | SideData::TokenList(s) => f(s),
             SideData::Attr(a) => a.owner.iter().for_each(f),
             _ => {}
         }
@@ -65,7 +71,7 @@ impl SideData {
             SideData::Event(ev) => ev.release(out),
             SideData::List(l) => l.release(out),
             // given back once: the object is freed or unlinked after this
-            SideData::Controller(s) | SideData::AttrMap(s) => out.push(std::mem::replace(s, Held::Window)),
+            SideData::Controller(s) | SideData::AttrMap(s) | SideData::TokenList(s) => out.push(std::mem::replace(s, Held::Window)),
             SideData::Attr(a) => out.extend(a.owner.take()),
             _ => {}
         }
@@ -85,9 +91,12 @@ impl SideData {
             SideData::Controller(_) => &g::AbortControllerClass::<E>::DEF,
             SideData::Attr(_) => &g::AttrClass::<E>::DEF,
             SideData::AttrMap(_) => &g::NamedNodeMapClass::<E>::DEF,
+            SideData::TokenList(_) => &g::DOMTokenListClass::<E>::DEF,
             SideData::Location => &g::LocationClass::<E>::DEF,
             SideData::History => &g::HistoryClass::<E>::DEF,
             SideData::Crypto => &g::CryptoClass::<E>::DEF,
+            SideData::Performance => &g::PerformanceClass::<E>::DEF,
+            SideData::Observer(_) => &g::PerformanceObserverClass::<E>::DEF,
         }
     }
 }

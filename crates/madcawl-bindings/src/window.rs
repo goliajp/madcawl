@@ -1,11 +1,11 @@
 //! The window's own members, put on the realm's global object: `window`
 //! and `self`, `parent` and `top` (a top-level window's own), `opener`,
-//! `document`, `location`, `history` and `crypto` (`objects.rs`), the
-//! interface objects, the timers, `queueMicrotask`, `atob` and `btoa`,
-//! and the window's listeners. The global is not yet a host object of a
-//! bound `Window` interface: these are plain properties, but for the
-//! accessors of `objects.rs`, and the functions host functions made at
-//! run time.
+//! `document`, `location`, `history`, `crypto` and `performance`
+//! (`objects.rs`), the interface objects, the timers, `queueMicrotask`,
+//! `atob` and `btoa`, and the window's listeners. The global is not yet
+//! a host object of a bound `Window` interface: these are plain
+//! properties, but for the accessors of `objects.rs`, and the functions
+//! host functions made at run time.
 
 use madcawl_js::{Bound, ClassDef, Ctx, Engine, ErrorKind, Halt, HostFn, Key, Owned, Root};
 use madcawl_str::{Atom, DomString};
@@ -13,8 +13,9 @@ use madcawl_str::{Atom, DomString};
 use crate::convert::{Thrown, arg, run, throw};
 use crate::generated::{
     AbortControllerClass, AbortSignalClass, AttrClass, CharacterDataClass, CommentClass, CryptoClass, CustomEventClass,
-    DOMExceptionClass, DocumentClass, DocumentFragmentClass, ElementClass, EventClass, EventTargetClass, HTMLCollectionClass,
-    HTMLScriptElementClass, HistoryClass, LocationClass, NamedNodeMapClass, NodeClass, NodeListClass, TextClass,
+    DOMExceptionClass, DOMTokenListClass, DocumentClass, DocumentFragmentClass, ElementClass, EventClass, EventTargetClass, HTMLCollectionClass,
+    HTMLScriptElementClass, HistoryClass, LocationClass, NamedNodeMapClass, NodeClass, NodeListClass, PerformanceClass,
+    PerformanceObserverClass, TextClass,
 };
 use crate::event::Target;
 use crate::host::DomHost;
@@ -40,11 +41,12 @@ impl<E: Engine> DomHost<E> {
         let d = self.wrap(e, doc);
         put(e, self, global.get(), "document", d.get());
         e.release(d);
-        let classes: [&'static ClassDef<E, DomHost<E>>; 21] = [
+        let classes: [&'static ClassDef<E, DomHost<E>>; 24] = [
             &AbortControllerClass::<E>::DEF,
             &AbortSignalClass::<E>::DEF,
             &AttrClass::<E>::DEF,
             &NamedNodeMapClass::<E>::DEF,
+            &DOMTokenListClass::<E>::DEF,
             &CharacterDataClass::<E>::DEF,
             &TextClass::<E>::DEF,
             &CommentClass::<E>::DEF,
@@ -62,6 +64,8 @@ impl<E: Engine> DomHost<E> {
             &LocationClass::<E>::DEF,
             &HistoryClass::<E>::DEF,
             &CryptoClass::<E>::DEF,
+            &PerformanceClass::<E>::DEF,
+            &PerformanceObserverClass::<E>::DEF,
         ];
         for c in classes {
             let i = e.interface_object(self.realm, c);
