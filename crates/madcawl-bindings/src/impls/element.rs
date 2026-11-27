@@ -14,6 +14,7 @@ pub(crate) use super::attributes::{
     has_attributes, remove_attribute, remove_attribute_node, set_attribute, set_attribute_node, set_attribute_node_ns,
     set_class_name, set_id, toggle_attribute,
 };
+pub(crate) use super::markup::{inner_html, outer_html, set_inner_html, set_outer_html};
 pub(crate) use super::parent::{query_selector, query_selector_all};
 
 /// The element's `classList`: the same object while the element lives.

@@ -133,7 +133,8 @@ fn every_bound_interface_has_its_prototype_chain_and_class_string() {
     let (mut e, mut h) = page("<p>x</p>");
     let src = "var parents = { EventTarget: null, Node: 'EventTarget', Document: 'Node', Element: 'Node', DocumentFragment: 'Node',
   CharacterData: 'Node', Text: 'CharacterData', Comment: 'CharacterData', Event: null, CustomEvent: 'Event', DOMException: null,
-  AbortController: null, AbortSignal: 'EventTarget', Attr: 'Node', NamedNodeMap: null };
+  AbortController: null, AbortSignal: 'EventTarget', Attr: 'Node', NamedNodeMap: null, HTMLElement: 'Element',
+  HTMLUnknownElement: 'HTMLElement', HTMLDivElement: 'HTMLElement', HTMLIFrameElement: 'HTMLElement', HTMLScriptElement: 'HTMLElement' };
 var bad = [];
 for (const n in parents) {
   const I = globalThis[n], P = parents[n];
@@ -143,7 +144,8 @@ for (const n in parents) {
   if (Object.prototype.toString.call(I.prototype) !== '[object ' + n + ']') bad.push(n + ' tag ' + Object.prototype.toString.call(I.prototype));
   if (I.name !== n) bad.push(n + ' name');
 }
-var objects = [[document, 'Document'], [document.querySelector('p'), 'Element'], [new Text(), 'Text'], [new Comment(), 'Comment'],
+var objects = [[document, 'Document'], [document.querySelector('p'), 'HTMLElement'], [document.createElement('div'), 'HTMLDivElement'],
+  [document.createElementNS('http://www.w3.org/2000/svg', 'g'), 'Element'], [new Text(), 'Text'], [new Comment(), 'Comment'],
   [new DocumentFragment(), 'DocumentFragment'], [new EventTarget(), 'EventTarget'], [new Event('x'), 'Event'],
   [new CustomEvent('x'), 'CustomEvent'], [new DOMException(), 'DOMException'], [new AbortController(), 'AbortController'],
   [AbortSignal.abort(), 'AbortSignal'], [document.createAttribute('a'), 'Attr'], [document.querySelector('p').attributes, 'NamedNodeMap']];

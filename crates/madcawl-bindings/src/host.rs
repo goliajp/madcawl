@@ -7,11 +7,11 @@ use madcawl_dom::{Dom, NodeId, NodeKind};
 use madcawl_js::{
     ClassDef, Deadline, Engine, ErrorKind, Host, HostRef, Member, ModuleRequest, Owned, Step,
 };
-use madcawl_str::HeldAtoms;
+use madcawl_str::{DomString, HeldAtoms};
 
 use crate::event_loop::EventLoop;
 use crate::listeners::Listener;
-use crate::generated::{DocumentClass, ElementClass, NodeClass};
+use crate::generated::{DocumentClass, NodeClass};
 
 pub struct DomHost<E: Engine> {
     pub dom: Dom,
@@ -78,6 +78,9 @@ pub struct DomHost<E: Engine> {
     /// Whether CSSStyleDeclaration's property attributes are defined
     /// (`css_props.rs`).
     pub(crate) css_properties: bool,
+    /// The nonce of each HTML element script set one on, by node index,
+    /// until its content attribute changes.
+    pub(crate) nonces: HashMap<u32, DomString>,
 }
 
 impl<E: Engine> DomHost<E> {
@@ -122,6 +125,7 @@ impl<E: Engine> DomHost<E> {
             notes: Default::default(),
             cookies: None,
             css_properties: false,
+            nonces: HashMap::new(),
             time_origin_ms: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("a clock after 1970").as_secs_f64() * 1e3,
         };
         if E::PLACES_WRAPPERS {
@@ -170,6 +174,9 @@ impl<E: Engine> DomHost<E> {
             let freed = std::mem::take(&mut self.freed);
             for &n in &freed {
                 self.forget_script(n);
+                if !self.nonces.is_empty() {
+                    self.nonces.remove(&n.index());
+                }
                 for mut l in self.take_listeners(n) {
                     l.callback.clear(e);
                 }
@@ -240,8 +247,7 @@ impl<E: Engine> Host<E> for DomHost<E> {
         }
         match self.dom.kind(self.node(obj)) {
             NodeKind::Document => &DocumentClass::<E>::DEF,
-            NodeKind::Element if crate::scripts::is_script(&self.dom, self.node(obj)) => &crate::generated::HTMLScriptElementClass::<E>::DEF,
-            NodeKind::Element => &ElementClass::<E>::DEF,
+            NodeKind::Element => crate::elements::class_of::<E>(&self.dom, self.node(obj)),
             NodeKind::Text => &crate::generated::TextClass::<E>::DEF,
             NodeKind::Comment => &crate::generated::CommentClass::<E>::DEF,
             NodeKind::Fragment => &crate::generated::DocumentFragmentClass::<E>::DEF,

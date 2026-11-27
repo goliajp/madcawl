@@ -59,7 +59,11 @@ pub(crate) fn set_value<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: SideRef,
     let mut b = Vec::new();
     value.write_wtf8(&mut b);
     let prefix = h.attr(this).prefix;
-    if h.dom.set_attribute_at(el, k, prefix, &b) { Ok(()) } else { Err(super::attributes::full(e, h)) }
+    if !h.dom.set_attribute_at(el, k, prefix, &b) {
+        return Err(super::attributes::full(e, h));
+    }
+    super::html_element::attribute_changed_at(h, el, k);
+    Ok(())
 }
 
 pub(crate) fn owner_element<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: SideRef) -> Result<Option<NodeId>, Thrown> {

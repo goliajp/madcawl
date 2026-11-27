@@ -101,6 +101,7 @@ pub(crate) fn set<E: Engine>(e: &mut E, h: &mut DomHost<E>, el: NodeId, local: A
     if !h.dom.set_attribute(el, local, &v) {
         return Err(full(e, h));
     }
+    super::html_element::attribute_changed(h, el, AttrNamespace::None, local);
     if new_src {
         h.script_src_added(e, el);
     }
@@ -116,7 +117,11 @@ pub(crate) fn set_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: Node
     let prefix = h.dom.attributes(this).nth(k).expect("the attribute found").prefix;
     let mut v = Vec::new();
     value.write_wtf8(&mut v);
-    if h.dom.set_attribute_at(this, k, prefix, &v) { Ok(()) } else { Err(full(e, h)) }
+    if !h.dom.set_attribute_at(this, k, prefix, &v) {
+        return Err(full(e, h));
+    }
+    super::html_element::attribute_changed_at(h, this, k);
+    Ok(())
 }
 
 pub(crate) fn remove_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, name: DomString) -> Result<(), Thrown> {
@@ -130,6 +135,7 @@ pub(crate) fn remove_attribute<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: N
 /// value it had.
 pub(crate) fn take_off<E: Engine>(e: &mut E, h: &mut DomHost<E>, el: NodeId, k: usize) -> Option<SideRef> {
     let r = h.detach_attr(e, el, k);
+    super::html_element::attribute_changed_at(h, el, k);
     h.dom.remove_attribute(el, k);
     r
 }
@@ -211,6 +217,7 @@ pub(crate) fn set_node<E: Engine>(e: &mut E, h: &mut DomHost<E>, el: NodeId, att
         }
         None => (None, h.dom.add_attribute(el, ns, prefix, local, &v)),
     };
+    super::html_element::attribute_changed(h, el, ns, local);
     if h.place_of(el, attr).is_some() {
         h.attach_attr(e, attr, el);
     }

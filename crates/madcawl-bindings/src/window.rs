@@ -14,7 +14,10 @@ use crate::convert::{Thrown, arg, run, throw};
 use crate::generated::{
     AbortControllerClass, AbortSignalClass, AttrClass, CSSStyleDeclarationClass, CharacterDataClass, CommentClass, CryptoClass, CustomEventClass,
     DOMExceptionClass, DOMTokenListClass, DocumentClass, DocumentFragmentClass, ElementClass, EventClass, EventTargetClass, HTMLCollectionClass,
-    HTMLScriptElementClass, HistoryClass, LocationClass, NamedNodeMapClass, NodeClass, NodeListClass, PerformanceClass,
+    HTMLAnchorElementClass, HTMLBodyElementClass, HTMLButtonElementClass, HTMLDivElementClass, HTMLElementClass,
+    HTMLHeadElementClass, HTMLHtmlElementClass, HTMLIFrameElementClass, HTMLImageElementClass, HTMLInputElementClass,
+    HTMLLinkElementClass, HTMLObjectElementClass, HTMLScriptElementClass, HTMLSpanElementClass, HTMLStyleElementClass,
+    HTMLUnknownElementClass, HistoryClass, LocationClass, NamedNodeMapClass, NodeClass, NodeListClass, PerformanceClass,
     PerformanceObserverClass, TextClass,
 };
 use crate::event::Target;
@@ -41,7 +44,7 @@ impl<E: Engine> DomHost<E> {
         let d = self.wrap(e, doc);
         put(e, self, global.get(), "document", d.get());
         e.release(d);
-        let classes: [&'static ClassDef<E, DomHost<E>>; 25] = [
+        let classes: [&'static ClassDef<E, DomHost<E>>; 40] = [
             &AbortControllerClass::<E>::DEF,
             &AbortSignalClass::<E>::DEF,
             &AttrClass::<E>::DEF,
@@ -58,6 +61,21 @@ impl<E: Engine> DomHost<E> {
             &NodeClass::<E>::DEF,
             &ElementClass::<E>::DEF,
             &DocumentClass::<E>::DEF,
+            &HTMLElementClass::<E>::DEF,
+            &HTMLUnknownElementClass::<E>::DEF,
+            &HTMLHtmlElementClass::<E>::DEF,
+            &HTMLHeadElementClass::<E>::DEF,
+            &HTMLBodyElementClass::<E>::DEF,
+            &HTMLDivElementClass::<E>::DEF,
+            &HTMLSpanElementClass::<E>::DEF,
+            &HTMLAnchorElementClass::<E>::DEF,
+            &HTMLLinkElementClass::<E>::DEF,
+            &HTMLStyleElementClass::<E>::DEF,
+            &HTMLImageElementClass::<E>::DEF,
+            &HTMLIFrameElementClass::<E>::DEF,
+            &HTMLObjectElementClass::<E>::DEF,
+            &HTMLButtonElementClass::<E>::DEF,
+            &HTMLInputElementClass::<E>::DEF,
             &HTMLScriptElementClass::<E>::DEF,
             &EventClass::<E>::DEF,
             &NodeListClass::<E>::DEF,

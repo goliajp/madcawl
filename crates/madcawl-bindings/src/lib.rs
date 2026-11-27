@@ -16,6 +16,7 @@ mod attr;
 mod base64;
 mod convert;
 mod cookie;
+mod elements;
 mod css_props;
 mod event;
 mod event_loop;

@@ -59,14 +59,17 @@ fn interface_objects_answer_instanceof_along_the_class_chain() {
     let node_proto = js.get(i.node.get(), "prototype");
     let up = js.e.prototype_of::<H>(el_proto.get());
     assert_eq!(up.get(), node_proto.get());
+    // a div's: HTMLDivElement's, then HTMLElement's, then Element's
     let div_proto = js.e.prototype_of::<H>(div.get());
-    assert_eq!(div_proto.get(), el_proto.get());
+    let html_proto = js.e.prototype_of::<H>(div_proto.get());
+    let html_up = js.e.prototype_of::<H>(html_proto.get());
+    assert_eq!(html_up.get(), el_proto.get());
     assert!(js.is(node_proto.get(), "constructor", i.node.get()));
     // an interface without a constructor throws when called
     let r = js.e.call(&mut js.h, i.node.get(), Stub::undefined(), &[]);
     assert!(Stub::is_thrown(r.into_raw()));
     assert_eq!(js.exception(), "TypeError");
-    for v in [div_proto, up, node_proto, el_proto, text, data, doc, div, again] {
+    for v in [html_up, html_proto, div_proto, up, node_proto, el_proto, text, data, doc, div, again] {
         js.drop(v);
     }
     for v in [i.document, i.element, i.node, i.event_target] {

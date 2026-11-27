@@ -1,20 +1,14 @@
 //! The HTMLScriptElement interface's members: its attributes reflected,
-//! `async` with the element's force async flag, and its two event
-//! handlers. Setting `src` or `text` on a connected script element may
-//! run it (`scripts.rs`).
+//! and `async` with the element's force async flag. Setting `src` or
+//! `text` on a connected script element may run it (`scripts.rs`).
 
 use madcawl_dom::NodeId;
 use madcawl_js::Engine;
 use madcawl_str::{Atom, DomString, atom};
 
 use super::attributes::set;
-use crate::convert::{Any, Thrown};
-use crate::event::Target;
+use crate::convert::Thrown;
 use crate::host::DomHost;
-
-fn reflect<E: Engine>(h: &DomHost<E>, el: NodeId, name: Atom) -> DomString {
-    h.dom.attribute(el, name).cloned().unwrap_or_else(DomString::empty)
-}
 
 fn toggle<E: Engine>(e: &mut E, h: &mut DomHost<E>, el: NodeId, name: Atom, on: bool) -> Result<(), Thrown> {
     if on {
@@ -28,7 +22,7 @@ fn toggle<E: Engine>(e: &mut E, h: &mut DomHost<E>, el: NodeId, name: Atom, on: 
 }
 
 pub(crate) fn src<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<DomString, Thrown> {
-    Ok(reflect(h, this, atom!("src")))
+    Ok(super::reflect::url(h, this, atom!("src")))
 }
 
 pub(crate) fn set_src<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, value: DomString) -> Result<(), Thrown> {
@@ -36,7 +30,7 @@ pub(crate) fn set_src<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, va
 }
 
 pub(crate) fn r#type<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<DomString, Thrown> {
-    Ok(reflect(h, this, atom!("type")))
+    Ok(super::reflect::string(h, this, atom!("type")))
 }
 
 pub(crate) fn set_type<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, value: DomString) -> Result<(), Thrown> {
@@ -67,22 +61,4 @@ pub(crate) fn text<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId) -> Re
 
 pub(crate) fn set_text<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, value: DomString) -> Result<(), Thrown> {
     super::node::set_text_content(e, h, this, Some(value))
-}
-
-pub(crate) fn onload<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<Any<E>, Thrown> {
-    Ok(Any(h.event_handler(e, Target::Node(this), atom!("load"))))
-}
-
-pub(crate) fn set_onload<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, value: Option<E::Value>) -> Result<(), Thrown> {
-    h.set_event_handler(e, Target::Node(this), atom!("load"), value);
-    Ok(())
-}
-
-pub(crate) fn onerror<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<Any<E>, Thrown> {
-    Ok(Any(h.event_handler(e, Target::Node(this), atom!("error"))))
-}
-
-pub(crate) fn set_onerror<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, value: Option<E::Value>) -> Result<(), Thrown> {
-    h.set_event_handler(e, Target::Node(this), atom!("error"), value);
-    Ok(())
 }

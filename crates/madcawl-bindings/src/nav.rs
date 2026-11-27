@@ -10,6 +10,7 @@
 use std::fmt;
 
 use alt_url::Url;
+use madcawl_dom::NodeId;
 use madcawl_js::{Engine, Root};
 
 use crate::host::DomHost;
@@ -45,6 +46,8 @@ impl fmt::Display for Navigation {
 
 pub(crate) struct Nav<E: Engine> {
     pub url: Url,
+    /// `about:blank`, the URL of every document but the main one
+    pub blank: Url,
     /// The session history's entries and the current one's index: this
     /// document's own, with no entries of other documents
     pub length: u32,
@@ -61,6 +64,7 @@ impl<E: Engine> Nav<E> {
     pub fn new() -> Self {
         Nav {
             url: Url::parse("about:blank").expect("a valid URL"),
+            blank: Url::parse("about:blank").expect("a valid URL"),
             length: 1,
             index: 0,
             state: None,
@@ -105,6 +109,13 @@ impl<E: Engine> DomHost<E> {
     /// The document's URL, `about:blank` until the embedder sets it.
     pub fn url(&self) -> &str {
         self.nav.url.as_str()
+    }
+
+    /// The base URL of document `doc`: its URL, as no `base` element is
+    /// read yet. Only the main document has one of its own; the others,
+    /// template contents' owners, have `about:blank`.
+    pub(crate) fn base_url(&self, doc: NodeId) -> &Url {
+        if doc == self.dom.document() { &self.nav.url } else { &self.nav.blank }
     }
 
     /// Make `url`, the URL the document was fetched from after its

@@ -236,9 +236,11 @@ def emit(ifaces, sources):
             out += glue(f"{m}_get_{snake(a['name'])}", i,
                         [f"impls::{m}::{ident(a['name'])}(e, h, this)"], 'get')
             if not a['readonly']:
+                # an `any` value is passed as it is
+                value = convert(a.get('set_type', a['type']), 'value', names, sides)
                 out += glue(f"{m}_set_{snake(a['name'])}", i,
-                            [f"let value = {convert(a.get('set_type', a['type']), 'value', names, sides)};",
-                             f"impls::{m}::set_{snake(a['name'])}(e, h, this, value)"], 'set')
+                            [f"let value = {value};"] * (value != 'value') +
+                            [f"impls::{m}::set_{snake(a['name'])}(e, h, this, value)"], 'set')
         members = [(o, 'op') for o in i['ops']] + [(o, 'ctor') for o in i['statics']] + ([(i['ctor'], 'ctor')] if i['ctor'] else [])
         for o, kind in members:
             body = []

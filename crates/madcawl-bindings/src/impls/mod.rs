@@ -19,13 +19,21 @@ pub(crate) mod element;
 pub(crate) mod event;
 pub(crate) mod event_target;
 pub(crate) mod history;
+pub(crate) mod html_element;
+mod html_elements;
 pub(crate) mod html_script_element;
 pub(crate) mod location;
+mod markup;
 pub(crate) mod named_node_map;
 pub(crate) mod node;
 pub(crate) mod parent;
 pub(crate) mod performance;
 pub(crate) mod performance_observer;
+mod reflect;
+
+pub(crate) use html_element::body as html_body_element;
+pub(crate) use html_elements::{anchor as html_anchor_element, iframe as html_iframe_element, image as html_image_element};
+pub(crate) use html_elements::link as html_link_element;
 
 pub(crate) mod text {
     pub(crate) use super::character_data::{new_text as constructor, split_text, whole_text};

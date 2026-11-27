@@ -170,6 +170,11 @@ interface Element : Node {
   // CSSOM's ElementCSSInlineStyle, which HTML, SVG and MathML elements
   // include: every element here
   [SameObject, PutForwards=cssText] readonly attribute CSSStyleDeclaration style;
+  // the HTML Standard's: InnerHTML's innerHTML, and outerHTML; (TrustedHTML
+  // or [LegacyNullToEmptyString] DOMString) in the standard, with no
+  // trusted types here
+  [CEReactions, RunsScript] attribute [LegacyNullToEmptyString] DOMString innerHTML;
+  [CEReactions, RunsScript] attribute [LegacyNullToEmptyString] DOMString outerHTML;
 
   boolean hasAttributes();
   [SameObject] readonly attribute NamedNodeMap attributes;
