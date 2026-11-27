@@ -157,6 +157,8 @@ fn a_dynamic_name_keeps_text_beyond_latin1() {
     let mut v = Vec::new();
     x.write_wtf8(&mut v);
     assert_eq!(v, name);
+    assert!(x.with_name(|n| n == name));
+    assert!(atom!("div").with_name(|n| n == b"div"));
 }
 
 #[test]

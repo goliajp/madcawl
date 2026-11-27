@@ -65,6 +65,16 @@ impl Atom {
         }
     }
 
+    /// Run `f` on the name as WTF-8, with no copy made. `f` runs with
+    /// the dynamic atoms' table locked, so it must not use atoms that
+    /// are not static. Panics if no holder has the atom any more.
+    pub fn with_name<R>(self, f: impl FnOnce(&[u8]) -> R) -> R {
+        match self.is_static() {
+            true => f(generated::NAMES[self.0 as usize].as_bytes()),
+            false => table::with_name(self, f).expect("a held atom"),
+        }
+    }
+
     /// Append the name as WTF-8. Panics if no holder has the atom any
     /// more.
     pub fn write_wtf8(self, out: &mut Vec<u8>) {

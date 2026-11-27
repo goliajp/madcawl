@@ -238,6 +238,14 @@ pub(super) fn lookup(name: &[u8]) -> Option<Atom> {
     t.find(h, name).map(|s| t.atom_of(s))
 }
 
+/// Run `f` on the name of a dynamic atom (WTF-8), or `None` when no
+/// holder has the atom any more.
+pub(super) fn with_name<R>(atom: Atom, f: impl FnOnce(&[u8]) -> R) -> Option<R> {
+    let t = table();
+    let slot = t.live_slot(atom)?;
+    Some(f(t.slots[slot as usize].as_ref()?.key.bytes()))
+}
+
 /// Run `f` on the string of a dynamic atom, or `None` when no holder
 /// has the atom any more.
 pub(super) fn with_text<R>(atom: Atom, f: impl FnOnce(&DomString) -> R) -> Option<R> {
