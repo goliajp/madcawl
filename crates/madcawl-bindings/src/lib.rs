@@ -16,6 +16,7 @@ mod attr;
 mod base64;
 mod convert;
 mod cookie;
+mod css_props;
 mod event;
 mod event_loop;
 mod fire;
@@ -38,6 +39,7 @@ mod shell;
 mod side;
 mod side_members;
 mod side_ops;
+mod style_attr;
 mod trees;
 mod window;
 

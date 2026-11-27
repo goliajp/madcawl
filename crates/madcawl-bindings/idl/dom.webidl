@@ -167,6 +167,9 @@ interface Element : Node {
   [CEReactions] attribute DOMString id;
   [CEReactions] attribute DOMString className;
   [SameObject, PutForwards=value] readonly attribute DOMTokenList classList;
+  // CSSOM's ElementCSSInlineStyle, which HTML, SVG and MathML elements
+  // include: every element here
+  [SameObject, PutForwards=cssText] readonly attribute CSSStyleDeclaration style;
 
   boolean hasAttributes();
   [SameObject] readonly attribute NamedNodeMap attributes;
@@ -212,8 +215,16 @@ interface Document : Node {
   // HTMLElement in the standard, until it is bound
   [CEReactions] attribute Element? body;
   readonly attribute Element? head;
+  // DocumentReadyState in the standard
+  readonly attribute DOMString readyState;
+  [CEReactions] attribute DOMString title;
+  // WindowProxy? in the standard
+  readonly attribute any defaultView;
 
   [NewObject] Element createElement(DOMString localName);
+  // an element of the HTML, SVG or MathML namespace with no prefix: no
+  // other is kept, and asking for one is a NotSupportedError
+  [NewObject] Element createElementNS(DOMString? namespace, DOMString qualifiedName);
   [NewObject] DocumentFragment createDocumentFragment();
   [NewObject] Text createTextNode(DOMString data);
   [NewObject] Comment createComment(DOMString data);

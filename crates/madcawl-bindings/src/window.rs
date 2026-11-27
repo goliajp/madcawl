@@ -12,7 +12,7 @@ use madcawl_str::{Atom, DomString};
 
 use crate::convert::{Thrown, arg, run, throw};
 use crate::generated::{
-    AbortControllerClass, AbortSignalClass, AttrClass, CharacterDataClass, CommentClass, CryptoClass, CustomEventClass,
+    AbortControllerClass, AbortSignalClass, AttrClass, CSSStyleDeclarationClass, CharacterDataClass, CommentClass, CryptoClass, CustomEventClass,
     DOMExceptionClass, DOMTokenListClass, DocumentClass, DocumentFragmentClass, ElementClass, EventClass, EventTargetClass, HTMLCollectionClass,
     HTMLScriptElementClass, HistoryClass, LocationClass, NamedNodeMapClass, NodeClass, NodeListClass, PerformanceClass,
     PerformanceObserverClass, TextClass,
@@ -41,12 +41,13 @@ impl<E: Engine> DomHost<E> {
         let d = self.wrap(e, doc);
         put(e, self, global.get(), "document", d.get());
         e.release(d);
-        let classes: [&'static ClassDef<E, DomHost<E>>; 24] = [
+        let classes: [&'static ClassDef<E, DomHost<E>>; 25] = [
             &AbortControllerClass::<E>::DEF,
             &AbortSignalClass::<E>::DEF,
             &AttrClass::<E>::DEF,
             &NamedNodeMapClass::<E>::DEF,
             &DOMTokenListClass::<E>::DEF,
+            &CSSStyleDeclarationClass::<E>::DEF,
             &CharacterDataClass::<E>::DEF,
             &TextClass::<E>::DEF,
             &CommentClass::<E>::DEF,

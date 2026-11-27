@@ -18,7 +18,8 @@ glue (`shell.rs`).
 The parser reads the subset of Web IDL the files use: interfaces with
 a parent, a constructor, constants, attributes, operations (static
 ones too) with optional arguments and defaults (boolean, string
-literals, and null for `any`), a variadic last argument (the
+literals, and null for `any`; a string default of a
+`[LegacyNullToEmptyString] DOMString` argument too), a variadic last argument (the
 implementation gets a `Vec` of the converted values),
 nullable types, an indexed `getter` operation with an `iterable<T>`
 declaration, and extended attribute
@@ -31,7 +32,8 @@ gets a setter that converts the value as attribute `x` of the interface
 it returns takes it and calls `set_<member>`.
 An interface with a `getter` operation of one `unsigned long` argument
 gets interceptors: its index getter calls the operation's
-implementation and gives no property for `None`, and its length calls
+implementation and gives no property for `None` (which the operation
+gives as the empty string when its result is not nullable), and its length calls
 the implementation of its `length` attribute. A `getter` of one
 `DOMString` argument beside it is its named getter, which calls the
 operation's implementation the same way.
@@ -71,6 +73,9 @@ TYPES = {
     'boolean': 'e.to_boolean({v})',
     'any': '{v}',
 }
+
+# the conversion of a string argument left out for its default
+STRING_DEFAULTS = {'DOMString': 'dom_string_or', '[LegacyNullToEmptyString] DOMString': 'dom_string_null_empty_or'}
 
 
 def strip(text):
@@ -245,8 +250,8 @@ def emit(ifaces, sources):
                 if a['variadic']:
                     body.append(f"let mut a{k} = Vec::with_capacity(args.len().saturating_sub({k}));")
                     body.append(f"for &v in args.get({k}..).unwrap_or(&[]) {{ a{k}.push({convert(a['type'], 'v', names, sides)}); }}")
-                elif a['default'] is not None and a['type'] == 'DOMString' and re.fullmatch(r'"[^"\\]*"', a['default']):
-                    body.append(f"let a{k} = cv::dom_string_or(e, h, {v}, b{a['default']})?;")
+                elif a['default'] is not None and a['type'] in STRING_DEFAULTS and re.fullmatch(r'"[^"\\]*"', a['default']):
+                    body.append(f"let a{k} = cv::{STRING_DEFAULTS[a['type']]}(e, h, {v}, b{a['default']})?;")
                 elif a['default'] == 'null' and a['type'] == 'any':
                     body.append(f"let a{k} = cv::any_or_null::<E>(e, {v});")
                 elif a['default'] is not None:
@@ -257,7 +262,11 @@ def emit(ifaces, sources):
                     body.append(f"let a{k} = {convert(a['type'], v, names, sides)};")
             call_args = ''.join(f', a{k}' for k in range(len(o['args'])))
             this = '' if kind == 'ctor' else ', this'
-            body.append(f"impls::{m}::{ident(o['name'])}(e, h{this}{call_args})")
+            call = f"impls::{m}::{ident(o['name'])}(e, h{this}{call_args})"
+            if o is i['getter'] and not o['ret'].endswith('?'):
+                # past the end the indexed getter gives no property, the operation the empty string
+                call += '.map(cv::or_empty)'
+            body.append(call)
             out += glue(f"{m}_{snake(o['name'])}", i, body, kind, bool(o['args']))
     return '\n'.join(out).rstrip('\n') + '\n'
 

@@ -14,9 +14,15 @@ impl Dom {
     /// refusal from script, here and in the host's other edits, does not
     /// stop a parser building into the DOM: only the parser's own do.
     pub fn new_element(&mut self, name: &[u8]) -> Option<NodeId> {
+        self.new_element_ns(Namespace::Html, name)
+    }
+
+    /// An element of namespace `ns` with local name `name` as it is,
+    /// otherwise as `new_element`.
+    pub fn new_element_ns(&mut self, ns: Namespace, name: &[u8]) -> Option<NodeId> {
         let local = self.atoms.hold(name);
         let cut = self.cut;
-        let el = self.element(Namespace::Html, local, self.doc);
+        let el = self.element(ns, local, self.doc);
         self.cut = cut;
         el.map(NodeId::at)
     }

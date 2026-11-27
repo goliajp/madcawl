@@ -73,7 +73,7 @@ impl<E: Engine> DomHost<E> {
         }
         let w = match &self.sides.get(r).data {
             SideData::Controller(s) => s.target().into_js(e, self),
-            SideData::Attr(_) | SideData::AttrMap(_) | SideData::TokenList(_) => match self.owning_element(r) {
+            SideData::Attr(_) | SideData::AttrMap(_) | SideData::TokenList(_) | SideData::Style(_) => match self.owning_element(r) {
                 Some(el) => self.wrap(e, el),
                 None => return,
             },

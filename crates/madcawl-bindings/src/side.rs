@@ -43,6 +43,8 @@ pub(crate) enum SideData {
     AttrMap(Held),
     /// An element's `classList`: the element, by a count.
     TokenList(Held),
+    /// An element's `style` (`style_attr.rs`).
+    Style(Box<crate::style_attr::StyleState>),
     /// The window's `Location`, `History` and `Crypto`: what they read is
     /// the host's (`nav.rs`).
     Location,
@@ -61,6 +63,7 @@ impl SideData {
             SideData::Event(ev) => ev.held(f),
             SideData::List(l) => l.held(f),
             SideData::Controller(s) | SideData::AttrMap(s) | SideData::TokenList(s) => f(s),
+            SideData::Style(s) => f(&s.owner),
             SideData::Attr(a) => a.owner.iter().for_each(f),
             _ => {}
         }
@@ -72,6 +75,7 @@ impl SideData {
             SideData::List(l) => l.release(out),
             // given back once: the object is freed or unlinked after this
             SideData::Controller(s) | SideData::AttrMap(s) | SideData::TokenList(s) => out.push(std::mem::replace(s, Held::Window)),
+            SideData::Style(s) => out.push(std::mem::replace(&mut s.owner, Held::Window)),
             SideData::Attr(a) => out.extend(a.owner.take()),
             _ => {}
         }
@@ -92,6 +96,7 @@ impl SideData {
             SideData::Attr(_) => &g::AttrClass::<E>::DEF,
             SideData::AttrMap(_) => &g::NamedNodeMapClass::<E>::DEF,
             SideData::TokenList(_) => &g::DOMTokenListClass::<E>::DEF,
+            SideData::Style(_) => &g::CSSStyleDeclarationClass::<E>::DEF,
             SideData::Location => &g::LocationClass::<E>::DEF,
             SideData::History => &g::HistoryClass::<E>::DEF,
             SideData::Crypto => &g::CryptoClass::<E>::DEF,

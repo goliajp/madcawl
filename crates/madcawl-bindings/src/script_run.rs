@@ -79,6 +79,19 @@ impl<E: Engine> DomHost<E> {
         self.settle(e);
     }
 
+    /// Fire `readystatechange` at the document, when a listener on its
+    /// path (the document, the window) is there to see it; with none, the
+    /// event would only wait for a collection. An `onreadystatechange`
+    /// handler, once the document has one, has to count here too.
+    fn ready_state_changed(&mut self, e: &mut E) {
+        let doc = self.dom.document();
+        let ty = atom!("readystatechange");
+        let heard = [Target::Node(doc), Target::Window].into_iter().any(|t| self.list_of(t).iter().any(|l| l.ty == ty));
+        if heard {
+            self.fire_simple(e, Target::Node(doc), ty, false);
+        }
+    }
+
     /// Take script `id` off the pending set and run it.
     fn run_pending(&mut self, e: &mut E, id: u64) {
         let p = self.scripts.pending.remove(&id).expect("a pending script");
@@ -142,6 +155,7 @@ impl<E: Engine> DomHost<E> {
             }
             ScriptTask::Load => {
                 self.scripts.phase = Phase::Complete;
+                self.ready_state_changed(e);
                 self.fire_simple(e, Target::Window, atom!("load"), false);
             }
         }
@@ -150,6 +164,10 @@ impl<E: Engine> DomHost<E> {
     /// Parsing is done: the `defer` scripts that are ready run, in
     /// order; once none is left, `DOMContentLoaded` is queued.
     pub(crate) fn run_defers(&mut self, e: &mut E) {
+        if self.scripts.phase == Phase::Parsing {
+            self.scripts.phase = Phase::Deferring;
+            self.ready_state_changed(e);
+        }
         self.scripts.phase = Phase::Deferring;
         while let Some(&id) = self.scripts.defer.front() {
             if !self.scripts.is_ready(id) {

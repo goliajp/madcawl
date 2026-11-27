@@ -1,4 +1,5 @@
 use madcawl_dom::{NodeId, NodeKind};
+use madcawl_html::Namespace;
 use madcawl_js::Engine;
 use madcawl_str::{Atom, DomString, atom};
 
@@ -9,6 +10,7 @@ pub(crate) use super::collections::{
     child_element_count, children, first_element_child, get_elements_by_class_name, get_elements_by_tag_name,
     last_element_child,
 };
+pub(crate) use super::document_state::{default_view, ready_state, set_title, title};
 pub(crate) use super::parent::{query_selector, query_selector_all};
 
 pub(crate) fn document_element<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<Option<NodeId>, Thrown> {
@@ -109,6 +111,42 @@ pub(crate) fn create_element<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: No
     }
 }
 
+/// The DOM Standard's "validate and extract" with its namespace errors,
+/// then an element in one of the namespaces the DOM keeps.
+pub(crate) fn create_element_ns<E: Engine>(
+    e: &mut E,
+    h: &mut DomHost<E>,
+    _this: NodeId,
+    namespace: Option<DomString>,
+    name: DomString,
+) -> Result<NodeId, Thrown> {
+    const XML: &str = "http://www.w3.org/XML/1998/namespace";
+    const XMLNS: &str = "http://www.w3.org/2000/xmlns/";
+    let ns = namespace.filter(|n| !n.is_empty());
+    let mut b = Vec::new();
+    name.write_wtf8(&mut b);
+    let (prefix, local) = match b.iter().position(|&c| c == b':') {
+        Some(i) => (Some(&b[..i]), &b[i + 1..]),
+        None => (None, &b[..]),
+    };
+    if prefix.is_some_and(bad_name) || bad_name(local) {
+        return Err(throw_dom(e, h, "InvalidCharacterError", "not a valid qualified name"));
+    }
+    let is = |s: &str| ns.as_ref().is_some_and(|n| n.eq_str(s));
+    let xmlns = prefix == Some(b"xmlns") || prefix.is_none() && local == b"xmlns";
+    if prefix.is_some() && ns.is_none() || prefix == Some(b"xml") && !is(XML) || xmlns != is(XMLNS) {
+        return Err(throw_dom(e, h, "NamespaceError", "the name and the namespace do not go together"));
+    }
+    let kept = [Namespace::Html, Namespace::Svg, Namespace::MathMl].into_iter().find(|k| is(k.url()));
+    let (Some(kept), None) = (kept, prefix) else {
+        return Err(throw_dom(e, h, "NotSupportedError", "only elements of the HTML, SVG and MathML namespaces with no prefix are kept"));
+    };
+    match h.dom.new_element_ns(kept, local) {
+        Some(n) => Ok(n),
+        None => Err(full(e, h)),
+    }
+}
+
 pub(crate) fn create_text_node<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: NodeId, data: DomString) -> Result<NodeId, Thrown> {
     match h.dom.new_text(data) {
         Some(n) => Ok(n),
@@ -152,7 +190,7 @@ pub(crate) fn get_element_by_id<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: 
         .find(|&n| dom.kind(n) == NodeKind::Element && dom.element_id(n) == Some(id)))
 }
 
-fn full<E: Engine>(e: &mut E, h: &mut DomHost<E>) -> Thrown {
+pub(crate) fn full<E: Engine>(e: &mut E, h: &mut DomHost<E>) -> Thrown {
     throw_dom(e, h, "QuotaExceededError", "the document holds all the nodes it may")
 }
 

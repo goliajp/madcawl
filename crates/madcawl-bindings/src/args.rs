@@ -67,3 +67,18 @@ pub(crate) fn boolean_or<E: Engine>(e: &mut E, v: E::Value, default: bool) -> bo
         e.to_boolean(v)
     }
 }
+
+/// A `[LegacyNullToEmptyString] DOMString` argument with a default:
+/// `default` when undefined, the empty string when null.
+pub(crate) fn dom_string_null_empty_or<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Value, default: &[u8]) -> Result<DomString, Thrown> {
+    if e.kind(v) == ValueKind::Undefined {
+        return Ok(DomString::from_wtf8(default));
+    }
+    crate::convert::dom_string_null_empty(e, h, v)
+}
+
+/// A non-nullable `DOMString` result the implementation has none of:
+/// the empty string.
+pub(crate) fn or_empty(s: Option<DomString>) -> DomString {
+    s.unwrap_or_else(DomString::empty)
+}

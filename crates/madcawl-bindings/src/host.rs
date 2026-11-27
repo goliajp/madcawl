@@ -75,6 +75,9 @@ pub struct DomHost<E: Engine> {
     pub(crate) time_origin_ms: f64,
     /// Where `document.cookie` goes (`cookie.rs`).
     pub(crate) cookies: Option<Box<dyn crate::cookie::CookieStore>>,
+    /// Whether CSSStyleDeclaration's property attributes are defined
+    /// (`css_props.rs`).
+    pub(crate) css_properties: bool,
 }
 
 impl<E: Engine> DomHost<E> {
@@ -118,6 +121,7 @@ impl<E: Engine> DomHost<E> {
             nav: crate::nav::Nav::new(),
             notes: Default::default(),
             cookies: None,
+            css_properties: false,
             time_origin_ms: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("a clock after 1970").as_secs_f64() * 1e3,
         };
         if E::PLACES_WRAPPERS {

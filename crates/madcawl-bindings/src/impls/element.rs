@@ -27,6 +27,19 @@ pub(crate) fn set_class_list<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: Nod
     super::dom_token_list::set_value(e, h, r, v)
 }
 
+/// The element's `style`: the same object while the element lives.
+pub(crate) fn style<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<crate::side::SideRef, Thrown> {
+    h.define_css_properties(e);
+    Ok(h.style_declaration(this))
+}
+
+/// `el.style = v`, forwarded to the declaration's `cssText`.
+pub(crate) fn set_style<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, v: DomString) -> Result<(), Thrown> {
+    h.define_css_properties(e);
+    let r = h.style_declaration(this);
+    super::css_style_declaration::set_css_text(e, h, r, v)
+}
+
 /// An HTML element's name in ASCII upper case; others' as they are.
 pub(crate) fn html_upper(dom: &Dom, el: NodeId) -> DomString {
     let mut b = Vec::new();
