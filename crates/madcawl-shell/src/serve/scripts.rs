@@ -18,7 +18,8 @@ use madcawl_html::{Decoder, Encoding};
 use madcawl_net::Url;
 use madcawl_net::wire::{Frame, kind, tag};
 
-use super::loader::{Loaded, Loader, Parsed, Pending, Stage};
+use super::doc::Parsed;
+use super::loader::{Loaded, Loader, Pending, Stage};
 use super::cookies::Cookies;
 use super::net::NetConn;
 
@@ -51,8 +52,9 @@ pub trait ScriptPage {
 }
 
 /// Starts a document of WTF-8 `html` at `url` with its scripts run,
-/// `document.cookie` in `cookies` when the page has a network.
-pub type Open = fn(html: &[u8], url: &str, cookies: Option<Box<dyn Cookies>>) -> Box<dyn ScriptPage>;
+/// `document.cookie` in `cookies` when the page has a network, each
+/// stopped once it has run for `limit` at a stretch.
+pub type Open = fn(html: &[u8], url: &str, cookies: Option<Box<dyn Cookies>>, limit: Option<Duration>) -> Box<dyn ScriptPage>;
 
 static OPEN: OnceLock<Open> = OnceLock::new();
 
@@ -86,6 +88,7 @@ pub(crate) fn open(
     transport: Option<Encoding>,
     commit: (String, bool, u16),
     cookies: Option<Box<dyn Cookies>>,
+    limit: Option<Duration>,
 ) -> Option<Scripting> {
     let open = OPEN.get()?;
     let essence = content_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
@@ -96,7 +99,7 @@ pub(crate) fn open(
     let (url, masked, status) = commit;
     // the parser runs the first scripts as it starts
     super::watch::stage("script");
-    let page = open(&html, &url, cookies);
+    let page = open(&html, &url, cookies, limit);
     super::watch::stage("network");
     Some(Scripting { page, encoding, fetches: HashMap::new(), asked: 0, url, masked, status })
 }

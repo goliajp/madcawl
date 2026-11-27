@@ -18,6 +18,7 @@ path = "src/main.rs"
 [dependencies]
 madcawl-bindings = { path = "../madcawl-bindings" }
 madcawl-dom = { path = "../madcawl-dom" }
+madcawl-js = { path = "../madcawl-js" }
 madcawl-js-jsc = { path = "../madcawl-js-jsc" }
 madcawl-shell = { path = "../madcawl-shell" }
 madcawl-str = { path = "../madcawl-str" }

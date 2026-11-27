@@ -56,6 +56,7 @@ pub fn args(c: &Config, session: u32, run: &str) -> Vec<OsString> {
     opt("--watch-ms", watch.as_millis().max(1).to_string().into());
     let cap = c.memory_cap.unwrap_or_else(|| Cap::for_machine().hard);
     opt("--memory-cap-mib", (cap >> 20).max(1).to_string().into());
+    opt("--script-ms", c.script_limit.map_or(0, |l| l.as_millis().max(1)).to_string().into());
     for (on, flag) in [(c.net, "--net"), (c.stats, "--stats")] {
         if on {
             a.push(flag.into());
@@ -112,6 +113,7 @@ mod tests {
         c.approve = vec!["http://a".into()];
         c.memory_cap = Some(256 << 20);
         c.rate = 1.5;
+        c.script_limit = Some(Duration::from_millis(250));
         let a = args(&c, 7, "run");
         let s: Vec<&str> = a.iter().map(|x| x.to_str().unwrap()).collect();
         assert_eq!(&s[..4], ["--content", "7", "run", "/s"]);
@@ -120,6 +122,11 @@ mod tests {
         assert_eq!(back.approve, c.approve);
         assert_eq!(back.memory_cap, Some(256 << 20));
         assert_eq!(back.watch, Some(DEFAULT_WATCH));
+        assert_eq!(back.script_limit, c.script_limit);
+        c.script_limit = None;
+        let a = args(&c, 7, "run");
+        let s: Vec<&str> = a.iter().map(|x| x.to_str().unwrap()).collect();
+        assert_eq!(parse_args(&s[3..]).unwrap().script_limit, None);
         assert_eq!((back.max_pages, back.idle, back.rate, back.burst), (c.max_pages, c.idle, 1.5, c.burst));
         assert_eq!((back.max_request, back.max_reply), (c.max_request, c.max_reply));
     }

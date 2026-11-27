@@ -19,6 +19,7 @@ mod conn;
 pub mod content;
 pub mod cookies;
 mod doc;
+mod download;
 mod limit;
 pub mod link;
 mod loader;
@@ -49,7 +50,7 @@ use std::time::Duration;
 
 use madcawl_agent::{Frame, kind, tag};
 
-pub use config::{Config, USAGE, parse_args};
+pub use config::{Config, HANG_FIRST, USAGE, parse_args};
 pub use log::AuditLog;
 pub use net::Net;
 pub use reqlog::{ERROR_CAP, LOG_CAP};

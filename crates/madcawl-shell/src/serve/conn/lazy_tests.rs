@@ -40,7 +40,7 @@ impl Fixture {
     }
 
     fn env(&self) -> Env<'_> {
-        Env { allow: std::slice::from_ref(&self.0), net: None, uploads: &[], approve: &[], owner: 1, run: "t" }
+        Env { allow: std::slice::from_ref(&self.0), net: None, uploads: &[], approve: &[], owner: 1, run: "t", script_limit: None }
     }
 }
 

@@ -9,13 +9,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use madcawl_css::style::{SheetSource, sheet_sources};
-use madcawl_dom::Dom;
-use madcawl_html::Encoding;
 use madcawl_net::Url;
 use madcawl_net::wire::{Frame, kind, tag};
 
 use super::cookies::{Cookies, NetCookies};
-use super::doc;
+use super::doc::{self, Parsed};
 use super::net::{Net, NetConn};
 use super::reqlog::{Entry, RequestLog};
 use super::scripts::initiator;
@@ -127,21 +125,12 @@ impl Pending {
     }
 }
 
-/// A document parsed and waiting for its stylesheets.
-pub(crate) struct Parsed {
-    pub dom: Dom,
-    pub encoding: Encoding,
-    pub url: String,
-    /// `url` has password values masked: it cannot be loaded again
-    pub masked: bool,
-    pub status: u16,
-}
-
 #[derive(Default)]
 pub(crate) enum Stage {
     #[default]
     Idle,
-    Document(u64),
+    /// The document request, and how long its script may run at a stretch
+    Document(u64, Option<Duration>),
     /// The document's scripts run (`scripts.rs`)
     Scripts(Box<super::scripts::Scripting>),
     Sheets(Box<Parsed>),
@@ -181,7 +170,7 @@ impl Loader {
     /// A new document request replaces whatever was loading; the
     /// document's script reaches the cookies of `cookies`' network and
     /// agent session.
-    pub fn begin(&mut self, id: u64, p: Pending, cookies: (Arc<Net>, u32), log: &mut RequestLog) {
+    pub fn begin(&mut self, id: u64, p: Pending, cookies: (Arc<Net>, u32), script_limit: Option<Duration>, log: &mut RequestLog) {
         self.cookies = Some(cookies);
         for (_, mut old) in self.inflight.drain(..).filter(|(_, p)| !p.done) {
             old.failed = Some("replaced by a new navigation".into());
@@ -189,7 +178,7 @@ impl Loader {
         }
         self.sheets.clear();
         self.inflight.push((id, p));
-        self.stage = Stage::Document(id);
+        self.stage = Stage::Document(id, script_limit);
     }
 
     /// Reads what arrives until the load moves on or `deadline` passes.
@@ -233,8 +222,8 @@ impl Loader {
     pub(crate) fn advance(&mut self, conn: &mut NetConn) -> std::io::Result<Option<Loaded>> {
         match &self.stage {
             Stage::Idle => Ok(None),
-            Stage::Document(id) if self.done(*id) => {
-                let id = *id;
+            Stage::Document(id, limit) if self.done(*id) => {
+                let (id, limit) = (*id, *limit);
                 let i = self.inflight.iter().position(|(x, _)| *x == id).expect("the document request");
                 let (_, p) = self.inflight.remove(i);
                 self.stage = Stage::Idle;
@@ -248,7 +237,7 @@ impl Loader {
                 let (masked, status) = (super::submit::is_masked(&url), p.status.unwrap_or(0));
                 let cookies = self.cookies.clone().map(|(net, session)| Box::new(NetCookies::new(net, session)) as Box<dyn Cookies>);
                 let commit = (url.clone(), masked, status);
-                if let Some(s) = super::scripts::open(&p.body, &p.content_type, charset_of(&p.content_type), commit, cookies) {
+                if let Some(s) = super::scripts::open(&p.body, &p.content_type, charset_of(&p.content_type), commit, cookies, limit) {
                     self.stage = Stage::Scripts(Box::new(s));
                     return self.advance(conn);
                 }

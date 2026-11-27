@@ -22,7 +22,7 @@ const DEFAULT_REQUESTS: usize = 50;
 
 pub(crate) fn env(shared: &Shared, owner: u32) -> Env<'_> {
     let c = &shared.config;
-    Env { allow: &c.allow, net: shared.net.as_ref(), uploads: &c.uploads, approve: &c.approve, owner, run: &shared.run }
+    Env { allow: &c.allow, net: shared.net.as_ref(), uploads: &c.uploads, approve: &c.approve, owner, run: &shared.run, script_limit: c.script_limit }
 }
 
 fn page_gen(p: &Page) -> u32 {

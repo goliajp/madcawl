@@ -45,7 +45,7 @@ impl Page {
     fn unsettled(&self) -> Vec<String> {
         let mut out = Vec::new();
         match &self.loader.stage {
-            Stage::Document(_) => out.push("a navigation is in flight".to_owned()),
+            Stage::Document(..) => out.push("a navigation is in flight".to_owned()),
             Stage::Scripts(_) => out.push("the new document's scripts run; its window has not loaded yet".to_owned()),
             Stage::Sheets(_) => {
                 out.push("the new document is parsed; its styles and layout wait for its stylesheets".to_owned());

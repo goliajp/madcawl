@@ -93,6 +93,14 @@ impl Host {
 /// A host process, ended when the test ends, a failed one too.
 pub struct Child(std::process::Child);
 
+impl Child {
+    /// Its content processes' ids, a line each.
+    pub fn content_pids(&self) -> String {
+        let out = std::process::Command::new("pgrep").args(["-P", &self.0.id().to_string(), "-f", "--", "--content"]).output().unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    }
+}
+
 impl Drop for Child {
     fn drop(&mut self) {
         let _ = self.0.kill();

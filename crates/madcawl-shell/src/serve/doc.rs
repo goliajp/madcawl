@@ -21,6 +21,16 @@ use madcawl_net::cookie::site_of;
 use super::net::partition_of;
 use crate::load;
 
+/// A document parsed and waiting for its stylesheets.
+pub(crate) struct Parsed {
+    pub dom: Dom,
+    pub encoding: Encoding,
+    pub url: String,
+    /// `url` has password values masked: it cannot be loaded again
+    pub masked: bool,
+    pub status: u16,
+}
+
 /// the stylesheets the pages of the host have parsed, shared only by the
 /// pages of one agent session whose documents are of one site, bounded by
 /// `SHEET_CACHE_CAP` apart from what pages hold

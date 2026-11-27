@@ -37,6 +37,9 @@ fn isolated(mut c: serve::Config) -> std::io::Result<serve::Config> {
     if c.isolate.is_none() {
         c.isolate = Some(std::env::current_exe()?);
     }
+    if c.hang_first() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, serve::HANG_FIRST));
+    }
     Ok(c)
 }
 

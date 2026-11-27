@@ -126,7 +126,7 @@ fn the_executable_runs_a_page_s_scripts_in_its_content_process() {
 fn a_script_that_never_returns_ends_its_content_process_and_not_the_host() {
     let origin = site(route);
     let dir = std::env::temp_dir().canonicalize().unwrap().join(format!("mcc-spin-{}", std::process::id()));
-    let (_child, mut spun) = executable(&dir, &["--hang-secs", "2"]);
+    let (_child, mut spun) = executable(&dir, &["--hang-secs", "2", "--script-ms", "0"]);
     let mut other = Host { dir: dir.join("other"), mcp: madcawl_mcp::server::Server::new(dir.join("s"), dir.clone()) };
     let t0 = Instant::now();
     let (text, error) = open_at(&mut spun, &format!("{origin}/spin"));

@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use madcawl_bindings::{CookieStore, DomHost};
 use madcawl_dom::Dom;
+use madcawl_js::Control;
 use madcawl_js_jsc::Jsc;
 use madcawl_shell::serve::cookies::Cookies;
 use madcawl_shell::serve::scripts::ScriptPage;
@@ -37,9 +38,11 @@ impl CookieStore for Jar {
 }
 
 /// A document of WTF-8 `html` with its scripts run on that engine,
-/// parsed as far as its scripts let it.
-pub fn open(html: &[u8], url: &str, cookies: Option<Box<dyn Cookies>>) -> Box<dyn ScriptPage> {
+/// parsed as far as its scripts let it, each stopped once it has run
+/// for `limit` at a stretch.
+pub fn open(html: &[u8], url: &str, cookies: Option<Box<dyn Cookies>>, limit: Option<Duration>) -> Box<dyn ScriptPage> {
     let mut e = Jsc::new();
+    e.set_time_limit(limit).expect("an isolate with the watchdog");
     let mut h = DomHost::new(&mut e, Dom::new());
     // a URL the network service fetched always parses
     let parsed = h.set_url(url);

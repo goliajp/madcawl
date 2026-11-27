@@ -56,6 +56,11 @@ pub struct Config {
     /// With `isolate`, a content process that has not answered a request
     /// for this long is killed and its pages opened again
     pub hang: Duration,
+    /// A page's script that runs this long (the engine's CPU time) is
+    /// stopped and reported as an uncaught exception; the page goes on.
+    /// `None`, no limit; otherwise below `hang`, which would end the
+    /// content process first
+    pub script_limit: Option<Duration>,
 }
 
 impl Config {
@@ -88,11 +93,12 @@ impl Config {
             memory_cap: None,
             isolate: None,
             hang: Duration::from_secs(180),
+            script_limit: Some(Duration::from_secs(10)),
         }
     }
 }
 
-pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds> | --idle-ms N] [--rate N] [--burst N] [--max-request <bytes>] [--max-reply <bytes>] [--listen-fd N] [--exit-idle <seconds>] [--net] [--downloads <dir>] [--upload-allow <dir>]... [--approve <origin>]... [--stats] [--watch-ms N] [--memory-cap-mib N] [--isolate [--hang-secs N]]
+pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--audit <file>] [--sessions N] [--pages N] [--total-pages N] [--idle <seconds> | --idle-ms N] [--rate N] [--burst N] [--max-request <bytes>] [--max-reply <bytes>] [--listen-fd N] [--exit-idle <seconds>] [--net] [--downloads <dir>] [--upload-allow <dir>]... [--approve <origin>]... [--stats] [--watch-ms N] [--memory-cap-mib N] [--script-ms N] [--isolate [--hang-secs N]]
          pages and their stylesheets open only from below the --allow directories;
          without --allow, only from below the current directory;
          --net lets pages come from http and https URLs, each session's in a cookie jar of its own that starts empty and ends with it;
@@ -107,11 +113,24 @@ pub const USAGE: &str = "madcawl-shell --serve <socket> [--allow <dir>]... [--au
          --max-request and --max-reply bound a request frame and a reply's page text (64 KiB, 4 MiB);
          --isolate runs each session's pages in a content process of its own and the network service in
          another, and starts them again when they end, the session's pages opened again where they were;
+         --script-ms stops a page's script once it has run for N ms at a stretch, as an uncaught exception (10000; 0, no limit; below --hang-secs);
          --hang-secs kills a content process that has not answered for N s (default 180) and recovers it;
          --stats answers the host's own counters (shared stylesheet cache, pages open) to any session;
          --listen-fd accepts on an inherited listening socket instead of binding <socket>;
          --exit-idle exits once no session has been open for that long (checked once a period
          while sessions are open, so up to twice that after the last one ends)";
+
+/// Why a configuration whose script limit is not below its hang limit
+/// does not start.
+pub const HANG_FIRST: &str = "--script-ms must be below --hang-secs (the default --script-ms is 10000), or 0 for no limit";
+
+impl Config {
+    /// Whether the hang watchdog would end a content process before the
+    /// script limit stops the script that holds it.
+    pub fn hang_first(&self) -> bool {
+        self.script_limit.is_some_and(|l| l >= self.hang)
+    }
+}
 
 /// The configuration the `--serve` command line gives.
 pub fn parse_args(args: &[&str]) -> Option<Config> {
@@ -143,6 +162,10 @@ pub fn parse_args(args: &[&str]) -> Option<Config> {
     if !allow.is_empty() {
         c.allow = allow;
     }
+    if c.isolate.is_some() && c.hang_first() {
+        eprintln!("madcawl-shell: {HANG_FIRST}");
+        return None;
+    }
     if c.net && c.downloads.is_none() {
         let mut d = c.socket.clone().into_os_string();
         d.push(".downloads");
@@ -172,6 +195,7 @@ fn set(c: &mut Config, allow: &mut Vec<PathBuf>, opt: &str, v: &str) -> Option<(
         "--upload-allow" => c.uploads.push(PathBuf::from(v).canonicalize().ok()?),
         "--memory-cap-mib" => c.memory_cap = Some(n()? as u64 * (1 << 20)),
         "--hang-secs" => c.hang = Duration::from_secs(n()? as u64),
+        "--script-ms" => c.script_limit = Some(Duration::from_millis(v.parse().ok()?)).filter(|d| !d.is_zero()),
         "--watch-ms" => c.watch = Some(Duration::from_millis(n()? as u64)),
         "--approve" => c.approve.push(v.trim_end_matches('/').to_ascii_lowercase()),
         _ => return None,
@@ -197,5 +221,17 @@ mod tests {
         assert!(parse_args(&["/s", "--stats"]).unwrap().stats);
         assert_eq!(c.downloads, Some(PathBuf::from("/d")));
         assert!(parse_args(&["/s", "--upload-allow", "/no/such/dir"]).is_none());
+    }
+
+    #[test]
+    fn the_script_limit_is_off_at_zero_and_below_the_hang_limit_when_isolated() {
+        assert_eq!(parse_args(&["/s"]).unwrap().script_limit, Some(Duration::from_secs(10)));
+        assert_eq!(parse_args(&["/s", "--script-ms", "0"]).unwrap().script_limit, None);
+        assert_eq!(parse_args(&["/s", "--script-ms", "250"]).unwrap().script_limit, Some(Duration::from_millis(250)));
+        assert!(parse_args(&["/s", "--script-ms", "x"]).is_none());
+        assert!(parse_args(&["/s", "--isolate", "--hang-secs", "10"]).is_none(), "the default 10 s limit is not below 10 s");
+        assert!(parse_args(&["/s", "--isolate", "--hang-secs", "10", "--script-ms", "9999"]).is_some());
+        assert!(parse_args(&["/s", "--isolate", "--hang-secs", "2", "--script-ms", "0"]).is_some());
+        assert!(parse_args(&["/s", "--hang-secs", "2"]).is_some(), "without --isolate nothing hangs");
     }
 }

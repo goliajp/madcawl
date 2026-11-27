@@ -35,6 +35,8 @@ pub(crate) struct Env<'a> {
     /// What tells this run of the host from others, for the names of
     /// what it leaves behind: session numbers start again every run
     pub run: &'a str,
+    /// How long a page's script may run at a stretch; `None`, no limit
+    pub script_limit: Option<Duration>,
 }
 
 /// A navigation to start.
@@ -171,7 +173,7 @@ impl Page {
         let id = net.fetch(&mut self.conn, env.owner, fetch_frame(&nav)).map_err(|e| format!("the network service: {e}"))?;
         let mut p = Pending::new("document", r.method, r.shown);
         p.mask = r.mask;
-        self.loader.begin(id, p, (net, env.owner), &mut self.log);
+        self.loader.begin(id, p, (net, env.owner), env.script_limit, &mut self.log);
         Ok(())
     }
 
@@ -191,7 +193,7 @@ impl Page {
         match loaded {
             Loaded::Pending => None,
             Loaded::Failed(why) => Some(format!("the load failed: {why}")),
-            Loaded::Downloaded { file, bytes } => Some(self.downloaded(&file, bytes, env)),
+            Loaded::Downloaded { file, bytes } => Some(super::download::place(&file, bytes, env)),
             Loaded::Committed(p, sheets) => {
                 let size = (self.width, self.height);
                 let mut links = HeldSheets(&sheets);
@@ -200,20 +202,6 @@ impl Page {
                 self.commit(doc, p.url, p.masked);
                 Some(format!("navigated to {} (status {status})", self.url))
             }
-        }
-    }
-
-    /// A download the network service saved, moved into the session's
-    /// own directory.
-    fn downloaded(&mut self, file: &str, bytes: u64, env: &Env) -> String {
-        let Some(dir) = env.net.and_then(|n| n.downloads.clone()) else {
-            return format!("downloaded {file} ({bytes} bytes)");
-        };
-        let mine = dir.join(format!("s{}-{}", env.owner, env.run));
-        let to = mine.join(file);
-        match std::fs::create_dir_all(&mine).and_then(|()| std::fs::rename(dir.join(file), &to)) {
-            Ok(()) => format!("downloaded {file} ({bytes} bytes) to {}", to.display()),
-            Err(e) => format!("downloaded {file} ({bytes} bytes); moving it failed: {e}"),
         }
     }
 
