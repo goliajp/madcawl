@@ -45,6 +45,7 @@ macro_rules! keywords {
 
 mod ancestors;
 mod before_after;
+mod block;
 mod buckets;
 mod calc;
 mod caseless;
@@ -65,6 +66,7 @@ mod hints;
 mod initial;
 mod intern;
 mod keys;
+mod known_names;
 mod kw;
 mod layers;
 mod length;
@@ -118,6 +120,7 @@ pub use computed::{
 pub use device::Device;
 pub use features::Tier;
 pub use generated::{AspectRatio, Content, ContentItem};
+pub use self::{block::Declarations, known_names::{canonical, property_names}};
 pub use kw::*;
 pub use length::{Form, Lp, to_fixed};
 pub use media::matches_media;

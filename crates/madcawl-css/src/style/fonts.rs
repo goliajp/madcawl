@@ -103,7 +103,7 @@ fn quote(name: &str, out: &mut String) {
     out.push('"');
 }
 
-const SIZE_KEYWORDS: &[&str] = &[
+pub(crate) const SIZE_KEYWORDS: &[&str] = &[
     "xx-small",
     "x-small",
     "small",

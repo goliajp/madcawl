@@ -124,7 +124,7 @@ fn supported(name: &str, src: &str, value: Span) -> bool {
 
 /// Properties WebKit supports that this engine does not compute yet,
 /// sorted.
-const KNOWN: &[&str] = &[
+pub(crate) const KNOWN: &[&str] = &[
     "-webkit-appearance",
     "-webkit-backdrop-filter",
     "-webkit-box-orient",

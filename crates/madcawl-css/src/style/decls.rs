@@ -36,35 +36,13 @@ pub struct Decl {
     pub substitutes: bool,
 }
 
-/// Longhands other engines name with a prefix or an older name.
-fn alias(name: &str) -> &str {
-    match name {
-        "-webkit-box-sizing" => "box-sizing",
-        "-webkit-flex-direction" => "flex-direction",
-        "-webkit-flex-wrap" => "flex-wrap",
-        "-webkit-flex-grow" => "flex-grow",
-        "-webkit-flex-shrink" => "flex-shrink",
-        "-webkit-flex-basis" => "flex-basis",
-        "-webkit-order" => "order",
-        "grid-row-gap" => "row-gap",
-        "grid-column-gap" => "column-gap",
-        "-webkit-justify-content" => "justify-content",
-        "-webkit-align-items" => "align-items",
-        "-webkit-align-self" => "align-self",
-        "-webkit-align-content" => "align-content",
-        "-webkit-writing-mode" => "writing-mode",
-        "-webkit-flex" => "flex",
-        "-webkit-flex-flow" => "flex-flow",
-        "-webkit-margin-start" => "margin-inline-start",
-        "-webkit-margin-end" => "margin-inline-end",
-        "-webkit-margin-before" => "margin-block-start",
-        "-webkit-margin-after" => "margin-block-end",
-        "-webkit-padding-start" => "padding-inline-start",
-        "-webkit-padding-end" => "padding-inline-end",
-        "-webkit-padding-before" => "padding-block-start",
-        "-webkit-padding-after" => "padding-block-end",
-        n => n,
-    }
+/// Longhands and shorthands other engines name with a prefix or an
+/// older name, by the name this engine knows them by.
+pub(crate) fn alias(name: &str) -> &str {
+    super::known_names::ALIASES
+        .iter()
+        .find(|a| a.0 == name)
+        .map_or(name, |a| a.1)
 }
 
 /// What a longhand name sets.
