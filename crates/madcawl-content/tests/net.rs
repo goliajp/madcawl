@@ -41,8 +41,26 @@ location.assign('/elsewhere?token=t1');
 throw new TypeError('boom at ' + location.hostname);
 </script>"#;
 
+/// A page with an iframe of its own origin whose document has an iframe
+/// of its own, both served late: the window's `load` waits for them,
+/// and its handler reads the innermost document.
+const FRAMED: &str = r#"<!doctype html><title>Framed</title><p id=out>log:</p>
+<script>function log(s) { document.getElementById('out').appendChild(document.createTextNode('|' + s)); }</script>
+<iframe src=/child></iframe>
+<script>var f = document.querySelector('iframe'); f.onload = () => log('frame:' + f.contentDocument.querySelector('p').textContent);
+addEventListener('load', () => log('load:' + f.contentDocument.querySelector('iframe').contentDocument.body.textContent));</script>"#;
+
 fn route(s: &mut TcpStream, path: &str, cookie: &str) -> bool {
     match path {
+        "/framed" => respond(s, "200 OK", "Content-Type: text/html\r\n", FRAMED.as_bytes()),
+        "/child" => {
+            std::thread::sleep(Duration::from_millis(300));
+            respond(s, "200 OK", "Content-Type: text/html\r\n", b"<p>from the child</p><iframe src=/grandchild></iframe>");
+        }
+        "/grandchild" => {
+            std::thread::sleep(Duration::from_millis(200));
+            respond(s, "200 OK", "Content-Type: text/html\r\n", b"<b>grandchild</b>");
+        }
         "/" => respond(s, "200 OK", "Content-Type: text/html; charset=utf-8\r\nSet-Cookie: sid=k1; Path=/\r\n", PAGE.as_bytes()),
         "/blocking.js" if cookie.contains("sid=k1") => respond(s, "200 OK", JS, b"log('blocking:' + document.currentScript.getAttribute('src'))"),
         "/blocking.js" => respond(s, "200 OK", JS, b"log('blocking-without-the-cookie')"),
@@ -72,6 +90,22 @@ fn a_page_s_scripts_come_over_its_connection_and_run_in_order_before_it_is_read(
     let log = h.call("requests", &format!(r#"{{"page":"{page}"}}"#));
     for js in ["/blocking.js", "/slow.js", "/defer.js", "/missing.js"] {
         assert!(log.lines().any(|l| l.contains("script") && l.contains(js)), "{js} in the request log: {log}");
+    }
+}
+
+/// An iframe of the page's origin, and one in its document, load their
+/// documents over the page's connection before the window's `load`.
+#[test]
+fn an_iframe_s_document_of_the_page_s_origin_comes_over_its_connection() {
+    let origin = site(route);
+    let mut h = Host::start();
+    let opened = h.call("open", &format!("{{\"path\":{}}}", json::s(&format!("{origin}/framed")).to_json()));
+    let page = opened.split_whitespace().nth(1).unwrap().to_owned();
+    let text = h.call("read", &format!(r#"{{"page":"{page}"}}"#));
+    let log = h.call("requests", &format!(r#"{{"page":"{page}"}}"#));
+    assert!(text.contains("log:|frame:from the child|load:grandchild"), "{text}\n{log}");
+    for doc in ["/child", "/grandchild"] {
+        assert!(log.lines().any(|l| l.contains("frame") && l.contains(doc)), "{doc} in the request log: {log}");
     }
 }
 

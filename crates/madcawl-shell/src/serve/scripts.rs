@@ -1,8 +1,9 @@
 //! A document's scripts, run while it loads by an engine this host does
 //! not name: the executable that picks one registers it
 //! ([`set_scripts`]), and without one documents load as they always did,
-//! with no script run. Script sources are fetched as the page's other
-//! subresources are, on the page's connection to the network service:
+//! with no script run. Script sources, and the documents of iframes of
+//! the page's origin, are fetched as the page's other subresources are,
+//! on the page's connection to the network service:
 //! in the agent session's cookie partition, in the page's request log
 //! and in what a wait counts as in flight, each read under the request
 //! loop's watchdog. Once the window's `load` has fired the DOM is the
@@ -26,6 +27,9 @@ use super::net::NetConn;
 /// The most script sources one document fetches; past it a script's
 /// fetch fails at once, as an `error` event.
 pub const MAX_SCRIPTS: usize = 256;
+/// The most iframe documents one document fetches; past it an iframe's
+/// fetch fails at once, which leaves it `about:blank`.
+pub const MAX_FRAME_DOCUMENTS: usize = 256;
 /// The most tasks one turn of a page's event loop runs.
 const TASKS_PER_TURN: usize = 10_000;
 
@@ -36,6 +40,12 @@ pub trait ScriptPage {
     fn requests(&mut self) -> Vec<(u64, String)>;
     /// The source of request `id`, or `None` when the fetch failed.
     fn fetched(&mut self, id: u64, text: Option<&str>);
+    /// The documents iframes' `src` asked for since the last call: an
+    /// id, and the URL, absolute and of the page's origin.
+    fn frame_requests(&mut self) -> Vec<(u64, String)>;
+    /// Iframe document request `id` ended: the URL it ended at and its
+    /// text, or `None` when the fetch failed.
+    fn frame_fetched(&mut self, id: u64, response: Option<(&str, &str)>);
     /// Run the tasks that are ready, at most `max`; whether the window's
     /// `load` has fired.
     fn run(&mut self, max: usize) -> bool;
@@ -101,7 +111,7 @@ pub(crate) fn open(
     super::watch::stage("script");
     let page = open(&html, &url, cookies, limit);
     super::watch::stage("network");
-    Some(Scripting { page, encoding, fetches: HashMap::new(), asked: 0, url, masked, status })
+    Some(Scripting { page, encoding, fetches: HashMap::new(), asked: 0, frames: HashMap::new(), frames_asked: 0, url, masked, status })
 }
 
 /// A document waiting for its scripts, and what its commit will say.
@@ -111,6 +121,9 @@ pub(crate) struct Scripting {
     /// Network request id to script request id.
     fetches: HashMap<u64, u64>,
     asked: usize,
+    /// Network request id to iframe document request id.
+    frames: HashMap<u64, u64>,
+    frames_asked: usize,
     url: String,
     masked: bool,
     status: u16,
@@ -168,10 +181,37 @@ impl Scripting {
             let text = p.ok_body().map(String::from_utf8_lossy);
             self.page.fetched(id, text.as_deref());
         }
+        self.frame_documents(conn, base, inflight)?;
         super::watch::stage("script");
         let loaded = self.page.run(TASKS_PER_TURN);
         super::watch::stage("network");
         Ok(loaded)
+    }
+
+    /// The iframe documents: asked for as the page's scripts are, and
+    /// read as UTF-8 whatever the charset, at the URL they ended at.
+    fn frame_documents(&mut self, conn: &mut NetConn, base: &str, inflight: &mut Vec<(u64, Pending)>) -> std::io::Result<()> {
+        for (id, src) in self.page.frame_requests() {
+            match self.url_of(base, &src) {
+                Some(u) if self.frames_asked < MAX_FRAME_DOCUMENTS => {
+                    let f = Frame::new(kind::FETCH).str(tag::URL, u.as_str()).str(tag::INITIATOR, &initiator(base));
+                    let net = conn.fetch(f)?;
+                    inflight.push((net, Pending::new("frame", "GET", u.as_str().to_owned())));
+                    self.frames.insert(net, id);
+                    self.frames_asked += 1;
+                }
+                _ => self.page.frame_fetched(id, None),
+            }
+        }
+        let done: Vec<u64> = self.frames.keys().copied().filter(|n| inflight.iter().any(|(i, p)| i == n && p.is_done())).collect();
+        for net in done {
+            let id = self.frames.remove(&net).expect("a frame fetch");
+            let i = inflight.iter().position(|(x, _)| *x == net).expect("its request");
+            let (_, p) = inflight.remove(i);
+            let text = p.ok_body().map(String::from_utf8_lossy);
+            self.page.frame_fetched(id, text.as_deref().map(|t| (p.final_url(), t)));
+        }
+        Ok(())
     }
 
     /// How long until the page has work: none, now, or its next timer.

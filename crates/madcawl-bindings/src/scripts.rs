@@ -34,6 +34,9 @@ pub(crate) enum ScriptTask {
     ContentLoaded,
     /// Fire `load` at the window.
     Load,
+    /// The next document of the navigable of this window is here
+    /// (`frames.rs`).
+    Frame(u64),
 }
 
 /// Where a script with a source waits.
@@ -191,7 +194,9 @@ impl<E: Engine> DomHost<E> {
         }
         let source = self.child_text(el);
         let src = self.script_attr(el, atom!("src"));
-        let runs = (src.is_some() || !source.is_empty()) && self.dom.is_connected(el) && self.is_classic(el);
+        // scripts of other documents, child navigables' too, do not run yet
+        let ours = self.dom.owner_document(el) == self.dom.document();
+        let runs = (src.is_some() || !source.is_empty()) && ours && self.dom.is_connected(el) && self.is_classic(el);
         if runs {
             if parser_made {
                 (f.parser, f.force_async) = (true, false);
@@ -272,7 +277,7 @@ impl<E: Engine> DomHost<E> {
     /// Nanoseconds until the window has something to run: 0 with a task
     /// or a source request waiting, else the next timer's, if any.
     pub fn next_work_in(&self) -> Option<u64> {
-        if !self.scripts.requests.is_empty() || !self.event_loop.tasks.is_empty() {
+        if !self.scripts.requests.is_empty() || !self.frames.requests.is_empty() || !self.event_loop.tasks.is_empty() {
             return Some(0);
         }
         self.event_loop.next_due_in()

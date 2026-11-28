@@ -30,7 +30,7 @@ pub(crate) trait IntoJs<E: Engine> {
     fn into_js(self, e: &mut E, h: &mut DomHost<E>) -> Owned<E::Value>;
 }
 
-fn plain<E: Engine>(v: E::Value) -> Owned<E::Value> {
+pub(crate) fn plain<E: Engine>(v: E::Value) -> Owned<E::Value> {
     // SAFETY: undefined, null, booleans and numbers carry no count
     unsafe { Owned::from_raw(v) }
 }
@@ -103,6 +103,7 @@ pub(crate) fn run<E: Engine, T: IntoJs<E>>(
     f: impl FnOnce(&mut E, &mut DomHost<E>) -> Result<T, Thrown>,
 ) -> Owned<E::Value> {
     let r = f(e, h);
+    h.check_frames(e);
     // before script runs again: its collector may run at any allocation
     h.regroup(e);
     match r {

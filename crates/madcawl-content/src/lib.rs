@@ -73,6 +73,16 @@ impl ScriptPage for JscPage {
         h.script_fetched(id, source.map(|s| DomString::from_wtf8(s.as_bytes())));
     }
 
+    fn frame_requests(&mut self) -> Vec<(u64, String)> {
+        let (_, h) = self.host();
+        h.take_frame_requests()
+    }
+
+    fn frame_fetched(&mut self, id: u64, response: Option<(&str, &str)>) {
+        let (_, h) = self.host();
+        h.frame_fetched(id, response.map(|(url, text)| (url, text.as_bytes())));
+    }
+
     fn run(&mut self, max: usize) -> bool {
         let (e, h) = self.host();
         let mut ran = 0;

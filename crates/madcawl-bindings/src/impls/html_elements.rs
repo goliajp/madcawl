@@ -64,7 +64,18 @@ pub(crate) mod iframe {
     use crate::host::DomHost;
 
     reflect!(src, set_src, "src", url);
+    reflect!(srcdoc, set_srcdoc, "srcdoc");
     reflect!(name, set_name, "name");
     reflect!(width, set_width, "width");
     reflect!(height, set_height, "height");
+
+    /// The child navigable's document, when its origin is the iframe's
+    /// document's (`frames.rs`).
+    pub(crate) fn content_document<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<Option<NodeId>, Thrown> {
+        Ok(h.content_document(this))
+    }
+
+    pub(crate) fn content_window<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<Option<crate::convert::Any<E>>, Thrown> {
+        Ok(h.content_window(e, this).map(crate::convert::Any))
+    }
 }

@@ -17,7 +17,7 @@ impl<E: Engine> DomHost<E> {
                 self.sides.inc(r);
                 Held::Side(r)
             }
-            Target::Window => Held::Window,
+            Target::Window(w) => Held::Window(w),
         }
     }
 
@@ -26,7 +26,7 @@ impl<E: Engine> DomHost<E> {
         match held {
             Held::Node(n) => self.dom.let_go(n),
             Held::Side(r) => self.sides.dec(r),
-            Held::Window => {}
+            Held::Window(_) => {}
         }
     }
 

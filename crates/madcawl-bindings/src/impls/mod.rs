@@ -24,6 +24,7 @@ mod html_elements;
 pub(crate) mod html_script_element;
 pub(crate) mod location;
 mod markup;
+pub(crate) use markup::mark_started;
 pub(crate) mod named_node_map;
 pub(crate) mod node;
 pub(crate) mod parent;

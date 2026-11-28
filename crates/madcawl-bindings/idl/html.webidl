@@ -73,13 +73,17 @@ interface HTMLImageElement : HTMLElement {
   [CEReactions] attribute DOMString src;
 };
 
-// contentWindow and contentDocument wait for nested browsing contexts
+// sandbox is a DOMTokenList in the standard
 [Exposed=Window]
 interface HTMLIFrameElement : HTMLElement {
   [CEReactions] attribute DOMString src;
+  [CEReactions] attribute DOMString srcdoc;
   [CEReactions] attribute DOMString name;
   [CEReactions] attribute DOMString width;
   [CEReactions] attribute DOMString height;
+  readonly attribute Document? contentDocument;
+  // WindowProxy? in the standard
+  readonly attribute any contentWindow;
 };
 
 [Exposed=Window]

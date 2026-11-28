@@ -81,13 +81,16 @@ pub struct DomHost<E: Engine> {
     /// The nonce of each HTML element script set one on, by node index,
     /// until its content attribute changes.
     pub(crate) nonces: HashMap<u32, DomString>,
+    /// The child navigables (`frames.rs`).
+    pub(crate) frames: crate::frames::Frames<E>,
 }
 
 impl<E: Engine> DomHost<E> {
     /// A host for `dom` in a new realm of `e`, which has no other live
     /// realm: the engine hands every wrapper notice and cycle candidate
     /// of the isolate to the host that settles, which must be the one
-    /// whose nodes they are. A host of a closed realm is no obstacle.
+    /// whose nodes they are. A host of a closed realm is no obstacle. The
+    /// realms of the host's child navigables are its own (`frames.rs`).
     ///
     /// The host is ended by [`DomHost::close`], never just dropped: the
     /// nodes, collections and events script still holds keep counts and
@@ -126,6 +129,7 @@ impl<E: Engine> DomHost<E> {
             cookies: None,
             css_properties: false,
             nonces: HashMap::new(),
+            frames: crate::frames::Frames::new(),
             time_origin_ms: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("a clock after 1970").as_secs_f64() * 1e3,
         };
         if E::PLACES_WRAPPERS {
@@ -154,9 +158,13 @@ impl<E: Engine> DomHost<E> {
             self.let_go_of_wrapper(e, n);
         }
         let obj = self.host_ref(n);
-        let v = e.new_wrapper(self.realm, self.class_of(obj), obj);
+        let realm = self.realm_for(n);
+        let v = e.new_wrapper(realm, self.class_of(obj), obj);
         let word = E::wrapper_word(v.get());
         self.dom.set_wrapper(n, word);
+        if realm != self.realm {
+            self.frames.wrapped.insert(n.index(), (word, self.window_for_doc(self.dom.owner_document(n))));
+        }
         self.place_new(e, n, word);
         v
     }
@@ -176,6 +184,9 @@ impl<E: Engine> DomHost<E> {
                 self.forget_script(n);
                 if !self.nonces.is_empty() {
                     self.nonces.remove(&n.index());
+                }
+                if !self.frames.wrapped.is_empty() {
+                    self.frames.wrapped.remove(&n.index());
                 }
                 for mut l in self.take_listeners(n) {
                     l.callback.clear(e);
@@ -215,6 +226,7 @@ impl<E: Engine> DomHost<E> {
     }
 
     pub(crate) fn shut(&mut self, e: &mut E) {
+        self.close_frames(e);
         self.close_loop(e);
         self.close_scripts(e);
         self.close_window(e);

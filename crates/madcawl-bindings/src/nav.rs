@@ -112,10 +112,14 @@ impl<E: Engine> DomHost<E> {
     }
 
     /// The base URL of document `doc`: its URL, as no `base` element is
-    /// read yet. Only the main document has one of its own; the others,
-    /// template contents' owners, have `about:blank`.
+    /// read yet, or its parent's for a navigable's `about:blank` and
+    /// `about:srcdoc`. The documents of no navigable (template contents'
+    /// owners) have `about:blank`.
     pub(crate) fn base_url(&self, doc: NodeId) -> &Url {
-        if doc == self.dom.document() { &self.nav.url } else { &self.nav.blank }
+        if doc == self.dom.document() {
+            return &self.nav.url;
+        }
+        self.frame_base_url(doc).unwrap_or(&self.nav.blank)
     }
 
     /// Make `url`, the URL the document was fetched from after its

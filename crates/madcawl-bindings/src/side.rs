@@ -74,8 +74,8 @@ impl SideData {
             SideData::Event(ev) => ev.release(out),
             SideData::List(l) => l.release(out),
             // given back once: the object is freed or unlinked after this
-            SideData::Controller(s) | SideData::AttrMap(s) | SideData::TokenList(s) => out.push(std::mem::replace(s, Held::Window)),
-            SideData::Style(s) => out.push(std::mem::replace(&mut s.owner, Held::Window)),
+            SideData::Controller(s) | SideData::AttrMap(s) | SideData::TokenList(s) => out.push(std::mem::replace(s, Held::Window(0))),
+            SideData::Style(s) => out.push(std::mem::replace(&mut s.owner, Held::Window(0))),
             SideData::Attr(a) => out.extend(a.owner.take()),
             _ => {}
         }

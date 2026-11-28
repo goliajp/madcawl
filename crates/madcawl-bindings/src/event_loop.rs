@@ -34,6 +34,8 @@ pub(crate) struct Timer<E: Engine> {
     /// The timer of `AbortSignal.timeout`: the handler is the signal's
     /// wrapper, and its id is above any `clearTimeout` reaches.
     pub abort: bool,
+    /// The window that set it (`frames.rs`), 0 for the top-level one.
+    pub window: u64,
 }
 
 /// A queued task: a callback script queued, or one of the host's own.
@@ -85,10 +87,10 @@ impl<E: Engine> EventLoop<E> {
     }
 
     /// A timer of `ms` milliseconds, already a Web IDL `long`.
-    pub(crate) fn add_timer(&mut self, handler: Root<E>, args: Vec<Root<E>>, ms: i32, repeat: bool) -> u32 {
+    pub(crate) fn add_timer(&mut self, handler: Root<E>, args: Vec<Root<E>>, ms: i32, repeat: bool, window: u64) -> u32 {
         let ms = ms.max(0) as u32;
         let id = self.take_id(false);
-        let t = Timer { id, handler, args, repeat: repeat.then_some(ms), nesting: self.nesting + 1, abort: false };
+        let t = Timer { id, handler, args, repeat: repeat.then_some(ms), nesting: self.nesting + 1, abort: false, window };
         self.schedule(t, u64::from(ms));
         id
     }
@@ -97,7 +99,7 @@ impl<E: Engine> EventLoop<E> {
     /// `ms` milliseconds.
     pub(crate) fn add_abort_timer(&mut self, signal: Root<E>, ms: u64) {
         let id = self.take_id(true);
-        let t = Timer { id, handler: signal, args: Vec::new(), repeat: None, nesting: 0, abort: true };
+        let t = Timer { id, handler: signal, args: Vec::new(), repeat: None, nesting: 0, abort: true, window: 0 };
         self.schedule(t, ms);
     }
 
@@ -128,6 +130,29 @@ impl<E: Engine> EventLoop<E> {
     pub(crate) fn remove_timer(&mut self, id: u32) -> Option<Timer<E>> {
         let key = self.by_id.remove(&id)?;
         self.timers.remove(&key)
+    }
+
+    /// [`EventLoop::remove_timer`] for a timer window `w` set; another
+    /// window's stays.
+    pub(crate) fn remove_timer_of(&mut self, id: u32, w: u64) -> Option<Timer<E>> {
+        let &key = self.by_id.get(&id)?;
+        if self.timers.get(&key).is_some_and(|t| t.window != w) {
+            return None;
+        }
+        self.remove_timer(id)
+    }
+
+    /// Take off every timer window `w` set: the window is gone. One
+    /// running now is not run again either (`run_timer`).
+    pub(crate) fn remove_window_timers(&mut self, w: u64) -> Vec<Timer<E>> {
+        let keys: Vec<(u64, u64)> = self.timers.iter().filter(|(_, t)| t.window == w).map(|(&k, _)| k).collect();
+        keys.into_iter()
+            .map(|k| {
+                let t = self.timers.remove(&k).expect("a listed timer");
+                self.by_id.remove(&t.id);
+                t
+            })
+            .collect()
     }
 
     /// The next timer that is due, or that virtual time can jump to.
@@ -202,9 +227,10 @@ impl<E: Engine> DomHost<E> {
             self.finish_task(e, unsafe { Owned::from_raw(E::undefined()) });
             return;
         }
+        let realm = self.realm_of(t.window).expect("the timers of a window go with it");
         let saved = std::mem::replace(&mut self.event_loop.nesting, t.nesting);
         let r = if e.is_callable(t.handler.get()) {
-            let window = e.global(self.realm);
+            let window = e.global(realm);
             let args: Vec<E::Value> = t.args.iter().map(Root::get).collect();
             let r = e.call(self, t.handler.get(), window.get(), &args);
             e.release(window);
@@ -212,12 +238,13 @@ impl<E: Engine> DomHost<E> {
         } else {
             let src = e.as_string(t.handler.get()).unwrap_or_else(DomString::empty);
             let url = DomString::from_wtf8(b"timer");
-            e.evaluate(self, self.realm, &src, &ScriptOrigin { url: &url, line: 1, column: 0 })
+            e.evaluate(self, realm, &src, &ScriptOrigin { url: &url, line: 1, column: 0 })
         };
         self.event_loop.nesting = saved;
         let stopped = self.finish_task(e, r);
-        // cleared by its own callback when its entry is gone; one stopped could take every turn
-        let live = self.event_loop.by_id.remove(&t.id).is_some();
+        // cleared by its own callback when its entry is gone; one stopped
+        // could take every turn; one whose window went with its run is done
+        let live = self.event_loop.by_id.remove(&t.id).is_some() && self.realm_of(t.window).is_some();
         match t.repeat {
             Some(ms) if live && !stopped && e.halt() == Halt::Running => {
                 // each run nests one deeper, so a fast interval is clamped
@@ -266,10 +293,10 @@ mod tests {
     #[test]
     fn timer_ids_wrap_past_live_ones() {
         let mut l = EventLoop::<Stub>::new();
-        let kept = l.add_timer(handler(), Vec::new(), 1000, true);
+        let kept = l.add_timer(handler(), Vec::new(), 1000, true, 0);
         assert_eq!(kept, 1);
         l.next_id = i32::MAX as u32 - 1;
-        let ids: Vec<u32> = (0..3).map(|_| l.add_timer(handler(), Vec::new(), 1000, false)).collect();
+        let ids: Vec<u32> = (0..3).map(|_| l.add_timer(handler(), Vec::new(), 1000, false, 0)).collect();
         assert_eq!(ids, [i32::MAX as u32 - 1, i32::MAX as u32, 2], "1 is still the interval's");
         assert_eq!(l.pending(), 4);
         assert!(l.remove_timer(1).is_some_and(|t| t.repeat == Some(1000)), "clearing 1 clears the interval");

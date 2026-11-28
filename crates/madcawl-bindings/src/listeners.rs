@@ -101,7 +101,8 @@ impl<E: Engine> DomHost<E> {
         match t {
             Target::Node(n) => self.listeners.get(&n.index()).map_or(&[], Vec::as_slice),
             Target::Side(r) => self.side_listeners.get(&r).map_or(&[], Vec::as_slice),
-            Target::Window => &self.window_listeners,
+            Target::Window(0) => &self.window_listeners,
+            Target::Window(w) => self.frames.listeners(w),
         }
     }
 
@@ -136,7 +137,7 @@ impl<E: Engine> DomHost<E> {
                 e.release(owner);
                 m
             }
-            Target::Window => Member::new(e.retain(cb)),
+            Target::Window(_) => Member::new(e.retain(cb)),
         }
     }
 
@@ -144,7 +145,8 @@ impl<E: Engine> DomHost<E> {
         match t {
             Target::Node(n) => self.listeners.entry(n.index()).or_default(),
             Target::Side(r) => self.side_listeners.entry(r).or_default(),
-            Target::Window => &mut self.window_listeners,
+            Target::Window(0) => &mut self.window_listeners,
+            Target::Window(w) => self.frames.listeners_mut(w),
         }
     }
 
@@ -157,10 +159,10 @@ impl<E: Engine> DomHost<E> {
         }
         let n = match t {
             Target::Node(n) => n,
-            Target::Window => return true,
+            Target::Window(_) => return true,
             Target::Side(_) => return false,
         };
-        let doc = self.dom.document();
+        let doc = self.dom.owner_document(n);
         let root = self.dom.children(doc).find(|&c| self.dom.kind(c) == madcawl_dom::NodeKind::Element);
         let body = root.and_then(|r| self.dom.children(r).find(|&c| self.dom.local_name(c) == Some(atom!("body"))));
         n == doc || Some(n) == root || Some(n) == body
@@ -179,7 +181,8 @@ impl<E: Engine> DomHost<E> {
         let list = match t {
             Target::Node(n) => self.listeners.get_mut(&n.index()),
             Target::Side(r) => self.side_listeners.get_mut(&r),
-            Target::Window => Some(&mut self.window_listeners),
+            Target::Window(0) => Some(&mut self.window_listeners),
+            Target::Window(w) => self.frames.live.get_mut(&w).map(|f| &mut f.listeners),
         };
         let Some(list) = list else { return };
         let Some(i) = list.iter().position(at) else { return };
@@ -188,7 +191,7 @@ impl<E: Engine> DomHost<E> {
             match t {
                 Target::Node(n) => drop(self.listeners.remove(&n.index())),
                 Target::Side(r) => drop(self.side_listeners.remove(&r)),
-                Target::Window => {}
+                Target::Window(_) => {}
             }
         }
         l.callback.clear(e);

@@ -32,6 +32,9 @@ impl<E: Engine> DomHost<E> {
         }
         let mut again = Vec::new();
         for r in moved.drain(..) {
+            if !self.frames.wrapped.is_empty() && self.dom.is_live(r) {
+                self.rehome_moved(e, r);
+            }
             if self.dom.is_live(r) && !self.dom.in_main_tree(r) {
                 self.fixed_nodes_left(e, r);
             }
@@ -125,6 +128,9 @@ impl<E: Engine> DomHost<E> {
     /// wrapper, so are its listeners' callbacks and its collections'
     /// wrappers.
     pub(crate) fn drop_members(&mut self, n: NodeId) {
+        if !self.frames.wrapped.is_empty() {
+            self.frames.wrapped.remove(&n.index());
+        }
         if E::PLACES_WRAPPERS {
             for mut l in self.take_listeners(n) {
                 l.callback.forget();

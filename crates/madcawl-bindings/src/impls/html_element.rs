@@ -146,23 +146,42 @@ pub(crate) fn set_onload<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId,
     set_handler(e, h, Target::Node(this), atom!("load"), v)
 }
 
-/// The body element's `onerror` and `onload`: the window's.
+/// The body element's `onerror` and `onload`: those of its document's
+/// window; with none, null and not set.
 pub(crate) mod body {
     use super::*;
 
-    pub(crate) fn onerror<E: Engine>(e: &mut E, h: &mut DomHost<E>, _: NodeId) -> Result<Any<E>, Thrown> {
-        handler(e, h, Target::Window, atom!("error"))
+    fn window<E: Engine>(h: &DomHost<E>, body: NodeId) -> Option<Target> {
+        h.window_of_doc(h.dom.owner_document(body)).map(Target::Window)
     }
 
-    pub(crate) fn set_onerror<E: Engine>(e: &mut E, h: &mut DomHost<E>, _: NodeId, v: Option<E::Value>) -> Result<(), Thrown> {
-        set_handler(e, h, Target::Window, atom!("error"), v)
+    fn get<E: Engine>(e: &mut E, h: &mut DomHost<E>, body: NodeId, ty: Atom) -> Result<Any<E>, Thrown> {
+        match window(h, body) {
+            Some(t) => handler(e, h, t, ty),
+            None => Ok(Any(crate::convert::plain::<E>(E::null()))),
+        }
     }
 
-    pub(crate) fn onload<E: Engine>(e: &mut E, h: &mut DomHost<E>, _: NodeId) -> Result<Any<E>, Thrown> {
-        handler(e, h, Target::Window, atom!("load"))
+    fn set<E: Engine>(e: &mut E, h: &mut DomHost<E>, body: NodeId, ty: Atom, v: Option<E::Value>) -> Result<(), Thrown> {
+        match window(h, body) {
+            Some(t) => set_handler(e, h, t, ty, v),
+            None => Ok(()),
+        }
     }
 
-    pub(crate) fn set_onload<E: Engine>(e: &mut E, h: &mut DomHost<E>, _: NodeId, v: Option<E::Value>) -> Result<(), Thrown> {
-        set_handler(e, h, Target::Window, atom!("load"), v)
+    pub(crate) fn onerror<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<Any<E>, Thrown> {
+        get(e, h, this, atom!("error"))
+    }
+
+    pub(crate) fn set_onerror<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, v: Option<E::Value>) -> Result<(), Thrown> {
+        set(e, h, this, atom!("error"), v)
+    }
+
+    pub(crate) fn onload<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<Any<E>, Thrown> {
+        get(e, h, this, atom!("load"))
+    }
+
+    pub(crate) fn set_onload<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, v: Option<E::Value>) -> Result<(), Thrown> {
+        set(e, h, this, atom!("load"), v)
     }
 }

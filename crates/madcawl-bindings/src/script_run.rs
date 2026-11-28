@@ -2,8 +2,8 @@
 //! and fetches them), their `load` and `error` events, and the end of
 //! loading: `defer` scripts once parsing is done, `DOMContentLoaded`,
 //! then `load` at the window once no script that may still run is
-//! awaited. Also where script elements that script inserts, fills or
-//! gives a `src` are prepared.
+//! awaited and no iframe is loading. Also where script elements that
+//! script inserts, fills or gives a `src` are prepared.
 
 use madcawl_dom::{HeldNode, NodeId};
 use madcawl_js::{Deadline, Engine, Halt, Host, Owned};
@@ -86,7 +86,7 @@ impl<E: Engine> DomHost<E> {
     fn ready_state_changed(&mut self, e: &mut E) {
         let doc = self.dom.document();
         let ty = atom!("readystatechange");
-        let heard = [Target::Node(doc), Target::Window].into_iter().any(|t| self.list_of(t).iter().any(|l| l.ty == ty));
+        let heard = [Target::Node(doc), Target::Window(0)].into_iter().any(|t| self.list_of(t).iter().any(|l| l.ty == ty));
         if heard {
             self.fire_simple(e, Target::Node(doc), ty, false);
         }
@@ -153,10 +153,11 @@ impl<E: Engine> DomHost<E> {
                 self.fire_simple(e, Target::Node(doc), atom!("DOMContentLoaded"), true);
                 self.check_load();
             }
+            ScriptTask::Frame(w) => self.frame_loaded(e, w),
             ScriptTask::Load => {
                 self.scripts.phase = Phase::Complete;
                 self.ready_state_changed(e);
-                self.fire_simple(e, Target::Window, atom!("load"), false);
+                self.fire_simple(e, Target::Window(0), atom!("load"), false);
             }
         }
     }
@@ -180,11 +181,11 @@ impl<E: Engine> DomHost<E> {
         self.event_loop.tasks.push_back(Task::Script(ScriptTask::ContentLoaded));
     }
 
-    /// Queue `load` once `DOMContentLoaded` fired and no script that runs
-    /// as soon as possible is awaited.
-    fn check_load(&mut self) {
+    /// Queue `load` once `DOMContentLoaded` fired, no script that runs
+    /// as soon as possible is awaited and no iframe is loading.
+    pub(crate) fn check_load(&mut self) {
         let s = &self.scripts;
-        if s.phase == Phase::ContentLoaded && s.soon == 0 && s.in_order.is_empty() {
+        if s.phase == Phase::ContentLoaded && s.soon == 0 && s.in_order.is_empty() && !self.frame_delays(0) {
             self.scripts.phase = Phase::LoadQueued;
             self.event_loop.tasks.push_back(Task::Script(ScriptTask::Load));
         }
@@ -233,21 +234,34 @@ impl<E: Engine> DomHost<E> {
         }
     }
 
-    /// A script element was inserted (`nodes`, each with what is below
-    /// it) into `parent`, or `parent` got new children: prepare the
-    /// connected script elements that were not made by the parser, in
-    /// tree order.
-    pub(crate) fn scripts_inserted(&mut self, e: &mut E, parent: NodeId, nodes: &[NodeId]) {
+    /// `nodes` (each with what is below it) were inserted into `parent`,
+    /// or `parent` got new children: the connected iframes get their
+    /// navigables (`frames.rs`), then the connected script elements not
+    /// made by the parser are prepared, each in tree order.
+    pub(crate) fn nodes_inserted(&mut self, e: &mut E, parent: NodeId, nodes: &[NodeId]) {
         if !self.dom.is_connected(parent) {
             return;
         }
-        let mut found = Vec::new();
+        let (mut found, mut iframes) = (Vec::new(), Vec::new());
         if is_script(&self.dom, parent) {
             found.push(parent);
         }
         for &n in nodes {
-            let below = std::iter::once(n).chain(self.dom.descendants(n));
-            found.extend(below.filter(|&d| is_script(&self.dom, d)));
+            for d in std::iter::once(n).chain(self.dom.descendants(n)) {
+                if is_script(&self.dom, d) {
+                    found.push(d);
+                } else if self.dom.in_html_namespace(d) && self.dom.local_name(d) == Some(atom!("iframe")) {
+                    iframes.push(d);
+                }
+            }
+        }
+        if !iframes.is_empty() {
+            let held: Vec<HeldNode> = found.iter().map(|&n| self.dom.hold(n)).collect();
+            self.frames_connected(e, iframes);
+            // held while load listeners run, which may take some out
+            for h in held {
+                self.dom.let_go(h);
+            }
         }
         self.prepare_found(e, found);
     }

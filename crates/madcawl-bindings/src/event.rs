@@ -23,7 +23,8 @@ pub const BUBBLING_PHASE: u16 = 3;
 pub(crate) enum Held {
     Node(HeldNode),
     Side(SideRef),
-    Window,
+    /// A window, by its id: 0 for the top-level one (`frames.rs`).
+    Window(u64),
 }
 
 /// An event target as an attribute returns it.
@@ -32,7 +33,7 @@ pub(crate) enum Target {
     Node(NodeId),
     /// An `EventTarget` made by its constructor.
     Side(SideRef),
-    Window,
+    Window(u64),
 }
 
 impl Held {
@@ -40,7 +41,7 @@ impl Held {
         match self {
             Held::Node(n) => Target::Node(n.id()),
             Held::Side(r) => Target::Side(*r),
-            Held::Window => Target::Window,
+            Held::Window(w) => Target::Window(*w),
         }
     }
 }
@@ -113,7 +114,7 @@ impl<E: Engine> IntoJs<E> for Target {
         match self {
             Target::Node(n) => h.wrap(e, n),
             Target::Side(r) => h.wrap_side(e, r),
-            Target::Window => e.global(h.realm),
+            Target::Window(w) => h.window_value(e, w),
         }
     }
 }
@@ -153,8 +154,10 @@ impl<E: Engine> DomHost<E> {
         let path = match target {
             Target::Node(n) => {
                 let mut path: Vec<Target> = std::iter::successors(Some(n), |&n| self.dom.parent(n)).map(Target::Node).collect();
-                if self.dom.in_main_tree(n) {
-                    path.push(Target::Window);
+                if self.dom.is_connected(n)
+                    && let Some(w) = self.window_of_doc(self.dom.owner_document(n))
+                {
+                    path.push(Target::Window(w));
                 }
                 path
             }

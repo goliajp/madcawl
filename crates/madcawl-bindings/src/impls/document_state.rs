@@ -11,10 +11,11 @@ use crate::host::DomHost;
 use crate::scripts::Phase;
 
 /// `loading` while the parser runs, `interactive` once it is done, and
-/// `complete` from the window's `load` on; a document no parser built
-/// is complete.
-pub(crate) fn ready_state<E: Engine>(_: &mut E, h: &mut DomHost<E>, _this: NodeId) -> Result<DomString, Thrown> {
-    let s = match h.scripts.phase {
+/// `complete` from the window's `load` on; a document no parser built,
+/// and a child navigable's, which loads at once, is complete.
+pub(crate) fn ready_state<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<DomString, Thrown> {
+    let phase = if this == h.dom.document() { h.scripts.phase } else { Phase::Complete };
+    let s = match phase {
         Phase::Parsing => "loading",
         Phase::Idle | Phase::Complete => "complete",
         _ => "interactive",
@@ -22,9 +23,10 @@ pub(crate) fn ready_state<E: Engine>(_: &mut E, h: &mut DomHost<E>, _this: NodeI
     Ok(DomString::from_wtf8(s.as_bytes()))
 }
 
-/// The window, for the window's own document; null for any other.
+/// The document's window, as `contentWindow` gives a child navigable's;
+/// null for a document without one.
 pub(crate) fn default_view<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<Option<Any<E>>, Thrown> {
-    Ok((this == h.dom.document()).then(|| Any(e.global(h.realm))))
+    Ok(h.window_of_doc(this).map(|w| Any(h.window_value(e, w))))
 }
 
 fn root(h: &DomHost<impl Engine>, doc: NodeId) -> Option<NodeId> {

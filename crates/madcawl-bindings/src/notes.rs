@@ -23,6 +23,8 @@ const JOB_STOPPED: &str = "script stopped: a promise job ran past the time limit
 pub enum Note {
     Exception(ScriptError),
     Navigation(Navigation),
+    /// An iframe got no navigable: as many as a host keeps were alive.
+    FrameLimit,
 }
 
 impl fmt::Display for Note {
@@ -30,6 +32,7 @@ impl fmt::Display for Note {
         match self {
             Note::Exception(x) => write!(f, "uncaught exception: {x}"),
             Note::Navigation(n) => write!(f, "navigation not followed: {n}"),
+            Note::FrameLimit => write!(f, "iframe left without a document: {} are alive", crate::frames::MAX_FRAMES),
         }
     }
 }

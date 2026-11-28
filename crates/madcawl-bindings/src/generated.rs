@@ -2122,9 +2122,12 @@ impl<E: Engine> HTMLIFrameElementClass<E> {
         parent: Some(&HTMLElementClass::<E>::DEF),
         attributes: &[
             Attribute { name: "src", get: unsafe { Bound::host_fn(html_iframe_element_get_src_abi::<E>) }, set: Some(unsafe { Bound::host_fn(html_iframe_element_set_src_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+            Attribute { name: "srcdoc", get: unsafe { Bound::host_fn(html_iframe_element_get_srcdoc_abi::<E>) }, set: Some(unsafe { Bound::host_fn(html_iframe_element_set_srcdoc_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
             Attribute { name: "name", get: unsafe { Bound::host_fn(html_iframe_element_get_name_abi::<E>) }, set: Some(unsafe { Bound::host_fn(html_iframe_element_set_name_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
             Attribute { name: "width", get: unsafe { Bound::host_fn(html_iframe_element_get_width_abi::<E>) }, set: Some(unsafe { Bound::host_fn(html_iframe_element_set_width_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
             Attribute { name: "height", get: unsafe { Bound::host_fn(html_iframe_element_get_height_abi::<E>) }, set: Some(unsafe { Bound::host_fn(html_iframe_element_set_height_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+            Attribute { name: "contentDocument", get: unsafe { Bound::host_fn(html_iframe_element_get_content_document_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::NullableObject, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "contentWindow", get: unsafe { Bound::host_fn(html_iframe_element_get_content_window_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Any, get: Effects::NONE, set: Effects::NONE } },
         ],
         operations: &[],
         statics: &[],
@@ -2157,6 +2160,27 @@ fn html_iframe_element_set_src<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E
 
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn html_iframe_element_set_src_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, html_iframe_element_set_src::<E>) } }
+
+fn html_iframe_element_get_srcdoc<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLIFrameElementClass::<E>::DEF)?;
+        impls::html_iframe_element::srcdoc(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_iframe_element_get_srcdoc_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, html_iframe_element_get_srcdoc::<E>) } }
+
+fn html_iframe_element_set_srcdoc<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLIFrameElementClass::<E>::DEF)?;
+        let value = cv::dom_string(e, h, value)?;
+        impls::html_iframe_element::set_srcdoc(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_iframe_element_set_srcdoc_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, html_iframe_element_set_srcdoc::<E>) } }
 
 fn html_iframe_element_get_name<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
     cv::run(e, h, |e, h| {
@@ -2220,6 +2244,26 @@ fn html_iframe_element_set_height<E: Engine>(e: &mut E, h: &mut DomHost<E>, this
 
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn html_iframe_element_set_height_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, html_iframe_element_set_height::<E>) } }
+
+fn html_iframe_element_get_content_document<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLIFrameElementClass::<E>::DEF)?;
+        impls::html_iframe_element::content_document(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_iframe_element_get_content_document_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, html_iframe_element_get_content_document::<E>) } }
+
+fn html_iframe_element_get_content_window<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_node(e, h, this, &HTMLIFrameElementClass::<E>::DEF)?;
+        impls::html_iframe_element::content_window(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn html_iframe_element_get_content_window_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, html_iframe_element_get_content_window::<E>) } }
 
 pub struct HTMLObjectElementClass<E>(PhantomData<E>);
 

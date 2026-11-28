@@ -48,7 +48,7 @@ fn parse<E: Engine>(e: &mut E, h: &mut DomHost<E>, context: NodeId, markup: &Dom
 
 /// Mark the script elements below `root` already started, those in
 /// template contents too.
-fn mark_started<E: Engine>(h: &mut DomHost<E>, root: NodeId) {
+pub(crate) fn mark_started<E: Engine>(h: &mut DomHost<E>, root: NodeId) {
     let mut roots = vec![root];
     while let Some(r) = roots.pop() {
         for n in h.dom.descendants(r) {
@@ -81,9 +81,10 @@ pub(crate) fn set_inner_html<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: Nod
     while let Some(c) = h.dom.first_child(target) {
         h.dom.remove_node(c);
     }
-    insert_all(h, f, target, None);
-    // a script element given children may run
-    h.scripts_inserted(e, target, &[]);
+    let nodes = insert_all(h, f, target, None);
+    // a script element given children may run, and the iframes get
+    // navigables
+    h.nodes_inserted(e, target, &nodes);
     Ok(())
 }
 
@@ -111,6 +112,6 @@ pub(crate) fn set_outer_html<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: Nod
     let before = h.dom.next_sibling(this);
     h.dom.remove_node(this);
     let nodes = insert_all(h, f, parent, before);
-    h.scripts_inserted(e, parent, &nodes);
+    h.nodes_inserted(e, parent, &nodes);
     Ok(())
 }

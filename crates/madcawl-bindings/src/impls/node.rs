@@ -107,7 +107,7 @@ pub(crate) fn set_text_content<E: Engine>(
             }
             let Some(t) = dom.new_text(value) else { return Err(full(e, h)) };
             dom.insert_node(this, t, None);
-            h.scripts_inserted(e, this, &[]);
+            h.nodes_inserted(e, this, &[]);
             Ok(())
         }
     }
@@ -134,10 +134,10 @@ pub(crate) fn insert_before<E: Engine>(
         for &c in &children {
             dom.insert_node(this, c, before);
         }
-        h.scripts_inserted(e, this, &children);
+        h.nodes_inserted(e, this, &children);
     } else {
         dom.insert_node(this, node, before);
-        h.scripts_inserted(e, this, &[node]);
+        h.nodes_inserted(e, this, &[node]);
     }
     Ok(node)
 }
@@ -169,7 +169,7 @@ pub(crate) fn replace_child<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: Node
     };
     dom.remove_node(child);
     dom.insert_node(this, node, before);
-    h.scripts_inserted(e, this, &[node]);
+    h.nodes_inserted(e, this, &[node]);
     Ok(child)
 }
 

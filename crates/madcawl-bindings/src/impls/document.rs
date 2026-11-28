@@ -98,14 +98,14 @@ fn bad_name(b: &[u8]) -> bool {
     b.is_empty() || b.iter().any(|&c| matches!(c, b'\t' | b'\n' | 0x0C | b'\r' | b' ' | b'/' | b'>' | 0))
 }
 
-pub(crate) fn create_element<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: NodeId, local: DomString) -> Result<NodeId, Thrown> {
+pub(crate) fn create_element<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, local: DomString) -> Result<NodeId, Thrown> {
     let mut b = Vec::new();
     local.write_wtf8(&mut b);
     if bad_name(&b) {
         return Err(throw_dom(e, h, "InvalidCharacterError", "not a valid element name"));
     }
     b.make_ascii_lowercase();
-    match h.dom.new_element(&b) {
+    match h.dom.in_document(this, |d| d.new_element(&b)) {
         Some(n) => Ok(n),
         None => Err(full(e, h)),
     }
@@ -116,7 +116,7 @@ pub(crate) fn create_element<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: No
 pub(crate) fn create_element_ns<E: Engine>(
     e: &mut E,
     h: &mut DomHost<E>,
-    _this: NodeId,
+    this: NodeId,
     namespace: Option<DomString>,
     name: DomString,
 ) -> Result<NodeId, Thrown> {
@@ -141,25 +141,28 @@ pub(crate) fn create_element_ns<E: Engine>(
     let (Some(kept), None) = (kept, prefix) else {
         return Err(throw_dom(e, h, "NotSupportedError", "only elements of the HTML, SVG and MathML namespaces with no prefix are kept"));
     };
-    match h.dom.new_element_ns(kept, local) {
+    match h.dom.in_document(this, |d| d.new_element_ns(kept, local)) {
         Some(n) => Ok(n),
         None => Err(full(e, h)),
     }
 }
 
-pub(crate) fn create_text_node<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: NodeId, data: DomString) -> Result<NodeId, Thrown> {
-    match h.dom.new_text(data) {
+pub(crate) fn create_text_node<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, data: DomString) -> Result<NodeId, Thrown> {
+    match h.dom.in_document(this, |d| d.new_text(data)) {
         Some(n) => Ok(n),
         None => Err(full(e, h)),
     }
 }
 
-pub(crate) fn create_document_fragment<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: NodeId) -> Result<NodeId, Thrown> {
-    super::document_fragment::constructor(e, h)
+pub(crate) fn create_document_fragment<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId) -> Result<NodeId, Thrown> {
+    match h.dom.in_document(this, |d| d.new_fragment()) {
+        Some(n) => Ok(n),
+        None => Err(full(e, h)),
+    }
 }
 
-pub(crate) fn create_comment<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: NodeId, data: DomString) -> Result<NodeId, Thrown> {
-    match h.dom.new_comment(data) {
+pub(crate) fn create_comment<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: NodeId, data: DomString) -> Result<NodeId, Thrown> {
+    match h.dom.in_document(this, |d| d.new_comment(data)) {
         Some(n) => Ok(n),
         None => Err(full(e, h)),
     }

@@ -11,6 +11,7 @@ use crate::host::DomHost;
 type Value<E> = <E as Engine>::Value;
 
 pub(crate) type Op<E> = fn(&mut E, &mut DomHost<E>, Value<E>, &[Value<E>]) -> Owned<Value<E>>;
+pub(crate) type OpData<E> = fn(&mut E, &mut DomHost<E>, u64, Value<E>, &[Value<E>]) -> Owned<Value<E>>;
 pub(crate) type Get<E> = fn(&mut E, &mut DomHost<E>, Value<E>) -> Owned<Value<E>>;
 pub(crate) type Set<E> = fn(&mut E, &mut DomHost<E>, Value<E>, Value<E>) -> Owned<Value<E>>;
 
@@ -22,6 +23,18 @@ pub(crate) unsafe fn op<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, a
     // SAFETY: the caller's
     let ((e, h), args) = unsafe { (Ctx::parts::<E, DomHost<E>>(ctx), E::values(argv, argc)) };
     E::to_bits(f(e, h, E::from_bits(this), args).into_raw())
+}
+
+/// [`op`] for a function made at run time, whose glue gets its data
+/// word.
+///
+/// # Safety
+/// As for [`op`].
+#[inline(always)]
+pub(crate) unsafe fn op_data<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize, f: OpData<E>) -> u64 {
+    // SAFETY: the caller's
+    let (data, (e, h), args) = unsafe { ((*ctx).data, Ctx::parts::<E, DomHost<E>>(ctx), E::values(argv, argc)) };
+    E::to_bits(f(e, h, data, E::from_bits(this), args).into_raw())
 }
 
 /// # Safety

@@ -98,14 +98,21 @@ impl<E: Engine> DomHost<E> {
         // nothing is freed while the builder has the DOM, so the counts
         // can go first: a node at 0 waits in the list free_dead reads
         p.held.drain(..).for_each(|h| self.dom.let_go(h));
+        self.dom.record_parsed_frames(true);
         std::mem::swap(&mut self.dom, p.b.sink_mut());
         let step = if inserted { p.tok.run_inserted(&mut p.b) } else { p.tok.run(&mut p.b) };
         std::mem::swap(&mut self.dom, p.b.sink_mut());
         let Parser { b, held, .. } = &mut **p;
         b.for_each_node(|n| held.push(self.dom.hold(n)));
-        if step == Step::Paused
-            && let Some(s) = p.b.take_script()
-        {
+        let script = if step == Step::Paused { p.b.take_script() } else { None };
+        // the iframes it finished are inserted before the script it stops for
+        let mut iframes = Vec::new();
+        self.dom.take_parsed_frames(&mut iframes);
+        self.dom.record_parsed_frames(false);
+        if !iframes.is_empty() {
+            self.frames_connected(e, iframes);
+        }
+        if let Some(s) = script {
             self.parser_script(e, s);
         }
         step

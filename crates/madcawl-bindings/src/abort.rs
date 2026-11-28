@@ -138,7 +138,7 @@ mod tests {
         let mut h = DomHost::new(&mut e, Dom::new());
         let s = h.new_signal();
         for id in 0..1000 {
-            h.remove_on_abort(s, Target::Window, 1_000_000 + id);
+            h.remove_on_abort(s, Target::Window(0), 1_000_000 + id);
         }
         assert!(h.signal(s).algorithms.len() <= 8, "{} entries", h.signal(s).algorithms.len());
         h.close(&mut e);

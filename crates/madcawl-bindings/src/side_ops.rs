@@ -31,7 +31,7 @@ fn traverse<E: Engine>(h: &DomHost<E>, obj: HostRef, t: &mut E::Tracer) {
     s.data.held(&mut |x| match x {
         Held::Node(n) => t.host(h.host_ref(n.id())),
         Held::Side(r) => t.host(r.host_ref()),
-        Held::Window => {}
+        Held::Window(_) => {}
     });
     for m in h.details.get(&r).into_iter().chain(h.target_edges.get(&r)).chain(h.fixed_edges(r)) {
         m.trace(t);

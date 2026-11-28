@@ -109,6 +109,11 @@ impl Pending {
         }
     }
 
+    /// The URL the request ended at, after redirects.
+    pub fn final_url(&self) -> &str {
+        self.final_url.as_deref().unwrap_or(&self.url)
+    }
+
     pub fn is_done(&self) -> bool {
         self.done
     }
