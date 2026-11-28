@@ -50,6 +50,8 @@ pub(crate) struct EventState {
     pub ty: Atom,
     /// A CustomEvent: its detail is in the host's `details`.
     pub custom: bool,
+    /// What a ProgressEvent, MessageEvent or ErrorEvent carries.
+    pub extra: crate::event_kinds::Extra,
     pub bubbles: bool,
     pub cancelable: bool,
     pub composed: bool,
@@ -74,6 +76,7 @@ impl EventState {
         EventState {
             ty,
             custom: false,
+            extra: crate::event_kinds::Extra::None,
             bubbles: false,
             cancelable: false,
             composed: false,
@@ -290,10 +293,5 @@ impl<E: Engine> DomHost<E> {
         {
             self.report_exception(e, x);
         }
-    }
-
-    /// The milliseconds since the window's time origin, as `timeStamp`.
-    pub(crate) fn now_ms(&self) -> f64 {
-        self.event_loop.now_ns() as f64 / 1e6
     }
 }

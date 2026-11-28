@@ -23,6 +23,7 @@ use super::doc::Parsed;
 use super::loader::{Loaded, Loader, Pending, Stage};
 use super::cookies::Cookies;
 use super::net::NetConn;
+use super::script_fetch::{ScriptFetch, ScriptFetches, ScriptResponse};
 
 /// The most script sources one document fetches; past it a script's
 /// fetch fails at once, as an `error` event.
@@ -46,6 +47,10 @@ pub trait ScriptPage {
     /// Iframe document request `id` ended: the URL it ended at and its
     /// text, or `None` when the fetch failed.
     fn frame_fetched(&mut self, id: u64, response: Option<(&str, &str)>);
+    /// The requests script made since the last call (`script_fetch.rs`).
+    fn fetches(&mut self) -> Vec<ScriptFetch>;
+    /// Request `id` ended with `response`, or `None` for a network error.
+    fn fetch_done(&mut self, id: u64, response: Option<ScriptResponse>);
     /// Run the tasks that are ready, at most `max`; whether the window's
     /// `load` has fired.
     fn run(&mut self, max: usize) -> bool;
@@ -111,12 +116,12 @@ pub(crate) fn open(
     super::watch::stage("script");
     let page = open(&html, &url, cookies, limit);
     super::watch::stage("network");
-    Some(Scripting { page, encoding, fetches: HashMap::new(), asked: 0, frames: HashMap::new(), frames_asked: 0, url, masked, status })
+    Some(Scripting { page, encoding, fetches: HashMap::new(), asked: 0, frames: HashMap::new(), frames_asked: 0, requests: ScriptFetches::default(), url, masked, status })
 }
 
 /// A document waiting for its scripts, and what its commit will say.
 pub(crate) struct Scripting {
-    page: Box<dyn ScriptPage>,
+    pub(crate) page: Box<dyn ScriptPage>,
     encoding: Encoding,
     /// Network request id to script request id.
     fetches: HashMap<u64, u64>,
@@ -124,6 +129,8 @@ pub(crate) struct Scripting {
     /// Network request id to iframe document request id.
     frames: HashMap<u64, u64>,
     frames_asked: usize,
+    /// The requests script made (`script_fetch.rs`).
+    pub(crate) requests: ScriptFetches,
     url: String,
     masked: bool,
     status: u16,
@@ -141,6 +148,7 @@ impl Loader {
             self.stage = Stage::Scripts(s);
             return Ok(None);
         }
+        self.drop_script_responses();
         let s = *s;
         let (url, masked, status, encoding) = (s.url.clone(), s.masked, s.status, s.encoding);
         let parsed = Parsed { dom: s.into_dom(), encoding, url, masked, status };
@@ -182,6 +190,7 @@ impl Scripting {
             self.page.fetched(id, text.as_deref());
         }
         self.frame_documents(conn, base, inflight)?;
+        self.script_fetches(conn, inflight)?;
         super::watch::stage("script");
         let loaded = self.page.run(TASKS_PER_TURN);
         super::watch::stage("network");

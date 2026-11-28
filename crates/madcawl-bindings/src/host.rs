@@ -85,6 +85,10 @@ pub struct DomHost<E: Engine> {
     pub(crate) frames: crate::frames::Frames<E>,
     /// What `URL.createObjectURL` made (`blob_urls.rs`).
     pub(crate) blob_urls: crate::blob_urls::BlobUrls,
+    /// The requests script made for the embedder (`fetches.rs`).
+    pub(crate) fetches: crate::fetches::Fetches<E>,
+    /// The dedicated workers (`workers.rs`).
+    pub(crate) workers: crate::workers::Workers<E>,
 }
 
 impl<E: Engine> DomHost<E> {
@@ -133,6 +137,8 @@ impl<E: Engine> DomHost<E> {
             nonces: HashMap::new(),
             frames: crate::frames::Frames::new(),
             blob_urls: Default::default(),
+            fetches: crate::fetches::Fetches::new(),
+            workers: crate::workers::Workers { live: HashMap::new(), current: None },
             time_origin_ms: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("a clock after 1970").as_secs_f64() * 1e3,
         };
         if E::PLACES_WRAPPERS {
@@ -229,7 +235,9 @@ impl<E: Engine> DomHost<E> {
     }
 
     pub(crate) fn shut(&mut self, e: &mut E) {
+        self.close_workers(e);
         self.close_frames(e);
+        self.close_fetches(e);
         self.blob_urls.clear();
         self.close_loop(e);
         self.close_scripts(e);
@@ -274,7 +282,10 @@ impl<E: Engine> Host<E> for DomHost<E> {
 
     fn report_exception(&mut self, e: &mut E, exception: Owned<E::Value>) {
         self.reported += 1;
-        self.record_exception(e, exception.get());
+        match self.workers.current.filter(|w| self.workers.live.contains_key(w)) {
+            Some(w) => self.worker_exception(e, w, exception.get()),
+            None => self.record_exception(e, exception.get()),
+        }
         e.release(exception);
     }
 

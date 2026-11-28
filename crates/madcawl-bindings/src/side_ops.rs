@@ -80,3 +80,10 @@ fn died<E: Engine>(h: &mut DomHost<E>, obj: HostRef) {
     s.wrapper = 0;
     h.sides.dec(r);
 }
+
+impl<E: Engine> DomHost<E> {
+    /// How many host objects that are not nodes are alive.
+    pub fn side_objects(&self) -> usize {
+        self.sides.len()
+    }
+}

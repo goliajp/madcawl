@@ -120,6 +120,12 @@ impl<E: Engine> Frames<E> {
         }
     }
 
+    /// A new window or worker id.
+    pub(crate) fn take_id(&mut self) -> u64 {
+        self.next += 1;
+        self.next
+    }
+
     pub(crate) fn listeners(&self, w: u64) -> &[Listener<E>] {
         self.live.get(&w).map_or(&[], |f| f.listeners.as_slice())
     }
@@ -186,8 +192,7 @@ impl<E: Engine> DomHost<E> {
             self.dom.let_go(doc);
             return None;
         }
-        self.frames.next += 1;
-        let w = self.frames.next;
+        let w = self.frames.take_id();
         self.frames.by_element.insert(el.index(), w);
         self.frames.by_doc.insert(doc.id().index(), w);
         let element = self.dom.hold(el);
@@ -234,6 +239,8 @@ impl<E: Engine> DomHost<E> {
         self.frames.by_doc.remove(&f.doc.id().index());
         self.frames.requests.retain(|&(id, _)| id != w);
         self.blob_urls.drop_window(w);
+        self.drop_window_workers(e, w);
+        self.drop_window_fetches(e, w);
         for mut l in f.listeners {
             l.callback.clear(e);
         }

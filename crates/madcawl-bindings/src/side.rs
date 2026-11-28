@@ -61,6 +61,9 @@ pub(crate) enum SideData {
     /// A `URLSearchParams`: a URL's holds it, by a count.
     SearchParams(Box<crate::impls::url_search_params::Params>),
     Blob(crate::impls::blob::BlobData),
+    Xhr(Box<crate::xhr::XhrState>),
+    /// A Worker object: its worker's id (`workers.rs`), alive or not.
+    Worker(u64),
 }
 
 impl SideData {
@@ -96,8 +99,7 @@ impl SideData {
     pub(crate) fn class<E: Engine>(&self) -> &'static ClassDef<E, DomHost<E>> {
         use crate::generated as g;
         match self {
-            SideData::Event(ev) if ev.custom => &g::CustomEventClass::<E>::DEF,
-            SideData::Event(_) => &g::EventClass::<E>::DEF,
+            SideData::Event(ev) => ev.class::<E>(),
             SideData::Target => &g::EventTargetClass::<E>::DEF,
             SideData::DomException(_) => &g::DOMExceptionClass::<E>::DEF,
             SideData::List(l) if l.is_node_list() => &g::NodeListClass::<E>::DEF,
@@ -118,6 +120,8 @@ impl SideData {
             SideData::Url(_) => &g::URLClass::<E>::DEF,
             SideData::SearchParams(_) => &g::URLSearchParamsClass::<E>::DEF,
             SideData::Blob(_) => &g::BlobClass::<E>::DEF,
+            SideData::Xhr(_) => &g::XMLHttpRequestClass::<E>::DEF,
+            SideData::Worker(_) => &g::WorkerClass::<E>::DEF,
         }
     }
 }
@@ -178,14 +182,14 @@ impl SideRef {
 }
 
 impl<E: Engine> DomHost<E> {
-    /// How many host objects that are not nodes are alive.
-    pub fn side_objects(&self) -> usize {
-        self.sides.len()
-    }
-
     /// The wrapper of side object `r`, made if it has none or the one it
     /// has is dead, with a count for the caller.
     pub(crate) fn wrap_side(&mut self, e: &mut E, r: SideRef) -> Owned<E::Value> {
+        self.wrap_side_in(e, r, self.realm)
+    }
+
+    /// [`DomHost::wrap_side`], a wrapper it has to make made in `realm`.
+    pub(crate) fn wrap_side_in(&mut self, e: &mut E, r: SideRef, realm: E::Realm) -> Owned<E::Value> {
         let w = self.sides.get(r).wrapper;
         if w != 0 {
             if let Some(v) = e.wrapper_upgrade(w & !1) {
@@ -194,7 +198,7 @@ impl<E: Engine> DomHost<E> {
             self.side_wrapper_gone(e, r);
         }
         let obj = r.host_ref();
-        let v = e.new_wrapper(self.realm, self.sides.get(r).data.class::<E>(), obj);
+        let v = e.new_wrapper(realm, self.sides.get(r).data.class::<E>(), obj);
         let word = E::wrapper_word(v.get());
         self.sides.get_mut(r).wrapper = word;
         self.sides.inc(r);

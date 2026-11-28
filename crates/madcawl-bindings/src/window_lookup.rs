@@ -26,35 +26,68 @@ impl<E: Engine> DomHost<E> {
         if w == 0 { Some(self.dom.document()) } else { self.frames.live.get(&w).map(|f| f.doc.id()) }
     }
 
-    /// The realm of window `w`, while it lives.
+    /// The realm of window or worker `w`, while it lives.
     pub(crate) fn realm_of(&self, w: u64) -> Option<E::Realm> {
-        if w == 0 { Some(self.realm) } else { self.frames.live.get(&w).map(|f| f.realm) }
+        match self.frames.live.get(&w) {
+            _ if w == 0 => Some(self.realm),
+            Some(f) => Some(f.realm),
+            None => self.workers.live.get(&w).map(|k| k.realm),
+        }
     }
 
-    /// The window whose realm is `realm`, while it lives.
+    /// Whether window or worker `w` lives, and a worker has not closed.
+    pub(crate) fn window_alive(&self, w: u64) -> bool {
+        w == 0 || self.frames.live.contains_key(&w) || self.workers.live.get(&w).is_some_and(|k| !k.closing)
+    }
+
+    /// The window or worker whose realm is `realm`, while it lives.
     pub(crate) fn window_of_realm(&self, realm: E::Realm) -> Option<u64> {
         if realm == self.realm {
             return Some(0);
         }
-        self.frames.live.iter().find(|(_, f)| f.realm == realm).map(|(&w, _)| w)
+        let frame = self.frames.live.iter().find(|(_, f)| f.realm == realm).map(|(&w, _)| w);
+        frame.or_else(|| self.workers.live.iter().find(|(_, k)| k.realm == realm).map(|(&w, _)| w))
     }
 
     /// Window `w` as script outside it gets it: its WindowProxy, the
-    /// top-level global, or null once it is gone.
+    /// top-level global, a worker's global, or null once it is gone.
     pub(crate) fn window_value(&mut self, e: &mut E, w: u64) -> madcawl_js::Owned<E::Value> {
         match self.frames.live.get(&w) {
             _ if w == 0 => e.global(self.realm),
             Some(f) => e.retain(f.proxy.get()),
-            None => crate::convert::plain::<E>(E::null()),
+            None => match self.workers.live.get(&w) {
+                Some(k) => e.global(k.realm),
+                None => crate::convert::plain::<E>(E::null()),
+            },
         }
     }
 
     pub(crate) fn origin_of(&self, w: u64) -> Origin {
+        if let Some(k) = self.workers.live.get(&w) {
+            return k.origin.clone();
+        }
         let Some(f) = self.frames.live.get(&w) else { return self.nav.url.origin() };
         match () {
             _ if !f.same_origin => Origin::Opaque,
             _ if inherits(&f.url) => self.origin_of(f.parent),
             _ => f.url.origin(),
         }
+    }
+
+    /// The URL of the document whose origin the requests of window or
+    /// worker `w` are made with: its own, its parent's for one that
+    /// inherits its origin, its owner's for a worker; `None` when that
+    /// origin is opaque.
+    pub(crate) fn initiator_of(&self, w: u64) -> Option<String> {
+        if let Some(k) = self.workers.live.get(&w) {
+            return self.initiator_of(k.owner);
+        }
+        let url = match self.frames.live.get(&w) {
+            None => &self.nav.url,
+            Some(f) if !f.same_origin => return None,
+            Some(f) if inherits(&f.url) => return self.initiator_of(f.parent),
+            Some(f) => &f.url,
+        };
+        url.origin().is_tuple().then(|| url.as_str().to_owned())
     }
 }

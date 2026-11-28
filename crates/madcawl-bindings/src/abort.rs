@@ -97,11 +97,11 @@ impl<E: Engine> DomHost<E> {
     /// signal's wrapper, with what is on it (listeners, their closures),
     /// until it fires, as the standard's lifetime has it: a page that
     /// asks for many timeouts far out (`ms` up to 2^53 - 1) holds one
-    /// timer and one signal each until the host closes.
-    pub(crate) fn timeout_signal(&mut self, e: &mut E, ms: u64) -> SideRef {
+    /// timer and one signal each until window `w`, which asked, goes.
+    pub(crate) fn timeout_signal(&mut self, e: &mut E, ms: u64, w: u64) -> SideRef {
         let r = self.new_signal();
-        let w = self.wrap_side(e, r);
-        self.event_loop.add_abort_timer(madcawl_js::Root::new(w), ms);
+        let wrapper = self.wrap_side(e, r);
+        self.event_loop.add_host_timer(madcawl_js::Root::new(wrapper), ms, crate::event_loop::TimerKind::Abort, w);
         r
     }
 
