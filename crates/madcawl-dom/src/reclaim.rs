@@ -5,7 +5,8 @@
 //! DOM frees nothing then: a node taken out of the tree stays allocated.
 //! `reclaim` frees them once nothing holds such handles.
 
-use crate::dom::{Dom, Rare};
+use crate::dom::Dom;
+use crate::tree::Rare;
 use crate::node::NodeKind;
 
 impl Dom {

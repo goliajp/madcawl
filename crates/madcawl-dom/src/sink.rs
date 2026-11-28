@@ -269,6 +269,7 @@ impl TreeSink for Dom {
         if self.is_html(element.index(), atom!("option")) {
             self.clone_into_selectedcontent(element.index());
         }
+        self.frame_finished(element.index());
     }
 
     fn parse_error(&mut self, error: ParseError) {

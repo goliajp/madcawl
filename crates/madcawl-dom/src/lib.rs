@@ -45,6 +45,7 @@ mod serialize;
 mod short;
 mod slots;
 mod sink;
+mod subdoc;
 mod sys;
 mod text;
 mod tree;

@@ -1,8 +1,23 @@
 //! Tree operations. Each keeps the counts by the crate's rules and the
 //! in-document bit, and reports the change in one place (`notify`).
 
-use crate::dom::{Dom, Rare};
+use madcawl_str::DomString;
+
+use crate::dom::Dom;
 use crate::node::{IN_DOCUMENT, INERT, Node, NodeKind, STYLE_DIRTY, SUSPECTED};
+
+#[derive(Default)]
+pub(crate) struct Rare {
+    pub contents: u32,
+    pub inert: u32,
+    pub form: u32,
+    pub doctype: Option<Box<[DomString; 3]>>,
+    /// A select's first option and first selectedcontent below it, when
+    /// `select_known`; otherwise found again by a scan.
+    pub select_option: u32,
+    pub select_content: u32,
+    pub select_known: bool,
+}
 
 /// What changed, as styles and later observers need to know.
 pub(crate) enum Change {

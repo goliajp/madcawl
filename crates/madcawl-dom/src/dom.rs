@@ -16,6 +16,7 @@ use crate::node::{
 };
 use crate::short::ShortStrings;
 use crate::text::Tail;
+use crate::tree::Rare;
 
 /// A node of one `Dom`: its slot index, never 0.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
@@ -40,19 +41,6 @@ impl NodeId {
     pub fn index(self) -> u32 {
         self.0.get()
     }
-}
-
-#[derive(Default)]
-pub(crate) struct Rare {
-    pub contents: u32,
-    pub inert: u32,
-    pub form: u32,
-    pub doctype: Option<Box<[DomString; 3]>>,
-    /// A select's first option and first selectedcontent below it, when
-    /// `select_known`; otherwise found again by a scan.
-    pub select_option: u32,
-    pub select_content: u32,
-    pub select_known: bool,
 }
 
 pub struct Dom {
@@ -93,6 +81,9 @@ pub struct Dom {
     pub(crate) moves: Option<Vec<u32>>,
     /// Counts insertions, removals and `class` changes (`tree.rs`).
     pub(crate) versions: crate::tree::Versions,
+    /// The iframes the parser finished, while the bindings ask
+    /// (`subdoc.rs`).
+    pub(crate) parsed_frames: Option<Vec<u32>>,
 }
 
 /// An attribute as stored.
@@ -141,6 +132,7 @@ impl Dom {
             observer: None,
             moves: None,
             versions: crate::tree::Versions::default(),
+            parsed_frames: None,
         };
         dom.doc = dom.new_document(false).expect("room for the document");
         dom
