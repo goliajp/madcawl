@@ -34,6 +34,19 @@ fn screen_download(doc: &Url, mut frame: Frame) -> Result<Frame, &'static str> {
     Ok(frame.num(tag::DOWNLOAD, asked))
 }
 
+/// The lowest of a FETCH's credentials values, ranked omit (0), then
+/// same-origin (2), then include (1); include when it carried none.
+fn credentials_of(frame: &Frame) -> Result<u64, &'static str> {
+    let rank = |v: &[u8]| match v {
+        [0] => Ok(0),
+        [2] => Ok(1),
+        [1] => Ok(2),
+        _ => Err("a credentials value other than 0, 1 and 2"),
+    };
+    let low = frame.all(tag::CREDENTIALS).try_fold(2, |low: u8, v| rank(v).map(|r| low.min(r)))?;
+    Ok([0, 2, 1][usize::from(low)])
+}
+
 /// A FETCH with its initiator checked and, when it claimed none, set to
 /// the document, never a navigation, with one credentials value and a
 /// download only of the document's origin; the reason when it is refused.
@@ -42,7 +55,7 @@ pub(super) fn screen(doc: &Url, mut frame: Frame) -> Result<Frame, &'static str>
         return Err("a navigation from a content process");
     }
     frame = screen_download(doc, frame)?;
-    let credentials = flag_of(&frame, tag::CREDENTIALS).map_err(|()| "a credentials value other than 0 and 1")?.unwrap_or(1);
+    let credentials = credentials_of(&frame)?;
     let mut claimed = None;
     for raw in frame.all(tag::INITIATOR) {
         let url = std::str::from_utf8(raw).ok().and_then(|s| Url::parse(s).ok()).ok_or("an initiator that is not a url")?;
@@ -63,6 +76,13 @@ mod tests {
 
     fn fetch(url: &str, values: &[u64]) -> Frame {
         values.iter().fold(Frame::new(kind::FETCH).str(tag::URL, url), |f, &v| f.num(tag::DOWNLOAD, v))
+    }
+
+    #[test]
+    fn the_lowest_credentials_value_holds() {
+        let creds = |values: &[u64]| credentials_of(&values.iter().fold(Frame::new(kind::FETCH), |f, &v| f.num(tag::CREDENTIALS, v)));
+        assert_eq!([creds(&[]), creds(&[1]), creds(&[1, 2]), creds(&[2, 1]), creds(&[2, 0]), creds(&[1, 0])], [Ok(1), Ok(1), Ok(2), Ok(2), Ok(0), Ok(0)]);
+        assert!(creds(&[3]).is_err() && creds(&[1, 3]).is_err());
     }
 
     #[test]

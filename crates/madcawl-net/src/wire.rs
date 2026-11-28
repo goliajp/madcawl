@@ -61,7 +61,11 @@ pub mod tag {
     pub const HEADER: u8 = 4;
     pub const BODY: u8 = 5;
     pub const NAVIGATION: u8 = 6;
+    /// the URL of the document that made the request; one of an opaque
+    /// origin (`about:blank`) for a document whose origin is opaque
     pub const INITIATOR: u8 = 7;
+    /// 0 omits cookies, 1 includes them, 2 includes them only on hops of
+    /// the initiator's origin
     pub const CREDENTIALS: u8 = 8;
     pub const REDIRECT: u8 = 9;
     pub const STATUS: u8 = 10;
@@ -79,6 +83,9 @@ pub mod tag {
     /// on FETCH, repeated: the origins its body may be sent to; a redirect
     /// that would carry the body to any other fails
     pub const BODY_ORIGIN: u8 = 24;
+    /// on FETCH: 1 CORS mode, 2 same-origin mode; none or 0 no rules on
+    /// where the request goes
+    pub const MODE: u8 = 25;
     pub const TOKEN: u8 = 32;
     pub const COUNT: u8 = 33;
     /// on an ERROR: the network process refused what the content process

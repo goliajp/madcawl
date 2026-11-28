@@ -6,15 +6,17 @@
 mod exchange;
 mod forbidden;
 mod hop;
+mod policy;
 mod redirect;
 
 pub use forbidden::{is_forbidden, is_forbidden_method, normalize_method};
 pub use hop::Sink;
+pub use policy::{Credentials, Mode, is_safelisted, is_simple};
 
 use hop::Hop;
 use redirect::{redirect_url, rewrite_for_redirect};
 
-use crate::cookie::{CookieJar, JarLimits, SiteContext, site_of};
+use crate::cookie::{CookieJar, JarLimits};
 use crate::dns::DnsCache;
 use crate::error::NetError;
 use crate::partition::{self, PROFILE, PartitionId, Partitions, SharedJar};
@@ -86,9 +88,11 @@ pub struct Request {
     pub body: Option<Vec<u8>>,
     /// a top-level navigation
     pub navigation: bool,
-    /// the document that made the request; `None` for the user
+    /// the document that made the request, a URL of an opaque origin
+    /// (`about:blank`) for one whose origin is opaque; `None` for the user
     pub initiator: Option<Url>,
-    pub credentials: bool,
+    pub credentials: Credentials,
+    pub mode: Mode,
     /// the cookie jar it reads and stores: the client's own (`PROFILE`)
     /// or an open partition's
     pub partition: PartitionId,
@@ -109,7 +113,8 @@ impl Request {
             body: None,
             navigation: true,
             initiator: None,
-            credentials: true,
+            credentials: Credentials::Include,
+            mode: Mode::NoCors,
             partition: PROFILE,
             redirect: Redirect::Follow,
             body_origins: Vec::new(),
@@ -152,21 +157,6 @@ pub struct Client {
     jar: SharedJar,
     partitions: Partitions,
     trust: Arc<Trust>,
-}
-
-fn host_of(url: &Url) -> &str {
-    url.host_str().unwrap_or("")
-}
-
-fn site_context(req: &Request, url: &Url, method: &str) -> SiteContext {
-    let Some(init) = &req.initiator else { return SiteContext::SameSite };
-    if init.scheme() == url.scheme() && site_of(host_of(init)) == site_of(host_of(url)) {
-        SiteContext::SameSite
-    } else if req.navigation {
-        SiteContext::CrossSiteNavigation { safe: matches!(method, "GET" | "HEAD") }
-    } else {
-        SiteContext::CrossSite
-    }
 }
 
 impl Client {
@@ -247,22 +237,16 @@ impl Client {
         let mut headers: Vec<(String, Vec<u8>)> =
             req.headers.iter().filter(|(n, v)| !is_forbidden(n, v)).cloned().collect();
         let mut url_list = vec![url.clone()];
+        let mut tainted = false;
         loop {
-            if !matches!(url.scheme(), "http" | "https") {
-                return Err(NetError::Scheme(url.scheme().to_owned()));
-            }
-            if req.cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
-                return Err(NetError::Cancelled);
-            }
-            if Instant::now() >= deadline {
-                return Err(NetError::Deadline);
-            }
-            let ctx = site_context(req, &url, &method);
-            let cookie = if req.credentials { partition::lock(&jar).header(&url, ctx, now_secs()) } else { None };
-            let origin = (!matches!(method.as_str(), "GET" | "HEAD"))
-                .then(|| req.initiator.as_ref().map_or("null".into(), |i| i.origin().ascii_serialization()));
+            policy::may_go(req, &url, deadline)?;
+            policy::check_hop(req, &url, &method, &headers)?;
+            let credentials = policy::with_cookies(req, &url);
+            let cookie = credentials.then(|| partition::lock(&jar).header(&url, policy::site_context(req, &url, &method), now_secs())).flatten();
+            let origin = policy::origin_header(req, &url, &method, tainted);
             let extra = exchange::Extra { cookie: cookie.as_deref(), origin: origin.as_deref(), body, deadline, cancel: req.cancel.as_ref() };
-            let mut hop = Hop { client: self, jar: &jar, req, url: &url, url_list: &url_list, method: &method, sink: &mut *sink, decoder: None, delivered: false };
+            let mut hop =
+                Hop { client: self, jar: &jar, req, url: &url, url_list: &url_list, method: &method, credentials, sink: &mut *sink, decoder: None, delivered: false };
             let raw = self.exchange(&method, &url, &headers, extra, &mut hop)?;
             if hop.delivered {
                 let Hop { decoder, sink, .. } = hop;
@@ -287,6 +271,7 @@ impl Client {
             if next.origin().ascii_serialization() != url.origin().ascii_serialization() {
                 headers.retain(|(n, _)| !n.eq_ignore_ascii_case("authorization"));
             }
+            tainted |= policy::taints(req, &url, &next);
             url = next;
             url_list.push(url.clone());
         }

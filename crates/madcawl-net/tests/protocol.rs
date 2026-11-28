@@ -240,7 +240,7 @@ fn cookies_are_stored_sent_and_follow_redirects() {
     get(&c, &f.url("/logout")).unwrap();
     assert_eq!(get(&c, &f.url("/home")).unwrap().body, b"theme=dark");
     let mut anon = Request::get(Url::parse(&f.url("/home")).unwrap());
-    anon.credentials = false;
+    anon.credentials = madcawl_net::fetch::Credentials::Omit;
     assert_eq!(c.fetch(&anon).unwrap().body, b"");
     let mut forged = Request::get(Url::parse(&f.url("/home")).unwrap());
     forged.headers.push(("Cookie".into(), b"sid=forged".to_vec()));

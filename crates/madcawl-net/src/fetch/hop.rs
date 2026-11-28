@@ -31,6 +31,8 @@ pub(super) struct Hop<'a, 's> {
     pub url: &'a Url,
     pub url_list: &'a [Url],
     pub method: &'a str,
+    /// cookies are stored from this hop's response
+    pub credentials: bool,
     pub sink: &'s mut dyn Sink,
     pub decoder: Option<Decoder>,
     pub delivered: bool,
@@ -38,7 +40,7 @@ pub(super) struct Hop<'a, 's> {
 
 impl BodySink for Hop<'_, '_> {
     fn head(&mut self, head: &RawHead) -> Result<bool, NetError> {
-        if self.req.credentials {
+        if self.credentials {
             let mut jar = partition::lock(self.jar);
             let now = now_secs();
             for (_, v) in head.headers.iter().filter(|(n, _)| n.eq_ignore_ascii_case("set-cookie")) {
