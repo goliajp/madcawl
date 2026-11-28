@@ -151,9 +151,10 @@ fn a_process_that_answers_but_hangs_on_its_page_list_is_killed_and_replaced() {
 #[test]
 fn a_process_that_hangs_reopening_a_page_is_killed_and_the_page_dropped() {
     let (s, dir) = shared("restore-hang", false, |c| c.hang = Duration::from_millis(300));
-    // a content process that never answers, and says which process it is
+    // a content process that never answers; on a busy host it may be
+    // killed before its shell has run a line, so it says nothing itself
     let script = dir.0.join("hang.sh");
-    std::fs::write(&script, format!("#!/bin/sh\necho $$ >> {}\nexec /bin/sleep 30\n", dir.0.join("pids").display())).unwrap();
+    std::fs::write(&script, "#!/bin/sh\nexec /bin/sleep 30\n").unwrap();
     std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     let mut s = s;
     s.config.isolate = Some(script);
@@ -161,24 +162,15 @@ fn a_process_that_hangs_reopening_a_page_is_killed_and_the_page_dropped() {
     let mine = p.new_page().get_num(tag::PAGE).unwrap() as u32;
     p.adopt(vec![page(mine)]);
     let note = p.recover("a test");
-    assert!(note.contains(&format!("p{mine} could not be opened again")), "{note}");
+    // the status the host waited for after its kill
+    assert!(note.contains(&format!("p{mine} could not be opened again (it did not answer")), "{note}");
+    assert!(note.contains("and was killed (it was ended by signal 9)"), "the process that hung was killed: {note}");
     assert_eq!(p.restarts, 2, "the hung process was replaced");
     assert!(p.pages.is_empty() && p.lost.contains(&mine));
     assert_eq!(s.pages.load(Ordering::SeqCst), 0, "the dropped page was given back");
-    // the second process may not have written its number yet
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let pids = loop {
-        let text = std::fs::read_to_string(dir.0.join("pids")).unwrap_or_default();
-        let pids: Vec<i32> = text.lines().map(|l| l.parse().unwrap()).collect();
-        if pids.len() >= 2 || Instant::now() > deadline {
-            break pids;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    };
-    assert_eq!(pids.len(), 2, "{pids:?}");
+    let pid = p.child.as_ref().map(Content::pid).unwrap();
     // SAFETY: signal 0 only checks that the process exists
-    assert_ne!(unsafe { kill(pids[0], 0) }, 0, "the process that hung was killed");
-    assert_eq!(p.child.as_ref().map(Content::pid), Some(pids[1]));
+    assert_eq!(unsafe { kill(pid, 0) }, 0, "the new process is held");
 }
 
 #[test]
