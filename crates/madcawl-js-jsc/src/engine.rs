@@ -183,6 +183,10 @@ impl Engine for Jsc {
         self.take(iface)
     }
 
+    fn define_interfaces<H: Host<Jsc>>(&mut self, _host: &mut H, realm: Realm, obj: Value, classes: &'static [&'static ClassDef<Jsc, H>]) -> bool {
+        self.lazy_interfaces(realm, obj, classes)
+    }
+
     fn throw(&mut self, exception: Owned<Value>) -> Owned<Value> {
         let x = exception.into_raw();
         if !self.halted() {

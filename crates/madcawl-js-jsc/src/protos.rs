@@ -21,6 +21,9 @@ pub(crate) struct RealmData {
     /// class id, made when first asked for; counted.
     pub protos: HashMap<u16, (Value, Value)>,
     pub helpers: Vec<Value>,
+    /// The class tables the realm's lazy interface properties stand
+    /// for, as `&'static [&'static ClassDef<Jsc, H>]` erased (`lazy.rs`).
+    pub lazy: (*const (), usize),
     /// The records of the realm's wrappers not yet freed.
     pub wrappers: HashSet<usize>,
 }
@@ -49,7 +52,7 @@ impl Jsc {
             self.deref = helpers[Helper::Deref as usize];
             self.protect(self.deref);
         }
-        self.realms.push(RealmData { ctx, detached: false, protos: HashMap::new(), helpers, wrappers: HashSet::new() });
+        self.realms.push(RealmData { ctx, detached: false, protos: HashMap::new(), helpers, lazy: (std::ptr::null(), 0), wrappers: HashSet::new() });
         Realm(r, self.id)
     }
 

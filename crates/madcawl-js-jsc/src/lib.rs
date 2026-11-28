@@ -40,6 +40,7 @@ mod halt;
 mod helpers;
 mod iface;
 mod isolate;
+mod lazy;
 mod lists;
 mod members;
 mod micro;

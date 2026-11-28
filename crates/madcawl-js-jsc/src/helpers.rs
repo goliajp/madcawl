@@ -25,10 +25,11 @@ pub(crate) enum Helper {
     Iterable = 19,
     ErrorInfo = 20,
     IteratorOf = 21,
+    Lazy = 22,
 }
 
 impl Helper {
-    pub(crate) const LAST: Helper = Helper::IteratorOf;
+    pub(crate) const LAST: Helper = Helper::Lazy;
 }
 
 // Page script runs in the realm and may replace any global or
@@ -59,6 +60,7 @@ pub(crate) const HELPERS: &str = r#"(function () {
   };
   const isError = Error.isError;
   const hasOwn = Object.hasOwn;
+  const frozen = Object.isFrozen;
   const slice = String.prototype.slice;
   const AP = Array.prototype;
   const iterating = [['entries', AP.entries], ['keys', AP.keys], ['values', AP.values], ['forEach', AP.forEach]];
@@ -234,5 +236,71 @@ pub(crate) const HELPERS: &str = r#"(function () {
     },
     // the iterator method of an object, by the realm's own @@iterator
     (o) => o[iterator],
+    // own accessors of global `g` named `names`, each standing for the
+    // writable, configurable, not enumerable data property whose value
+    // `make(i)` gives, and turning into it in place once read or
+    // written. Once it has (or the page deleted or redefined it), the
+    // accessor, if the page saved it, reads and writes the property. A
+    // write through another receiver goes on as the data property's
+    // would; an assignment to the bare name calls the setter with
+    // undefined, not the global. When the global no longer lets it be
+    // replaced (sealed, frozen, the accessor made non-configurable),
+    // the accessor stays and holds the value, read-only if the global is
+    // frozen, where a write fails silently even in strict code; on a
+    // sealed global defineProperty with a new value throws where the
+    // data property would take it
+    (g, names, make) => {
+      for (let i = 0; i < names.length; i++) {
+        const n = names[i];
+        // 0 not made, 1 the data property is there, 2 the accessor
+        // stays and holds `value`
+        let state = 0;
+        let value;
+        const ours = () => {
+          const d = R.gopd(g, n);
+          return d !== undefined && d.get === get ? d : undefined;
+        };
+        const become = (d, v) => {
+          if (R.define(g, n, ({ __proto__: null, value: v, writable: true, enumerable: d.enumerable, configurable: true }))) {
+            state = 1;
+            return true;
+          }
+          return false;
+        };
+        const made = (d) => {
+          const v = apply(make, undefined, [i]);
+          if (!become(d, v)) {
+            state = 2;
+            value = v;
+          }
+          return v;
+        };
+        const get = () => {
+          if (state === 0) {
+            const d = ours();
+            if (d) return made(d);
+            state = 1;
+          }
+          return state === 1 ? R.get(g, n) : value;
+        };
+        const set = function (v) {
+          const r = this === undefined ? g : this;
+          if (state === 0) {
+            const d = ours();
+            if (!d) state = 1;
+            else if (r === g && become(d, v)) return;
+            else made(d);
+          }
+          if (state === 1) {
+            R.set(g, n, v, r);
+          } else if (!frozen(g) && r === g) {
+            value = v;
+          } else if (!frozen(g)) {
+            R.define(r, n, ({ __proto__: null, value: v, writable: true, enumerable: true, configurable: true }));
+          }
+        };
+        dp(g, n, ({ __proto__: null, get, set, enumerable: false, configurable: true }));
+      }
+    },
   ];
 })()"#;
