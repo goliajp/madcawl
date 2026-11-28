@@ -144,7 +144,8 @@ impl AttrIndex {
     /// The element's attribute may have changed.
     pub fn update(&mut self, dom: &Dom, n: NodeId) {
         self.remove(n);
-        if dom.kind(n) != NodeKind::Element || !dom.is_connected(n) {
+        // an iframe's document is connected too, and has ids of its own
+        if dom.kind(n) != NodeKind::Element || !dom.in_main_tree(n) {
             return;
         }
         if self.only.is_some_and(|o| dom.local_name(n) != Some(o)) {
@@ -305,6 +306,32 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// An iframe's document is connected and has ids of its own: only
+    /// the page's own document is indexed.
+    #[test]
+    fn an_iframe_s_document_is_not_indexed_with_the_page() {
+        use madcawl_str::atom;
+
+        use super::AttrIndex;
+        let mut dom = Dom::new();
+        let doc = dom.document();
+        let a = dom.new_element(b"p").unwrap();
+        dom.set_attribute(a, atom!("id"), b"x");
+        dom.insert_node(doc, a, None);
+        let frame = dom.new_active_document(false).unwrap();
+        assert!(dom.parse_into(frame.id(), b"<p id=x>in the frame"));
+        let inner = dom
+            .descendants(frame.id())
+            .find(|&n| dom.attribute(n, atom!("id")).is_some())
+            .unwrap();
+        assert!(dom.is_connected(inner));
+        let mut index = AttrIndex::new(atom!("id"), None);
+        index.build(&dom);
+        index.update(&dom, inner);
+        assert_eq!(index.all("x"), [a]);
+        dom.let_go(frame);
     }
 
     #[test]

@@ -243,7 +243,7 @@ impl SemTree {
         let n = NodeId::from_index(i).expect("a slot index is never 0");
         let old = self.records.get(i as usize).copied().unwrap_or_default();
         let freed = test(&self.freed, i);
-        let mut new = if live(dom, n) && dom.is_connected(n) {
+        let mut new = if live(dom, n) && dom.in_main_tree(n) {
             let clear = self.transparent(inputs, dom, n);
             self.compute(dom, inputs, n, clear)
         } else {

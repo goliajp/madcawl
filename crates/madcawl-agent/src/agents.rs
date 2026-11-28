@@ -292,7 +292,7 @@ impl Agents {
         }
         let n = NodeId::from_index(r.index).ok_or(stale)?;
         let rec = t.record(n).ok_or(stale)?;
-        if rec.generation != r.slot_gen || !live(dom, n) || !dom.is_connected(n) {
+        if rec.generation != r.slot_gen || !live(dom, n) || !dom.in_main_tree(n) {
             return Err(stale);
         }
         Ok(n)

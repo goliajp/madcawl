@@ -187,7 +187,8 @@ impl Cascade<'_> {
             while let Some((n, mode)) = stack.pop() {
                 r.visited += 1;
                 let seen = done.get(&n).copied();
-                if seen.is_some_and(|s| s >= mode) || !dom.is_connected(n) {
+                // an iframe's document is connected too, and not styled with this one
+                if seen.is_some_and(|s| s >= mode) || !dom.in_main_tree(n) {
                     continue;
                 }
                 let (changed, pseudo) = if seen.is_none() {
