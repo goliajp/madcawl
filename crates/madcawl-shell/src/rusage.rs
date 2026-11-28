@@ -183,11 +183,24 @@ mod tests {
         // SAFETY: getpid has no preconditions
         let pid = unsafe { getpid() };
         let a = usage_of(pid).unwrap();
-        let v: Vec<u64> = (0..200_000u64).map(|i| i * i).collect();
+        // a block larger than anything the other tests in this process hold
+        let block = vec![7u8; 64 << 20];
         let b = usage_of(pid).unwrap();
-        assert!(v.len() == 200_000 && b.cpu_ns > a.cpu_ns && b.footprint > 0);
-        // a neighbouring counter (instructions, cycles) would be far larger
-        assert!(b.lifetime_max_footprint >= b.footprint && b.lifetime_max_footprint < b.footprint * 64, "{b:?}");
+        assert!(b.footprint >= a.footprint + (48 << 20), "the touched block is counted: {a:?} {b:?}");
+        // one reply reads the footprint and its high-water mark at different
+        // moments, so while another thread allocates the mark can trail the
+        // footprint beside it; a later read never trails an earlier one
+        let c = usage_of(pid).unwrap();
+        assert!(c.lifetime_max_footprint >= b.footprint, "{b:?} {c:?}");
+        // at least 4 instructions an iteration: a neighbouring counter
+        // (instructions, cycles) would grow by more than 10^8
+        let mut x = 0u64;
+        for i in 0..25_000_000u64 {
+            x = std::hint::black_box(x ^ i);
+        }
+        let d = usage_of(pid).unwrap();
+        assert!(d.cpu_ns > a.cpu_ns && d.lifetime_max_footprint - c.lifetime_max_footprint < 100_000_000, "{x} {c:?} {d:?}");
+        drop(block);
         assert!(fd_count(pid).unwrap() >= 3, "stdin, stdout and stderr at least");
         assert!(fds(pid).unwrap().starts_with(&[0, 1, 2]), "{:?}", fds(pid));
         assert!(thread_count(pid).unwrap() >= 1);
