@@ -16,6 +16,7 @@ dependencies = [
  "madcawl-html",
  "madcawl-layout",
  "madcawl-str",
+ "madcawl-wire",
 ]
 
 [[package]]
@@ -177,6 +178,7 @@ dependencies = [
  "madcawl-netd",
  "madcawl-paint",
  "madcawl-str",
+ "madcawl-wire",
 ]
 
 [[package]]
@@ -195,6 +197,10 @@ dependencies = [
 
 [[package]]
 name = "madcawl-unicode"
+version = "0.0.1"
+
+[[package]]
+name = "madcawl-wire"
 version = "0.0.1"
 
 [[package]]

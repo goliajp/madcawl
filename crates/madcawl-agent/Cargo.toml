@@ -18,3 +18,4 @@ madcawl-form = { path = "../madcawl-form" }
 madcawl-html = { path = "../madcawl-html" }
 madcawl-layout = { path = "../madcawl-layout" }
 madcawl-str = { path = "../madcawl-str" }
+madcawl-wire = { path = "../madcawl-wire" }

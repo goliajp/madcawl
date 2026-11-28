@@ -29,7 +29,7 @@ mod cx;
 mod diff;
 mod envelope;
 pub mod extract;
-mod frame;
+use madcawl_wire::frame;
 mod geom;
 mod html_role;
 mod html_table;
