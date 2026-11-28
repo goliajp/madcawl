@@ -61,6 +61,9 @@ pub struct Config {
     /// `None`, no limit; otherwise below `hang`, which would end the
     /// content process first
     pub script_limit: Option<Duration>,
+    /// In a content process holding a pane page, the display channel
+    /// its host left at this descriptor
+    pub display_fd: Option<i32>,
 }
 
 impl Config {
@@ -94,6 +97,7 @@ impl Config {
             isolate: None,
             hang: Duration::from_secs(180),
             script_limit: Some(Duration::from_secs(10)),
+            display_fd: None,
         }
     }
 }
@@ -190,6 +194,7 @@ fn set(c: &mut Config, allow: &mut Vec<PathBuf>, opt: &str, v: &str) -> Option<(
         "--max-request" => c.max_request = n()?,
         "--max-reply" => c.max_reply = n()?,
         "--listen-fd" => c.listen_fd = Some(v.parse::<i32>().ok().filter(|&fd| fd > 2)?),
+        "--display-fd" => c.display_fd = Some(v.parse::<i32>().ok().filter(|&fd| fd > 2)?),
         "--exit-idle" => c.exit_idle = Some(Duration::from_secs(n()? as u64)),
         "--downloads" => c.downloads = Some(PathBuf::from(v)),
         "--upload-allow" => c.uploads.push(PathBuf::from(v).canonicalize().ok()?),

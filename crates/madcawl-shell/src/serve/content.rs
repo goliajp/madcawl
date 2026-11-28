@@ -6,17 +6,19 @@
 //! agent's connection, the network service and the page numbers. It has
 //! a watchdog on its request loop and a memory cap, and exits with its
 //! host. It holds no descriptor of its host's but the channel: not the
-//! audit log, whose lines it sends its host to write.
+//! audit log, whose lines it sends its host to write. One that holds a
+//! pane page has a display channel too (`--display-fd`), on which it
+//! draws the page into the display end's shared memory.
 
 use std::ffi::OsString;
-use std::os::fd::AsFd as _;
+use std::os::fd::{AsFd as _, FromRawFd as _, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::conn::Conn;
+use super::conn::{Channel, Conn};
 use super::link::Link;
 use super::memory::Cap;
 use super::{AuditLog, Config, Net, Shared, parse_args};
@@ -67,7 +69,10 @@ pub fn args(c: &Config, session: u32, run: &str) -> Vec<OsString> {
 
 /// The content process's main.
 pub fn child_main(args: &[&str]) -> ExitCode {
-    super::orphan::close_inherited_fds();
+    // read before anything is parsed: nothing but the display channel may
+    // stay open past this
+    let display = args.windows(2).find(|w| w[0] == "--display-fd").and_then(|w| w[1].parse().ok());
+    super::orphan::close_inherited_fds(display);
     let [session, run, rest @ ..] = args else { return usage() };
     let (Ok(session), Some(config)) = (session.parse::<u32>(), parse_args(rest)) else { return usage() };
     super::orphan::exit_with_parent();
@@ -95,8 +100,11 @@ fn serve(session: u32, run: &str, config: Config) -> std::io::Result<()> {
         sock.push(".net");
         Arc::new(Net::through(link.clone(), Path::new(&sock), config.downloads.clone()))
     });
+    // SAFETY: the host passed this descriptor on purpose, and the sweep
+    // of inherited ones left it open for this process to own
+    let display = config.display_fd.map(|fd| unsafe { OwnedFd::from_raw_fd(fd) });
     let shared = Shared::new(config, log, net, run.to_owned(), Some(link));
-    Conn::new(session, &shared).run(stream);
+    Conn::new(session, &shared).with_display(display.map(Channel::new)).run(stream);
     Ok(())
 }
 

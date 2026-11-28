@@ -93,7 +93,7 @@ impl Raster {
         let mut taken: Vec<RectF> = Vec::with_capacity(marks.len());
         // SAFETY: the context draws into `bm`, which outlives it; every object made is released
         unsafe {
-            let ctx = context(bm, self.scale, self.view);
+            let ctx = context(&mut bm.canvas(), self.scale, self.view);
             let cf = ffi::CFStringCreateWithBytes(
                 std::ptr::null(),
                 name.as_ptr(),

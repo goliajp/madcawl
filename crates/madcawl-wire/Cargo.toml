@@ -1,0 +1,12 @@
+[package]
+name = "madcawl-wire"
+description = "What crosses a process boundary: the frame format, a host connection's and a display channel's frames, version ranges, the shared-memory surface header, descriptor passing"
+version.workspace = true
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true

@@ -104,6 +104,27 @@ pub(crate) fn readable_pair(a: i32, b: Option<i32>, wait: Option<Duration>) -> s
     }
 }
 
+/// Waits, with no limit, until one of `fds` has something to read or is
+/// closed; which of them, into `ready`.
+pub(crate) fn readable_any(fds: &[i32], ready: &mut Vec<bool>) -> std::io::Result<()> {
+    const POLLERR: i16 = 0x8;
+    const POLLHUP: i16 = 0x10;
+    let mut p: Vec<PollFd> = fds.iter().map(|&fd| PollFd { fd, events: POLLIN, revents: 0 }).collect();
+    loop {
+        // SAFETY: `p.len()` valid pollfds for the length of the call
+        let r = unsafe { poll(p.as_mut_ptr(), p.len() as NFds, -1) };
+        if r >= 0 {
+            ready.clear();
+            ready.extend(p.iter().map(|q| q.revents & (POLLIN | POLLERR | POLLHUP) != 0));
+            return Ok(());
+        }
+        let e = Error::last_os_error();
+        if e.kind() != ErrorKind::Interrupted {
+            return Err(e);
+        }
+    }
+}
+
 /// An accept error that every later accept would repeat: the inherited
 /// socket is not one to accept on.
 pub(crate) fn fatal(e: &Error) -> bool {

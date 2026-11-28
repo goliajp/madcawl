@@ -26,6 +26,7 @@ madcawl-net = { path = "../madcawl-net" }
 madcawl-netd = { path = "../madcawl-netd" }
 madcawl-paint = { path = "../madcawl-paint" }
 madcawl-str = { path = "../madcawl-str" }
+madcawl-wire = { path = "../madcawl-wire" }
 
 [dev-dependencies]
 madcawl-mcp = { path = "../madcawl-mcp" }

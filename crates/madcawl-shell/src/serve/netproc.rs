@@ -133,7 +133,7 @@ pub(crate) fn start(spec: Spec, net: impl FnOnce(UnixStream, i32) -> io::Result<
 /// <per-file> <total>]`, with the control channel on standard input: the
 /// network process. It exits with its host.
 pub fn child_main(args: &[&str]) -> ExitCode {
-    super::orphan::close_inherited_fds();
+    super::orphan::close_inherited_fds(None);
     let parsed = match args {
         [socket, "--partitions", n] => n.parse().ok().map(|n| (socket, n, None)),
         [socket, "--partitions", n, "--downloads", dir, per, total] => match (n.parse(), per.parse(), total.parse()) {

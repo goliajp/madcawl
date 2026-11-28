@@ -9,7 +9,8 @@
 //! line to the audit log for every request. Sessions, pages per session, frame sizes, each
 //! page's change ring and request log are bounded; a page nobody asked
 //! anything of for the idle time is closed, and a session's pages close
-//! with it.
+//! with it. A connection may instead play the display end, which opens
+//! pane pages and is handed their display channels (`display`).
 
 mod act;
 mod act_input;
@@ -18,6 +19,7 @@ mod config;
 mod conn;
 pub mod content;
 pub mod cookies;
+mod display;
 mod doc;
 mod download;
 mod limit;
@@ -250,10 +252,16 @@ impl Server {
             .name(format!("session-{id}"))
             .spawn(move || {
                 let s = theirs.lock().unwrap_or_else(|e| e.into_inner()).take();
-                match (s, shared.config.isolate.is_some()) {
-                    (Some(s), true) => proxy::run(id, &shared, s),
-                    (Some(s), false) => conn::Conn::new(id, &shared).run(s),
-                    (None, _) => {}
+                let route = s.as_ref().map(|s| display::route(s, shared.config.idle, shared.config.max_request));
+                match (s, route, shared.config.isolate.is_some()) {
+                    (Some(s), Some(display::Route::Display), _) => display::run(id, &shared, s),
+                    (Some(_), Some(display::Route::Idle), _) => {
+                        let l = log::Line { session: id, origin: "-", action: "idle", role: "", name: "", result: "ok" };
+                        shared.log.write(&l);
+                    }
+                    (Some(s), _, true) => proxy::run(id, &shared, s),
+                    (Some(s), _, false) => conn::Conn::new(id, &shared).run(s),
+                    (None, _, _) => {}
                 }
                 // the time first: a host counting no sessions must find it set
                 *shared.quiet_since.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();

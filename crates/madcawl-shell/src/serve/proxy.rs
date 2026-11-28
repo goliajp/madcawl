@@ -24,6 +24,7 @@ mod audit;
 mod content;
 mod netreg;
 mod pages;
+mod pane;
 mod recover;
 #[cfg(test)]
 mod cookie_tests;
@@ -31,7 +32,7 @@ mod cookie_tests;
 mod tests;
 
 use std::collections::{HashMap, VecDeque};
-use std::os::fd::AsRawFd as _;
+use std::os::fd::{AsRawFd as _, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
@@ -44,6 +45,7 @@ use super::log::Line;
 use super::wire::{Got, read_frame};
 use super::{Shared, activation, code, error_frame};
 use content::{Content, Fault};
+pub(crate) use pane::Pane;
 
 pub(crate) fn run(id: u32, shared: &Shared, agent: UnixStream) {
     let mut p = Proxy::new(id, shared);
@@ -73,12 +75,14 @@ struct Proxy<'a> {
     /// its next reply has not said so yet
     jar_lost: bool,
     audit: audit::Budget,
+    /// A pane's display channel, for the content process it starts first
+    display: Option<OwnedFd>,
 }
 
 impl<'a> Proxy<'a> {
     fn new(id: u32, shared: &'a Shared) -> Proxy<'a> {
         let (pages, reserved, tokens) = (Vec::new(), Vec::new(), HashMap::new());
-        Proxy { id, shared, child: None, pages, reserved, lost: VecDeque::new(), crashes: VecDeque::new(), restarts: 0, tokens, jar: None, jar_lost: false, audit: audit::Budget::new() }
+        Proxy { id, shared, child: None, pages, reserved, lost: VecDeque::new(), crashes: VecDeque::new(), restarts: 0, tokens, jar: None, jar_lost: false, audit: audit::Budget::new(), display: None }
     }
 
     fn log(&self, action: &str, result: &str) {
@@ -212,7 +216,7 @@ impl<'a> Proxy<'a> {
     fn start(&mut self) -> std::io::Result<()> {
         let exe = self.shared.config.isolate.as_deref().expect("a proxy runs only with --isolate");
         let args = super::content::args(&self.shared.config, self.id, &self.shared.run);
-        self.child = Some(Content::start(exe, &args)?);
+        self.child = Some(Content::start(exe, &args, self.display.take())?);
         Ok(())
     }
 

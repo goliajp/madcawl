@@ -8,7 +8,7 @@ use std::time::Duration;
 use madcawl_agent::{Frame, kind};
 
 /// How long the rest of a frame may take once its first byte came.
-const BODY_WAIT: Duration = Duration::from_secs(10);
+pub(crate) const BODY_WAIT: Duration = Duration::from_secs(10);
 
 pub(crate) enum Got {
     Frame(Frame),
