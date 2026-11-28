@@ -9,12 +9,22 @@ use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
-use std::os::unix::process::ExitStatusExt as _;
+use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
 
 use madcawl_agent::Frame;
 
 use crate::serve::link::{internal, read_until, write};
 use crate::serve::memory;
+
+/// Where a content process holding a pane page finds its display
+/// channel.
+pub(super) const DISPLAY_FD: i32 = 3;
+const F_SETFD: i32 = 2;
+
+unsafe extern "C" {
+    fn dup2(from: i32, to: i32) -> i32;
+    fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+}
 
 /// How long an ended session's content process may take to close its
 /// pages before it is killed.
@@ -52,9 +62,29 @@ pub(super) fn describe(s: ExitStatus) -> String {
 }
 
 impl Content {
-    pub fn start(exe: &Path, args: &[OsString]) -> io::Result<Content> {
+    /// Starts `exe` with `args`; a `display` channel goes to it at
+    /// [`DISPLAY_FD`].
+    pub fn start(exe: &Path, args: &[OsString], display: Option<OwnedFd>) -> io::Result<Content> {
         let (host, theirs) = UnixStream::pair()?;
-        let child = Command::new(exe).args(args).stdin(Stdio::from(OwnedFd::from(theirs))).stdout(Stdio::null()).spawn()?;
+        let mut cmd = Command::new(exe);
+        cmd.args(args).stdin(Stdio::from(OwnedFd::from(theirs))).stdout(Stdio::null());
+        if let Some(d) = &display {
+            let raw = d.as_raw_fd();
+            // SAFETY: only dup2 and fcntl run between fork and exec, both
+            // async-signal-safe; `display` stays open here until spawn returns
+            unsafe {
+                cmd.pre_exec(move || {
+                    let r = match raw == DISPLAY_FD {
+                        true => fcntl(raw, F_SETFD, 0),
+                        false => dup2(raw, DISPLAY_FD),
+                    };
+                    if r < 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
+                });
+            }
+            cmd.args(["--display-fd", &DISPLAY_FD.to_string()]);
+        }
+        let child = cmd.spawn()?;
+        drop(display);
         Ok(Content { child, s: host, buf: Vec::new() })
     }
 

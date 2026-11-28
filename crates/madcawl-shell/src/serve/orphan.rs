@@ -65,11 +65,11 @@ fn wait_exit(pid: i32) -> io::Result<()> {
 /// host inherited without asking for it (a listening socket handed to
 /// the host, say); called first thing, before any thread starts. When
 /// the open ones cannot be listed, every number up to the descriptor
-/// limit is closed instead.
-pub(crate) fn close_inherited_fds() {
+/// limit is closed instead. `keep` is one its parent passed on purpose.
+pub(crate) fn close_inherited_fds(keep: Option<i32>) {
     // SAFETY: getpid has no preconditions
     let fds = crate::rusage::fds(unsafe { getpid() }).unwrap_or_else(|_| (3..sweep_end()).collect());
-    for fd in fds.into_iter().filter(|&fd| fd > 2) {
+    for fd in fds.into_iter().filter(|&fd| fd > 2 && Some(fd) != keep) {
         // SAFETY: nothing in this process holds these yet
         unsafe { close(fd) };
     }

@@ -19,10 +19,12 @@ use super::wire::{Got, read_frame};
 use super::{Shared, code, error_frame};
 
 mod act;
+mod display;
 mod listing;
 mod open;
 mod restore;
 
+pub(crate) use display::Channel;
 pub(crate) use restore::PageState;
 mod shot;
 
@@ -34,6 +36,7 @@ pub(crate) struct Conn<'a> {
     pages: Vec<Page>,
     bucket: Bucket,
     watch: Option<Watch>,
+    display: Option<Channel>,
 }
 
 /// The audit log's word for how a request ended.
@@ -52,6 +55,7 @@ impl<'a> Conn<'a> {
             pages: Vec::new(),
             bucket: Bucket::new(shared.config.rate, shared.config.burst),
             watch: shared.config.watch.and_then(|slow| Watch::for_session(id, slow, shared.config.memory_cap.map(Cap::new))),
+            display: None,
         }
     }
 
@@ -72,7 +76,8 @@ impl<'a> Conn<'a> {
         loop {
             // after a frame too long or malformed the stream cannot be
             // read on: the error goes back and the session ends
-            let (reply, last) = match read_frame(&mut s, max, self.next_expiry()) {
+            let shown = self.serve_display(std::os::fd::AsRawFd::as_raw_fd(&s));
+            let (reply, last) = match shown.unwrap_or_else(|| read_frame(&mut s, max, self.next_expiry())) {
                 Got::Idle if self.pages.is_empty() => {
                     self.log("-", "idle", ("", ""), &Frame::new(kind::RESULT));
                     break;
@@ -118,6 +123,9 @@ impl<'a> Conn<'a> {
         }
         if let Some(cap) = self.shared.config.memory_cap {
             memory::check(Cap::new(cap), self.id);
+        }
+        if f.kind != internal::STATE {
+            self.display_owed();
         }
         reply
     }
@@ -176,8 +184,12 @@ impl<'a> Conn<'a> {
     }
 
     /// How long until the first page's idle time runs out; with no page,
-    /// the idle time itself, after which the session ends.
+    /// the idle time itself, after which the session ends. A pane page,
+    /// drawn on a display channel, does not run out.
     fn next_expiry(&self) -> Option<Duration> {
+        if self.display.is_some() {
+            return None;
+        }
         let idle = self.shared.config.idle;
         let Some(first) = self.pages.iter().map(|p| p.last_used + idle).min() else {
             return Some(idle);
