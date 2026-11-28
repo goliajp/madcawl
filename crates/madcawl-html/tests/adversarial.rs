@@ -1,11 +1,15 @@
 //! Inputs built to make a parser do quadratic work, each parsed at two
-//! sizes, N and 4N. Linear work takes about four times as long at 4N,
-//! quadratic about sixteen; the test asks for less than six, on the
-//! fastest of five runs at each size. Run it with `--release` on a
-//! machine that is not busy: the ratio of a debug build measures the
-//! debug build, and one of a loaded machine measures the load.
+//! sizes, N and 4N. Linear work costs about four times as much at 4N,
+//! quadratic about sixteen; the test asks for less than six. The cost is
+//! the instructions this thread retires, which the kernel counts per
+//! thread: unlike time, the count does not move with the load on the
+//! machine, which core the thread ran on or how much of the input fits
+//! in the cache. It is the fewest of three parses at each size, since
+//! the first one also warms up the allocator and the atom table. The
+//! atom table is one for the process, and its size changes what a name
+//! costs, so the tests here measure one at a time.
 
-use std::time::{Duration, Instant};
+use std::sync::{Mutex, PoisonError};
 
 use madcawl_dom::Dom;
 use madcawl_html::{Options, Step, Tokenizer, TreeBuilder};
@@ -19,23 +23,53 @@ fn parse(input: &[u8]) -> Dom {
     builder.into_sink()
 }
 
-fn fastest(input: &[u8]) -> Duration {
-    (0..5)
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn thread_selfcounts(kind: i32, counts: *mut u64, len: usize) -> i32;
+}
+
+/// Instructions this thread has retired.
+#[cfg(target_os = "macos")]
+fn instructions() -> u64 {
+    // kind 1 is the pair of instructions and cycles
+    let mut counts = [0u64; 2];
+    // SAFETY: the buffer holds the two u64 counters of kind 1
+    let r = unsafe { thread_selfcounts(1, counts.as_mut_ptr(), std::mem::size_of_val(&counts)) };
+    assert_eq!(r, 0, "thread_selfcounts");
+    counts[0]
+}
+
+/// Nanoseconds since a fixed start, where the thread's counters are not read.
+#[cfg(not(target_os = "macos"))]
+fn instructions() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
+}
+
+fn fewest(input: &[u8]) -> u64 {
+    (0..3)
         .map(|_| {
-            let t = Instant::now();
+            let before = instructions();
             std::hint::black_box(parse(input));
-            t.elapsed()
+            instructions() - before
         })
         .min()
         .unwrap()
 }
 
-/// The ratio of the time at 4N to the time at N.
+static MEASURING: Mutex<()> = Mutex::new(());
+
+/// The ratio of the instructions at 4N to those at N.
 fn ratio(name: &str, n: usize, make: impl Fn(usize) -> Vec<u8>) -> f64 {
     let (small, large) = (make(n), make(4 * n));
-    let (a, b) = (fastest(&small), fastest(&large));
-    let r = b.as_secs_f64() / a.as_secs_f64();
-    println!("{name}: N={n} {a:?}, 4N={} {b:?}, 4N/N {r:.2}", 4 * n);
+    // a test that failed while measuring leaves nothing half done
+    let _one = MEASURING.lock().unwrap_or_else(PoisonError::into_inner);
+    let (a, b) = (fewest(&small), fewest(&large));
+    let r = b as f64 / a as f64;
+    println!(
+        "{name}: N={n} {a} instructions, 4N={} {b}, 4N/N {r:.2}",
+        4 * n
+    );
     r
 }
 
@@ -69,7 +103,6 @@ fn deep_nesting_stops_at_the_depth_limit() {
 
 #[test]
 fn many_attributes() {
-    // kept small for the reason given at many_tag_names
     let r = ratio("many attributes", 5_000, |n| {
         let mut s = b"<a".to_vec();
         for i in 0..n {
@@ -93,11 +126,9 @@ fn many_formatting_elements() {
 
 #[test]
 fn many_tag_names() {
-    // small: past a few tens of thousands of names the table outgrows
-    // the cache and each lookup costs more, which measures the memory
-    // rather than the algorithm (5.5 to 6.0 at 20 000 on an idle
-    // machine, with every doubling 2.2 times the time)
-    let r = ratio("many tag names", 5_000, |n| {
+    // every name is new, so each start tag adds one to the atom table:
+    // adding must not cost more as the table grows
+    let r = ratio("many tag names", 20_000, |n| {
         (0..n)
             .flat_map(|i| format!("<t{i}></t{i}>").into_bytes())
             .collect()
