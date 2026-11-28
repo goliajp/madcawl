@@ -81,6 +81,9 @@ pub struct Jsc {
     /// The first realm's `deref` helper, counted: weak handles read
     /// through it once no realm is live.
     pub(crate) deref: Value,
+    /// The structured clone's test for a platform object, made on the
+    /// base context when first needed, counted (`builtins.rs`).
+    pub(crate) platform: Value,
     /// The private property name a wrapper's members hang on.
     pub(crate) members_name: JSStringRef,
     /// How many times a member was taken out of a container.
@@ -142,6 +145,7 @@ impl Jsc {
             scratch: Vec::new(),
             proxies: HashMap::new(),
             deref: Value(0),
+            platform: Value(0),
             // SAFETY: a static string; released in Drop
             members_name: unsafe { ffi::JSStringCreateWithUTF8CString(c"members".as_ptr()) },
             member_writes: 0,
@@ -235,6 +239,7 @@ impl Drop for Jsc {
         }
         self.drop_pending();
         self.unprotect(self.deref);
+        self.unprotect(self.platform);
         for (p, (f, _)) in std::mem::take(&mut self.proxies) {
             self.unprotect(Value(p));
             self.unprotect(f);

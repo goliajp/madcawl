@@ -151,6 +151,7 @@ unsafe extern "C" {
         line: i32,
         exception: *mut JSValueRef,
     ) -> JSObjectRef;
+    pub fn JSObjectMakeFunctionWithCallback(ctx: JSContextRef, name: JSStringRef, f: CallAsFunctionCallback) -> JSObjectRef;
     pub fn JSObjectMakeArray(ctx: JSContextRef, argc: usize, argv: *const JSValueRef, exception: *mut JSValueRef)
     -> JSObjectRef;
     pub fn JSObjectMakeError(ctx: JSContextRef, argc: usize, argv: *const JSValueRef, exception: *mut JSValueRef)
