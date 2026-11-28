@@ -65,6 +65,7 @@ mod host;
 mod script;
 mod sig;
 mod value;
+mod windows;
 
 pub mod trial;
 
@@ -81,3 +82,4 @@ pub use handle::{Member, Root};
 pub use script::{ModuleRequest, ScriptOrigin};
 pub use sig::{AttributeSig, Effects, IdlType, Signature};
 pub use value::{ArrayType, ErrorKind, HostRef, Key, Owned, Tree, ValueKind};
+pub use windows::Windows;

@@ -30,7 +30,7 @@ impl Jsc {
         let Some(&first) = words.first() else { return true };
         let realm = record(first).realm;
         let settled = |&w: &u64| record(w).strong && !record(w).grouped;
-        if self.realms[realm as usize].detached || (tree == Tree::Anchored && words.iter().all(settled)) {
+        if record(first).gone || (tree == Tree::Anchored && words.iter().all(settled)) {
             return true;
         }
         self.words_placed += words.len() as u64;

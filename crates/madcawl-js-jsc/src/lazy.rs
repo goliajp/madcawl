@@ -25,7 +25,7 @@ impl Jsc {
         }
         // SAFETY: `make` reads its context as Jsc and H
         let f = unsafe { Bound::<madcawl_js::HostFn, Jsc, H>::host_fn(make::<H>) };
-        let kind = FnKind::Host { f: f.get(), data: u64::from(realm.0), thunk: thunk::<H> };
+        let kind = FnKind::Host { f: f.get(), data: u64::from(realm.0) | u64::from(realm.2) << 32, thunk: thunk::<H> };
         let fproto = self.helper(realm.0, Helper::FunctionProto);
         let make = make_function(self, ctx, FnRec { kind, host_type: std::any::TypeId::of::<H>() }, fproto);
         let done = self.call_helper(realm.0, Helper::Lazy, &[global, list, make]);
@@ -39,8 +39,9 @@ impl Jsc {
 }
 
 /// `make(i)`: the interface object of the realm's `i`th lazy class,
-/// made now if no wrapper or earlier read made it; the realm is the
-/// function's data word. Throws a TypeError once the realm is detached.
+/// made now if no wrapper or earlier read made it; the realm's slot and
+/// generation are the function's data word. Throws a TypeError once
+/// the realm is detached.
 ///
 /// # Safety
 /// As for any [`madcawl_js::HostFn`] bound to Jsc and `H`, made by
@@ -49,10 +50,12 @@ unsafe extern "C" fn make<H: Host<Jsc>>(ctx: *mut Ctx, _this: u64, argv: *const 
     // SAFETY: the caller's
     let (e, _) = unsafe { Ctx::parts::<Jsc, H>(ctx) };
     // SAFETY: the context of this call
-    let realm = unsafe { (*ctx).data } as u32;
+    let data = unsafe { (*ctx).data };
+    let (realm, generation) = (data as u32, (data >> 32) as u32);
     // an accessor kept after its realm was let go: what it would make
-    // its interface from is gone with the realm
-    if e.realms[realm as usize].detached {
+    // its interface from is gone with the realm, whose slot may hold
+    // another by now
+    if e.realms[realm as usize].detached || e.realms[realm as usize].generation != generation {
         return e.throw_new(madcawl_js::ErrorKind::Type, "the interface's window is gone").into_raw().0;
     }
     // SAFETY: the helper passes one number

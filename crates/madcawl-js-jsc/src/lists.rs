@@ -102,7 +102,7 @@ fn target(obj: JSObjectRef) -> Option<(Frame, ListCalls)> {
     let e = unsafe { &*f.engine };
     // SAFETY: the private data of a list class's object is its record
     let rec = unsafe { &*ffi::JSObjectGetPrivate(obj).cast::<WrapRec>() };
-    if e.halted() || rec.orphan || e.realms[rec.realm as usize].detached {
+    if e.halted() || rec.orphan || rec.gone {
         return None;
     }
     let calls = *e.classes.lists.get(&rec.id.0)?;

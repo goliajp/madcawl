@@ -3,7 +3,7 @@
 //! built-ins the adapter's helpers use, a stop asked for while a
 //! WindowProxy is made.
 
-use madcawl_js::{ClassDef, Control, Engine, ErrorKind, Host, HostRef, Interrupt, Key, ModuleRequest, Owned, ScriptOrigin};
+use madcawl_js::{ClassDef, Control, Engine, ErrorKind, Host, HostRef, Interrupt, Key, ModuleRequest, Owned, ScriptOrigin, Windows};
 use madcawl_js_jsc::{Jsc, Realm, Value};
 use madcawl_str::DomString;
 

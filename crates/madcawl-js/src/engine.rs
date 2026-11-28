@@ -25,8 +25,9 @@ use crate::value::{ErrorKind, HostRef, Key, Owned, Tree, ValueKind};
 /// handle passes from one to another.
 ///
 /// Every engine has [`Control`] (interrupts from other threads, the
-/// memory limits) and [`crate::Builtins`] (the realm's own builtins).
-pub trait Engine: Control + crate::Builtins + Sized + 'static {
+/// memory limits), [`crate::Builtins`] (the realm's own builtins) and
+/// [`crate::Windows`] (browsing contexts' windows).
+pub trait Engine: Control + crate::Builtins + crate::Windows + Sized + 'static {
     /// A script value: 8 bytes, copied by its bits, opaque to the host.
     type Value: Copy + Eq + Debug;
     type Realm: Copy + Eq + Debug;
@@ -97,22 +98,6 @@ pub trait Engine: Control + crate::Builtins + Sized + 'static {
     fn to_boolean(&self, v: Self::Value) -> bool;
 
     fn new_realm(&mut self) -> Self::Realm;
-    /// A WindowProxy: the object script gets for a browsing context's
-    /// window, forwarding every property access to the global object of
-    /// `realm`; thrown, with nothing registered, when script is halted
-    /// and the engine needs script to make one. What `this` the global's
-    /// own accessors see is settled with the global as a host object.
-    fn new_window_proxy(&mut self, realm: Self::Realm) -> Owned<Self::Value>;
-    /// Navigation: `proxy` forwards to the global of `realm` from now on.
-    /// Script that holds the proxy sees the new global through the same
-    /// object; the old realm is detached by the host as usual.
-    ///
-    /// `realm` is one of this isolate's. A window in another agent
-    /// cluster (a cross-site iframe, an opener) is never a target: the
-    /// host gives script a host object that stands for it instead.
-    fn set_window_proxy_target(&mut self, proxy: Self::Value, realm: Self::Realm);
-    /// The realm `proxy` forwards to; `None` when `proxy` is no WindowProxy.
-    fn window_proxy_target(&self, proxy: Self::Value) -> Option<Self::Realm>;
     fn global(&mut self, realm: Self::Realm) -> Owned<Self::Value>;
     /// Let the realm go: no more script runs in it, and what only it
     /// holds is left to the collector. Objects other realms hold stay.

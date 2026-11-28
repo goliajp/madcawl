@@ -111,6 +111,21 @@ impl Jsc {
         self.take(p)
     }
 
+    /// A window of another origin as `realm` sees it (`Helper::CrossOrigin`).
+    pub(crate) fn cross_origin(&mut self, realm: Realm, members: Value, deny: Value) -> Owned<Value> {
+        self.realm_ctx(realm);
+        if self.halted() {
+            return Jsc::owned(THROWN);
+        }
+        match self.call_helper(realm.0, Helper::CrossOrigin, &[members, deny]) {
+            Ok(o) => self.take(o),
+            Err(_) => {
+                self.after_stop();
+                Jsc::owned(THROWN)
+            }
+        }
+    }
+
     /// Point `proxy` at the global of `realm`: a plain property set on a
     /// record with no prototype, so nothing can stop or intercept it.
     pub(crate) fn retarget(&mut self, proxy: Value, realm: Realm) {

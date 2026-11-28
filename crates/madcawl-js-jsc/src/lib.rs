@@ -52,6 +52,8 @@ mod strings;
 mod typed;
 mod value;
 mod weak;
+mod window_helpers;
+mod windows;
 mod wrap;
 
 pub use collect::{JscTracer, JscUnlinker};

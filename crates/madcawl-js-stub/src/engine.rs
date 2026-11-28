@@ -131,18 +131,6 @@ impl Engine for Stub {
         self.retain(g)
     }
 
-    fn new_window_proxy(&mut self, realm: Realm) -> Owned<Value> {
-        self.window_proxy(realm)
-    }
-
-    fn set_window_proxy_target(&mut self, proxy: Value, realm: Realm) {
-        self.retarget(proxy, realm);
-    }
-
-    fn window_proxy_target(&self, proxy: Value) -> Option<Realm> {
-        self.proxy_realm(proxy)
-    }
-
     fn detach_realm(&mut self, realm: Realm) {
         detach(self, realm);
     }

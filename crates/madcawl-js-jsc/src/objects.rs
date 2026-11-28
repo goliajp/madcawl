@@ -29,7 +29,7 @@ pub(crate) type Report = unsafe fn(*mut Jsc, *mut (), Value);
 pub(crate) enum FnKind {
     Host { f: HostFn, data: u64, thunk: Thunk },
     /// `job(arg)`, both counted until it ran.
-    Micro { job: Value, arg: Value, realm: u32 },
+    Micro { job: Value, arg: Value, realm: u32, generation: u32 },
     Ran,
 }
 
@@ -45,9 +45,12 @@ pub(crate) struct WrapRec {
     pub id: ClassId,
     pub host_type: TypeId,
     pub js: Value,
-    /// The realm it was made in: once that realm is detached its host
-    /// is gone, and nothing about the wrapper reaches a host again.
+    /// The slot of the realm it belongs to: the one it was made in, or
+    /// the one its host object moved to (`move_wrapper`).
     pub realm: u32,
+    /// That realm was detached: its host is gone, and nothing about the
+    /// wrapper reaches a host again.
+    pub gone: bool,
     /// Finalized: its notice is queued.
     pub dead: bool,
     /// Refused by `wrapper_upgrade`: the host let go of it already, and

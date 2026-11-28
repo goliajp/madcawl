@@ -32,7 +32,7 @@ impl Jsc {
             self.unprotect(arg.into_raw());
             return;
         }
-        let kind = FnKind::Micro { job: job.into_raw(), arg: arg.into_raw(), realm };
+        let kind = FnKind::Micro { job: job.into_raw(), arg: arg.into_raw(), realm, generation: self.realms[realm as usize].generation };
         let ctx = self.realms[realm as usize].ctx;
         let fproto = self.helper(realm, Helper::FunctionProto);
         let rec = FnRec { kind, host_type: std::any::TypeId::of::<()>() };
@@ -147,10 +147,11 @@ fn trampoline<'a>(t: Value) -> Option<&'a mut FnKind> {
 
 /// Run the job of a trampoline, once.
 pub(crate) fn run_job(e: &mut Jsc, ctx: JSContextRef, rec: &mut FnRec, host: *mut (), report: Report) {
-    let FnKind::Micro { job, arg, realm } = std::mem::replace(&mut rec.kind, FnKind::Ran) else {
+    let FnKind::Micro { job, arg, realm, generation } = std::mem::replace(&mut rec.kind, FnKind::Ran) else {
         return;
     };
-    let detached = e.realms[realm as usize].detached;
+    let d = &e.realms[realm as usize];
+    let detached = d.detached || d.generation != generation;
     if !detached && !e.halted() {
         let mut exc: JSValueRef = std::ptr::null();
         // SAFETY: a counted job and argument of this isolate

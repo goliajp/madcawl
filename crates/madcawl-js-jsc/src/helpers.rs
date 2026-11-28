@@ -1,4 +1,5 @@
-//! The script helpers each realm makes once, and their order.
+//! The script helpers each realm makes once, and their order; those
+//! for windows and handlers are in `window_helpers.rs`.
 
 /// The helpers, in the order the script below returns them.
 #[derive(Clone, Copy)]
@@ -11,35 +12,37 @@ pub(crate) enum Helper {
     EnqueueAll = 5,
     WeakRef = 6,
     Deref = 7,
-    Proxy = 8,
-    Handler = 9,
-    Named = 10,
-    FunctionProto = 11,
-    ObjectProto = 12,
-    Call = 13,
-    Group = 14,
-    Ungroup = 15,
-    DerefAll = 16,
-    Constructor = 17,
-    ErrorProto = 18,
-    Iterable = 19,
-    ErrorInfo = 20,
-    IteratorOf = 21,
-    Lazy = 22,
+    FunctionProto = 8,
+    ObjectProto = 9,
+    Call = 10,
+    Group = 11,
+    Ungroup = 12,
+    DerefAll = 13,
+    Constructor = 14,
+    ErrorProto = 15,
+    Iterable = 16,
+    ErrorInfo = 17,
+    IteratorOf = 18,
+    Lazy = 19,
+    // made by `WINDOW_HELPERS` (`window_helpers.rs`)
+    Proxy = 20,
+    Handler = 21,
+    Named = 22,
+    CrossOrigin = 23,
 }
 
 impl Helper {
-    pub(crate) const LAST: Helper = Helper::Lazy;
+    /// The last of those `HELPERS` makes; `WINDOW_HELPERS` makes the rest.
+    pub(crate) const LAST_OF_FIRST: Helper = Helper::Lazy;
+    pub(crate) const LAST: Helper = Helper::CrossOrigin;
 }
 
 // Page script runs in the realm and may replace any global or
 // prototype member: everything the helpers use is taken when the realm
 // is made, before any page script, and called through `apply`; their
 // descriptors and arrays have no prototype to intercept a lookup. The
-// one exception is the direct `eval` that compiles a handler: it is
-// looked up when called, through the handler's scopes, so a page that
-// replaced it runs its own code there. The helpers are strict, so that
-// page code they call finds none of them as its `caller`.
+// helpers are strict, so that page code they call finds none of them as
+// its `caller`. `WINDOW_HELPERS` follows the same rules.
 pub(crate) const HELPERS: &str = r#"(function () {
   'use strict';
   const dp = Object.defineProperty;
@@ -79,10 +82,8 @@ pub(crate) const HELPERS: &str = r#"(function () {
   const wmGet = WM.prototype.get;
   const wmSet = WM.prototype.set;
   const wmDelete = WM.prototype.delete;
-  const P = Proxy;
-  const R = { __proto__: null, get: Reflect.get, set: Reflect.set, ownKeys: Reflect.ownKeys,
-    gopd: Reflect.getOwnPropertyDescriptor, define: Reflect.defineProperty, proto: Reflect.getPrototypeOf,
-    setProto: Reflect.setPrototypeOf, del: Reflect.deleteProperty };
+  const R = { __proto__: null, get: Reflect.get, set: Reflect.set, gopd: Reflect.getOwnPropertyDescriptor,
+    define: Reflect.defineProperty, proto: Reflect.getPrototypeOf, setProto: Reflect.setPrototypeOf };
   // each placed wrapper to its tree's group, which holds every wrapper
   // of the tree: one held keeps all, and none held lets all go
   const groupOf = new WM();
@@ -93,17 +94,6 @@ pub(crate) const HELPERS: &str = r#"(function () {
     apply(setAdd, g, [w]);
     apply(wmSet, groupOf, [w, g]);
   };
-  // the scopes come innermost first (element, form, document). Sloppy,
-  // for `with`, and made by `Function`, so that the code it compiles
-  // sees the global scope and the scopes, not the names in here
-  const handler = Function('__mcParams', '__mcBody', '__mcScopes', `
-    const __mcS = [{ __proto__: null }, { __proto__: null }, { __proto__: null }];
-    for (let __mcI = 0; __mcI < 3 && __mcI < __mcScopes.length; __mcI++) __mcS[2 - __mcI] = __mcScopes[__mcI];
-    let __mcP = '';
-    for (let __mcI = 0; __mcI < __mcParams.length; __mcI++) __mcP += (__mcI ? ',' : '') + __mcParams[__mcI];
-    with (__mcS[0]) with (__mcS[1]) with (__mcS[2]) {
-      return eval('(function (' + __mcP + ') {\\n' + __mcBody + '\\n})');
-    }`);
   return [
     (o, n, g, s, unforgeable) => {
       named(g, 'get ' + n, 0);
@@ -125,29 +115,6 @@ pub(crate) const HELPERS: &str = r#"(function () {
     (jobs) => { for (let i = 0; i < jobs.length; i++) apply(then, resolved, [jobs[i]]); },
     (o) => new WR(o),
     (w) => apply(deref, w, []),
-    // a WindowProxy, and the record whose `g` is its target: the host
-    // sets `g` as a plain property, which runs no script
-    (t) => {
-      const state = { __proto__: null, g: t };
-      const h = {
-        __proto__: null,
-        get: (_, k) => R.get(state.g, k),
-        set: (_, k, v) => R.set(state.g, k, v),
-        has: (_, k) => k in state.g,
-        deleteProperty: (_, k) => R.del(state.g, k),
-        ownKeys: () => R.ownKeys(state.g),
-        getOwnPropertyDescriptor: (_, k) => {
-          const d = R.gopd(state.g, k);
-          if (d) d.configurable = true;
-          return d;
-        },
-        defineProperty: (_, k, d) => R.define(state.g, k, d),
-        getPrototypeOf: () => R.proto(state.g),
-      };
-      return [new P(create(null), h), state];
-    },
-    handler,
-    named,
     Function.prototype,
     Object.prototype,
     Function.prototype.call,

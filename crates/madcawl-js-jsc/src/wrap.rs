@@ -31,6 +31,7 @@ impl Jsc {
             host_type: TypeId::of::<H>(),
             js: Value(0),
             realm: realm.0,
+            gone: false,
             dead: false,
             orphan: false,
             strong: true,
@@ -58,6 +59,22 @@ impl Jsc {
         Jsc::owned(w)
     }
 
+    /// The wrapper of `word` belongs to `realm` from now on. A group it
+    /// is in stays in the old realm's map until the host places it again,
+    /// which it does for a node that moved.
+    pub(crate) fn rehome(&mut self, word: u64, realm: Realm) {
+        let to = self.index(realm);
+        // SAFETY: a live record the host holds the word of
+        let rec = unsafe { &mut *(word as *mut WrapRec) };
+        assert!(!rec.gone && !self.realms[to as usize].detached, "a wrapper moves between live realms");
+        if rec.realm == to {
+            return;
+        }
+        self.realms[rec.realm as usize].wrappers.remove(&(word as usize));
+        self.realms[to as usize].wrappers.insert(word as usize);
+        rec.realm = to;
+    }
+
     pub(crate) fn word_of(wrapper: Value) -> u64 {
         // SAFETY: a live wrapper, whose private data is its record
         (unsafe { ffi::JSObjectGetPrivate(wrapper.0 as _) }) as u64
@@ -66,13 +83,14 @@ impl Jsc {
     /// A strong wrapper is alive. Any other may have been found dead by
     /// a collection whose sweep has not reached it yet, which only its
     /// `WeakRef` tells: protecting such an object would keep a pointer
-    /// to memory the sweep frees.
+    /// to memory the sweep frees. One whose realm was detached is
+    /// refused: it has neither, and its slot may hold another realm.
     pub(crate) fn upgrade(&mut self, word: u64) -> Option<Owned<Value>> {
         // SAFETY: a record is freed only once the host was told, or after
         // it was refused here
         let rec = unsafe { &mut *(word as *mut WrapRec) };
         assert!(!rec.orphan, "a refused wrapper's word was cleared");
-        if rec.dead {
+        if rec.dead || rec.gone {
             rec.orphan = true;
             return None;
         }
@@ -101,7 +119,7 @@ impl Jsc {
         }
         // SAFETY: a wrapper's private data is its record
         let rec = unsafe { &*ffi::JSObjectGetPrivate(v.0 as _).cast::<WrapRec>() };
-        let live = !self.realms[rec.realm as usize].detached && !rec.orphan;
+        let live = !rec.gone && !rec.orphan;
         (live && rec.host_type == TypeId::of::<H>() && class.contains(rec.id)).then_some(rec.obj)
     }
 
@@ -115,9 +133,9 @@ impl Jsc {
             // SAFETY: a finalized wrapper's record, freed only here
             let r = unsafe { Box::from_raw(rec) };
             self.unprotect(r.weak);
-            let realm = &mut self.realms[r.realm as usize];
-            realm.wrappers.remove(&(rec as usize));
-            if !r.orphan && !realm.detached {
+            // the slot may hold another realm, whose set never had it
+            self.realms[r.realm as usize].wrappers.remove(&(rec as usize));
+            if !r.orphan && !r.gone {
                 (class_of::<H>(&r).host_ops().wrapper_died)(host, r.obj);
                 n += 1;
             }

@@ -2,7 +2,7 @@
 //! microtasks, exceptions and interrupts.
 
 use madcawl_js::{
-    Bound, ClassDef, Control, Ctx, Engine, ErrorKind, Halt, Host, HostRef, Interrupt, Key, ModuleRequest, Owned, ScriptOrigin,
+    Bound, ClassDef, Control, Ctx, Engine, ErrorKind, Halt, Host, HostRef, Interrupt, Key, ModuleRequest, Owned, ScriptOrigin, Windows,
 };
 use madcawl_js_jsc::{Jsc, Value};
 use madcawl_str::DomString;

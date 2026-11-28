@@ -113,18 +113,6 @@ impl Engine for Jsc {
         self.make_realm()
     }
 
-    fn new_window_proxy(&mut self, realm: Realm) -> Owned<Value> {
-        self.window_proxy(realm)
-    }
-
-    fn set_window_proxy_target(&mut self, proxy: Value, realm: Realm) {
-        self.retarget(proxy, realm);
-    }
-
-    fn window_proxy_target(&self, proxy: Value) -> Option<Realm> {
-        self.proxies.get(&proxy.0).map(|&(_, r)| r)
-    }
-
     fn global(&mut self, realm: Realm) -> Owned<Value> {
         let ctx = self.realm_ctx(realm);
         // SAFETY: a live realm
@@ -134,7 +122,9 @@ impl Engine for Jsc {
 
     fn detach_realm(&mut self, realm: Realm) {
         let i = self.index(realm);
-        crate::protos::detach(self, i);
+        if self.realms[i as usize].generation == realm.2 {
+            crate::protos::detach(self, i);
+        }
     }
 
     fn live_realms(&self) -> usize {

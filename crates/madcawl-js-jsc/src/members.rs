@@ -17,9 +17,10 @@ fn record<'a>(word: u64) -> &'a mut WrapRec {
 }
 
 impl Jsc {
-    /// Keep `v` beside `owner`, a live wrapper.
+    /// Keep `v` beside `owner`, a live wrapper of a live realm.
     pub(crate) fn add_member(&mut self, owner: Value, v: Value) {
         let rec = record(Self::word_of(owner));
+        assert!(!rec.gone, "a member of a detached realm's wrapper");
         let ctx = self.realms[rec.realm as usize].ctx;
         if rec.container == Value(0) {
             // SAFETY: a plain object of a live realm, with no prototype, so
@@ -46,7 +47,7 @@ impl Jsc {
     /// then, nor when script was being stopped as it was read.
     pub(crate) fn remove_member(&mut self, owner: u64, v: Value) {
         let rec = record(owner);
-        if rec.dead || self.realms[rec.realm as usize].detached {
+        if rec.dead || rec.gone {
             return;
         }
         // held while its container is written, which may allocate

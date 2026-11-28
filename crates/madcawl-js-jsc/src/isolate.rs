@@ -14,9 +14,10 @@ use crate::objects::{Classes, WrapRec};
 use crate::protos::RealmData;
 use crate::value::Value;
 
-/// A realm's number in its isolate, and the isolate's.
+/// A realm's slot in its isolate, the isolate's number, and the slot's
+/// generation: a slot whose realm was detached is used again.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Realm(pub(crate) u32, pub(crate) u32);
+pub struct Realm(pub(crate) u32, pub(crate) u32, pub(crate) u32);
 
 /// What the framework's finalizers write: they run inside whatever
 /// call allocated, so they never touch the isolate itself.
@@ -165,7 +166,7 @@ impl Jsc {
         let i = self.index(r);
         self.current = i;
         let d = &self.realms[i as usize];
-        assert!(!d.detached, "a detached realm");
+        assert!(!d.detached && d.generation == r.2, "a detached realm");
         d.ctx
     }
 

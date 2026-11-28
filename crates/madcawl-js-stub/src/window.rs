@@ -1,7 +1,8 @@
 //! WindowProxy: one object per browsing context that forwards to the
-//! global object of the realm its context shows now.
+//! global object of the realm its context shows now; the engine's
+//! window methods.
 
-use madcawl_js::Owned;
+use madcawl_js::{Engine, Owned, Windows};
 
 use crate::cell::{Body, Cell};
 use crate::isolate::{Realm, Stub};
@@ -43,5 +44,25 @@ impl Stub {
             Some(Body::Proxy { global, .. }) => *global,
             _ => v,
         }
+    }
+}
+
+impl Windows for Stub {
+    fn new_window_proxy(&mut self, realm: Realm) -> Owned<Value> {
+        self.window_proxy(realm)
+    }
+
+    fn set_window_proxy_target(&mut self, proxy: Value, realm: Realm) {
+        self.retarget(proxy, realm);
+    }
+
+    fn window_proxy_target(&self, proxy: Value) -> Option<Realm> {
+        self.proxy_realm(proxy)
+    }
+
+    /// The stub has no proxies: `members` itself, other keys absent
+    /// rather than denied.
+    fn new_cross_origin_object(&mut self, _realm: Realm, members: Value, _deny: Value) -> Owned<Value> {
+        self.retain(members)
     }
 }

@@ -5,7 +5,7 @@
 
 mod support;
 
-use madcawl_js::{Deadline, Engine, ErrorKind, Halt, HostRef, Interrupt, Control, Key, Step, ValueKind};
+use madcawl_js::{Deadline, Engine, ErrorKind, Halt, HostRef, Interrupt, Control, Key, Step, ValueKind, Windows};
 use madcawl_js_stub::Stub;
 use madcawl_str::DomString;
 use support::*;
