@@ -73,7 +73,7 @@ pub use class::{
     Attribute, Bound, ClassDef, ClassId, Constant, Ctx, Getter, HostFn, HostOps, IndexGetter,
     Interceptors, Length, NamedGetter, Operation, Setter,
 };
-pub use builtins::{Builtins, ErrorInfo};
+pub use builtins::{Builtins, Deferred, ErrorInfo};
 pub use engine::Engine;
 pub use host::Host;
 pub use graph::{Deadline, Step, Tracer, Unlinker};

@@ -202,21 +202,21 @@ return [throws(() => before.dispatchEvent(new Event('x'))), throws(() => after.d
 }
 
 /// A host microtask queued in a window's realm that went before it ran
-/// stays unrun, though another window has that realm's slot by then.
-/// The engine queues a job in the realm it last entered, so each window
-/// makes a wrapper just before.
+/// stays unrun, though another window has that realm's slot by then;
+/// one queued in the realm of the window whose `queueMicrotask` was
+/// called, whichever realm a wrapper was last made in.
 #[test]
 fn a_microtask_of_a_window_that_went_does_not_run_in_the_window_after_it() {
     let (mut e, mut h) = page("<body>");
     let src = "window.log = []; var f = document.body.appendChild(document.createElement('iframe')); var w = f.contentWindow;
-w.document.createElement('p'); w.queueMicrotask(() => log.push('old'));
-document.createElement('p'); queueMicrotask(() => log.push('top')); f.remove();
-var g = document.body.appendChild(document.createElement('iframe'));
-g.contentDocument.createElement('p'); g.contentWindow.queueMicrotask(() => log.push('new'));
+w.queueMicrotask(() => log.push('old')); var b = f.contentDocument.body; queueMicrotask(() => log.push('top')); f.remove();
+w.queueMicrotask(() => log.push('gone'));
+var g = document.body.appendChild(document.createElement('iframe')); g.contentWindow.queueMicrotask(() => log.push('new'));
+g.contentDocument.body; queueMicrotask(() => log.push('last'));
 return log.join();";
     assert_eq!(eval(&mut e, &mut h, src), "");
     assert_eq!(e.realm_slots(), 2, "the second iframe has the first one's slot");
-    assert_eq!(eval(&mut e, &mut h, "return log.join();"), "top,new");
+    assert_eq!(eval(&mut e, &mut h, "return log.join();"), "top,new,last");
     h.close(&mut e);
 }
 

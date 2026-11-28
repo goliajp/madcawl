@@ -173,10 +173,6 @@ impl Engine for Jsc {
         self.take(iface)
     }
 
-    fn define_interfaces<H: Host<Jsc>>(&mut self, _host: &mut H, realm: Realm, obj: Value, classes: &'static [&'static ClassDef<Jsc, H>]) -> bool {
-        self.lazy_interfaces(realm, obj, classes)
-    }
-
     fn throw(&mut self, exception: Owned<Value>) -> Owned<Value> {
         let x = exception.into_raw();
         if !self.halted() {
@@ -258,10 +254,10 @@ impl Engine for Jsc {
         self.collect_host(host, deadline)
     }
 
-    fn enqueue_microtask(&mut self, job: Owned<Value>, arg: Owned<Value>) {
+    fn enqueue_microtask(&mut self, realm: Realm, job: Owned<Value>, arg: Owned<Value>) {
         // the host type is only known to calls that take the host: the
         // trampoline finds it in the frame of the call that runs it
-        self.queue_job(job, arg);
+        self.queue_job(realm, job, arg);
     }
 
     fn run_microtasks<H: Host<Jsc>>(&mut self, host: &mut H) {

@@ -1,7 +1,7 @@
 //! The host's reads and definitions through a realm's own builtins
 //! (`helpers.rs`).
 
-use madcawl_js::{ArrayType, Builtins, ErrorInfo, Host, Owned};
+use madcawl_js::{ArrayType, Builtins, Deferred, ErrorInfo, Host, Owned};
 use madcawl_str::DomString;
 
 use crate::ffi;
@@ -10,6 +10,11 @@ use crate::isolate::{Jsc, Realm};
 use crate::value::{UNDEFINED, Value};
 
 impl Builtins for Jsc {
+    fn current_realm(&self) -> Option<Realm> {
+        self.running_realm()
+            .map(|r| Realm(r, self.id, self.realms[r as usize].generation))
+    }
+
     fn typed_array(&mut self, v: Value) -> Option<(ArrayType, &mut [u8])> {
         self.typed_array_bytes(v)
     }
@@ -45,6 +50,34 @@ impl Builtins for Jsc {
 
     fn iterator_method<H: Host<Jsc>>(&mut self, host: &mut H, realm: Realm, v: Value) -> Owned<Value> {
         let f = self.helper(self.index(realm), Helper::IteratorOf);
+        self.call_value(host, f, UNDEFINED, &[v])
+    }
+
+    fn array_values<H: Host<Jsc>>(
+        &mut self,
+        host: &mut H,
+        realm: Realm,
+        arr: Value,
+    ) -> Owned<Value> {
+        let f = self.helper(self.index(realm), Helper::ArrayValues);
+        self.call_value(host, f, UNDEFINED, &[arr])
+    }
+
+    fn buffer_source(&mut self, realm: Realm, v: Value) -> Option<&[u8]> {
+        let r = self.index(realm);
+        self.buffer_bytes(r, v)
+    }
+
+    fn new_bytes(&mut self, realm: Realm, bytes: Vec<u8>, buffer: bool) -> Owned<Value> {
+        self.make_bytes(realm, bytes, buffer)
+    }
+
+    fn new_promise(&mut self, realm: Realm) -> Option<Deferred<Value>> {
+        self.make_promise(realm)
+    }
+
+    fn own_entries<H: Host<Jsc>>(&mut self, host: &mut H, realm: Realm, v: Value) -> Owned<Value> {
+        let f = self.helper(self.index(realm), Helper::OwnEntries);
         self.call_value(host, f, UNDEFINED, &[v])
     }
 

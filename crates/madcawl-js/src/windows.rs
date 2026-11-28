@@ -2,12 +2,49 @@
 //! WindowProxy, the object that stands for a window of another origin,
 //! and wrappers moving from one window's realm to another's.
 
+use madcawl_str::DomString;
+
+use crate::class::ClassDef;
 use crate::engine::Engine;
-use crate::value::Owned;
+use crate::value::{Key, Owned};
 
 /// The methods take the engine's own types, so they are bound by
 /// `Engine`, as those of [`crate::Builtins`] are.
 pub trait Windows {
+    /// Put the interface object of each of `classes` on `obj` (the
+    /// global of `realm`), in that order, as a writable, not
+    /// enumerable, configurable data property named as the class, as Web
+    /// IDL has it. `false` when it threw. The default puts each with
+    /// [`Engine::set`] of [`Engine::interface_object`], which is that for
+    /// an engine without property attributes; one with them overrides it.
+    ///
+    /// An engine may make each one when it is first read instead: the
+    /// property is there, in its place among `obj`'s own keys, from the
+    /// start, and reads as that data property once read or written.
+    /// Until then its descriptor may show an accessor.
+    fn define_interfaces<H: crate::Host<Self>>(
+        &mut self,
+        host: &mut H,
+        realm: <Self as Engine>::Realm,
+        obj: <Self as Engine>::Value,
+        classes: &'static [&'static ClassDef<Self, H>],
+    ) -> bool
+    where
+        Self: Engine,
+    {
+        classes.iter().all(|&c| {
+            let i = self.interface_object(realm, c);
+            let ok = self.set(
+                host,
+                obj,
+                Key::Str(&DomString::from_wtf8(c.name.as_bytes())),
+                i.get(),
+            );
+            self.release(i);
+            ok
+        })
+    }
+
     /// A WindowProxy: the object script gets for a browsing context's
     /// window, forwarding every property access to the global object of
     /// `realm`; thrown, with nothing registered, when script is halted

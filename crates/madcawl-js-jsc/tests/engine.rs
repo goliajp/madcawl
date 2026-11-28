@@ -123,7 +123,7 @@ fn microtasks_run_in_order_with_promise_jobs_and_report_their_exceptions() {
     for word in ["one", "boom", "two"] {
         let arg = e.string(DomString::from_wtf8(word.as_bytes()));
         let job = e.retain(f.get());
-        e.enqueue_microtask(job, arg);
+        e.enqueue_microtask(realm, job, arg);
     }
     assert!(h.reported.is_empty());
     e.run_microtasks(&mut h);
@@ -250,14 +250,14 @@ fn a_detached_realms_waiting_microtasks_are_dropped_unrun() {
     let log = e.get(&mut h, g.get(), Key::Str(&DomString::from_wtf8(b"log")));
     e.release(g);
     let arg = e.string(DomString::from_wtf8(b"late"));
-    e.enqueue_microtask(log, arg);
+    e.enqueue_microtask(realm, log, arg);
     e.detach_realm(realm);
     e.run_microtasks(&mut h);
     assert!(h.reported.is_empty(), "the detached realm's job ran: {:?}", h.reported);
     // the other realm's microtasks still run at a checkpoint
     let f = function(&mut e, &mut h, other, "(function (x) { globalThis.got = x; })");
     let arg = e.string(DomString::from_wtf8(b"ok"));
-    e.enqueue_microtask(f, arg);
+    e.enqueue_microtask(other, f, arg);
     e.run_microtasks(&mut h);
     assert_eq!(eval(&mut e, &mut h, other, "got"), "ok");
 }

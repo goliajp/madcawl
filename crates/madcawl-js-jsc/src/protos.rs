@@ -38,7 +38,8 @@ impl Jsc {
         let ctx = unsafe { ffi::JSGlobalContextCreateInGroup(self.group, std::ptr::null_mut()) };
         let mut helpers = Vec::with_capacity(Helper::LAST as usize + 1);
         self.make_helpers(ctx, HELPERS, Helper::LAST_OF_FIRST as u32 + 1, &mut helpers);
-        self.make_helpers(ctx, WINDOW_HELPERS, Helper::LAST as u32 - Helper::LAST_OF_FIRST as u32, &mut helpers);
+        self.make_helpers(ctx, WINDOW_HELPERS, Helper::LAST_OF_WINDOW as u32 - Helper::LAST_OF_FIRST as u32, &mut helpers);
+        self.make_helpers(ctx, crate::data_helpers::DATA_HELPERS, Helper::LAST as u32 - Helper::LAST_OF_WINDOW as u32, &mut helpers);
         if self.deref == Value(0) {
             self.deref = helpers[Helper::Deref as usize];
             self.protect(self.deref);
@@ -80,7 +81,7 @@ impl Jsc {
     pub(crate) fn host_function<H: Host<Jsc>>(&mut self, realm: Realm, name: &'static str, length: u8, f: madcawl_js::Bound<madcawl_js::HostFn, Jsc, H>, data: u64) -> madcawl_js::Owned<Value> {
         let ctx = self.realm_ctx(realm);
         let fproto = self.helper(realm.0, Helper::FunctionProto);
-        let kind = FnKind::Host { f: f.get(), data, thunk: thunk::<H> };
+        let kind = FnKind::Host { f: f.get(), data, thunk: thunk::<H>, realm: realm.0, generation: realm.2 };
         let v = make_function(self, ctx, FnRec { kind, host_type: std::any::TypeId::of::<H>() }, fproto);
         let n = self.string_of(&madcawl_str::DomString::from_wtf8(name.as_bytes()));
         // stopped while naming it, the function stays usable, unnamed
@@ -158,7 +159,8 @@ impl Jsc {
     /// interface then throws on `new`, as one without a constructor.
     fn constructor_object<H: Host<Jsc>>(&mut self, realm: u32, ctx: JSContextRef, f: madcawl_js::HostFn, proto: Value) -> Option<Value> {
         let fproto = self.helper(realm, Helper::FunctionProto);
-        let kind = FnKind::Host { f, data: 0, thunk: thunk::<H> };
+        let generation = self.realms[realm as usize].generation;
+        let kind = FnKind::Host { f, data: 0, thunk: thunk::<H>, realm, generation };
         let native = make_function(self, ctx, FnRec { kind, host_type: std::any::TypeId::of::<H>() }, fproto);
         let made = self.call_helper(realm, Helper::Constructor, &[native, proto]);
         self.unprotect(native);
@@ -170,8 +172,9 @@ impl Jsc {
 
     fn define_members<H: Host<Jsc>>(&mut self, realm: u32, ctx: JSContextRef, class: &'static ClassDef<Jsc, H>, iface: Value, proto: Value) {
         let fproto = self.helper(realm, Helper::FunctionProto);
+        let generation = self.realms[realm as usize].generation;
         let host_fn = |e: &Jsc, f: madcawl_js::HostFn| {
-            let kind = FnKind::Host { f, data: 0, thunk: thunk::<H> };
+            let kind = FnKind::Host { f, data: 0, thunk: thunk::<H>, realm, generation };
             make_function(e, ctx, FnRec { kind, host_type: std::any::TypeId::of::<H>() }, fproto)
         };
         for a in class.attributes {
@@ -188,6 +191,10 @@ impl Jsc {
             let name = self.string_of(&madcawl_str::DomString::from_wtf8(o.name.as_bytes()));
             let f = host_fn(self, o.call.get());
             self.define(realm, Helper::Method, &[target, name, f, Value::number(f64::from(o.length))]);
+            // a pair iterator's `entries` is its @@iterator too
+            if target == proto && o.name == "entries" && class.interceptors.is_none() {
+                self.define(realm, Helper::Iterable, &[proto, crate::value::FALSE, f]);
+            }
             self.unprotect(name);
             self.unprotect(f);
         }

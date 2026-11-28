@@ -81,7 +81,7 @@ impl Stub {
                     }
                 }
                 Link::Class(def, realm) => match member(def, &name, false) {
-                    Some(Member::Get(get)) => return Stub::owned(self.invoke(host, get, obj, &[], 0)),
+                    Some(Member::Get(get)) => return Stub::owned(self.invoke_in(host, realm, get, obj, &[])),
                     Some(Member::Method(table, i)) => return self.method::<H>(realm, table, i),
                     Some(Member::Constant(n)) => return Stub::owned(Value::number(n)),
                     _ => {}
@@ -131,18 +131,18 @@ impl Stub {
         if let PropKey::Name(a) = k {
             let name = name_bytes(a);
             let setter = self.chain::<H>(obj).into_iter().find_map(|l| match l {
-                Link::Class(def, _) => member(def, &name, true),
+                Link::Class(def, realm) => member(def, &name, true).map(|m| (m, realm)),
                 Link::Own(_) => None,
             });
             match setter {
-                Some(Member::Set(Some(set))) => {
-                    let r = self.invoke(host, set, obj, &[v], 0);
+                Some((Member::Set(Some(set)), realm)) => {
+                    let r = self.invoke_in(host, realm, set, obj, &[v]);
                     let ok = r != THROWN;
                     self.release_value(r);
                     return ok;
                 }
                 // a readonly attribute: ignored, as outside strict mode
-                Some(Member::Set(None)) => return true,
+                Some((Member::Set(None), _)) => return true,
                 _ => {}
             }
         }

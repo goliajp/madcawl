@@ -33,8 +33,8 @@ fn halt_in_a_drain(e: &mut Stub, h: &mut Log, realm: Realm, log: Value, body: Cl
     let after = counter(e, realm, log, "after");
     let job = e.new_closure::<Log>(realm, body, vec![after]);
     let left = counter(e, realm, log, "left");
-    e.enqueue_microtask(job, undefined());
-    e.enqueue_microtask(left, undefined());
+    e.enqueue_microtask(realm, job, undefined());
+    e.enqueue_microtask(realm, left, undefined());
     e.run_microtasks(h);
     assert_eq!(h.reported, 0, "a halt reports nothing");
     assert_eq!(num(e, h, log, "left"), 0.0, "the draining stopped");
@@ -71,7 +71,7 @@ fn a_termination_drops_the_queue_and_no_script_runs_again() {
     assert_eq!(e.halt(), Halt::Terminated);
     // a job queued later is dropped as it comes
     let late = counter(&mut e, realm, log.get(), "late");
-    e.enqueue_microtask(late, undefined());
+    e.enqueue_microtask(realm, late, undefined());
     assert_eq!(e.queued_microtasks(), 0);
     e.release(log);
 }
@@ -199,8 +199,8 @@ fn a_job_of_a_detached_realm_is_dropped_unrun() {
     let log = e.new_object(kept);
     let theirs = counter(&mut e, gone, log.get(), "theirs");
     let ours = counter(&mut e, kept, log.get(), "ours");
-    e.enqueue_microtask(theirs, undefined());
-    e.enqueue_microtask(ours, undefined());
+    e.enqueue_microtask(gone, theirs, undefined());
+    e.enqueue_microtask(kept, ours, undefined());
     e.detach_realm(gone);
     e.run_microtasks(&mut h);
     assert_eq!(num(&mut e, &mut h, log.get(), "theirs"), 0.0, "no script runs in a detached realm");

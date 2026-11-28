@@ -40,7 +40,7 @@ pub struct Stub {
     pub(crate) exception: Option<Value>,
     pub(crate) live: usize,
     pub(crate) names: HeldAtoms,
-    pub(crate) microtasks: std::collections::VecDeque<(Value, Value)>,
+    pub(crate) microtasks: std::collections::VecDeque<(u32, Value, Value)>,
     pub(crate) in_checkpoint: bool,
     /// Script and host functions on the stack.
     pub(crate) depth: u32,

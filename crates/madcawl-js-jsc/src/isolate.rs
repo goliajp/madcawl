@@ -48,6 +48,9 @@ pub struct Jsc {
     /// The realm of the last call that named one; errors the adapter
     /// makes come from its constructors.
     pub(crate) current: u32,
+    /// The slot and generation of the realm of the host function being
+    /// run, the standard's current realm: its errors are made there.
+    pub(crate) running: Option<(u32, u32)>,
     pub(crate) classes: Classes,
     pub(crate) shared: *const Shared,
     /// Registered and not yet taken; holds a count.
@@ -118,6 +121,7 @@ impl Jsc {
             base,
             realms: Vec::new(),
             current: 0,
+            running: None,
             classes: Classes::new(),
             shared: Box::into_raw(Box::default()),
             exception: None,
@@ -160,6 +164,13 @@ impl Jsc {
             return Some(self.current);
         }
         (0..self.realms.len() as u32).find(|&i| live(i))
+    }
+
+    /// The realm of the host function being run while it is live.
+    pub(crate) fn running_realm(&self) -> Option<u32> {
+        let (r, generation) = self.running?;
+        let d = &self.realms[r as usize];
+        (!d.detached && d.generation == generation).then_some(r)
     }
 
     pub(crate) fn realm_ctx(&mut self, r: Realm) -> JSContextRef {

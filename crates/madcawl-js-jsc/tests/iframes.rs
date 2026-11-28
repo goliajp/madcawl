@@ -148,13 +148,49 @@ return [w.closed, w.parent, w.top].join();";
 #[test]
 fn a_redirect_to_another_origin_leaves_the_document_unloaded() {
     let (mut e, mut h) = page("<body>");
-    eval(&mut e, &mut h, "var f = document.createElement('iframe'); f.src = '/r'; document.body.appendChild(f); return '';");
+    let src = "window.log = []; var f = document.createElement('iframe'); f.src = '/r'; f.onload = () => log.push('load');
+document.body.appendChild(f); return '';";
+    eval(&mut e, &mut h, src);
     let (id, url) = h.take_frame_requests().remove(0);
     assert_eq!(url, "https://a.test/r");
     h.frame_fetched(id, Some(("https://c.test/landed", b"<p>elsewhere")));
+    assert_eq!(eval(&mut e, &mut h, "return log.join();"), "", "load comes in a task");
     settle_tasks(&mut e, &mut h);
-    let src = "var f = document.querySelector('iframe'); return [f.contentDocument, f.contentWindow.closed].join();";
-    assert_eq!(eval(&mut e, &mut h, src), ",false");
+    let src = "var f = document.querySelector('iframe'); return [f.contentDocument, f.contentWindow.closed, log.join()].join();";
+    assert_eq!(eval(&mut e, &mut h, src), ",false,load");
+    h.close(&mut e);
+}
+
+/// An iframe whose document is of another origin, which is not loaded
+/// here, still fires `load` in a task, and the document it is in waits
+/// for it, as when that document loads in a browser.
+#[test]
+fn an_iframe_of_another_origin_fires_load_and_delays_its_document_s() {
+    let html = "<iframe src='https://b.test/'></iframe><iframe sandbox src=same></iframe><iframe src=r></iframe>
+<script>window.log = []; addEventListener('load', () => log.push('window'));
+document.querySelectorAll('iframe').forEach((f, i) => f.onload = () => log.push(i + ':' + f.contentDocument));</script>";
+    let (mut e, mut h) = page(html);
+    let requests = h.take_frame_requests();
+    let urls: Vec<&str> = requests.iter().map(|(_, u)| u.as_str()).collect();
+    assert_eq!(urls, ["https://a.test/dir/r"], "only the same origin's is fetched");
+    assert_eq!(eval(&mut e, &mut h, "return log.join() + ',' + document.readyState;"), "0:null,1:null,interactive");
+    h.frame_fetched(requests[0].0, Some(("https://c.test/landed", b"<p>elsewhere")));
+    settle_tasks(&mut e, &mut h);
+    assert_eq!(eval(&mut e, &mut h, "return log.join() + ',' + document.readyState;"), "0:null,1:null,2:null,window,complete");
+    h.close(&mut e);
+}
+
+/// An error a host function throws is made in the realm of that
+/// function, the standard's current realm, not in the realm a wrapper
+/// was last made in.
+#[test]
+fn an_error_a_host_function_throws_is_of_that_function_s_realm() {
+    let (mut e, mut h) = page("<body>");
+    let src = "var f = document.body.appendChild(document.createElement('iframe')); var w = f.contentWindow;
+function err(fn) { try { fn(); } catch (x) { return x; } }
+var theirs = err(() => w.queueMicrotask(1)), ours = err(() => { f.contentDocument.body; queueMicrotask(1); });
+return [theirs instanceof w.TypeError, theirs instanceof TypeError, ours instanceof TypeError, ours instanceof w.TypeError].join();";
+    assert_eq!(eval(&mut e, &mut h, src), "true,false,true,false");
     h.close(&mut e);
 }
 

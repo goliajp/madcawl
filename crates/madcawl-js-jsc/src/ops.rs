@@ -220,7 +220,8 @@ impl Jsc {
         })
     }
 
-    /// Throw a new error of `kind` made in the current realm. Making it
+    /// Throw a new error of `kind` made in the realm of the host function
+    /// being run, or else the current realm. Making it
     /// runs script, so it can itself be stopped: then nothing is
     /// registered, as for any call script was being ended in.
     pub(crate) fn throw_new(&mut self, kind: madcawl_js::ErrorKind, message: &str) -> Owned<Value> {
@@ -232,7 +233,7 @@ impl Jsc {
             Reference => 3.0,
         };
         let msg = self.string_of(&DomString::from_wtf8(message.as_bytes()));
-        let r = match self.live_realm() {
+        let r = match self.running_realm().or_else(|| self.live_realm()) {
             Some(realm) => self.call_helper(realm, Helper::Error, &[Value::number(k), msg]),
             // every realm detached: a plain Error, made with no script
             None => {

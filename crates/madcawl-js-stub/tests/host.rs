@@ -20,7 +20,7 @@ fn a_function_gets_its_data_word_on_every_call_and_as_a_microtask() {
     assert_eq!(h.data, 0xD47A);
     h.data = 0;
     let job = e.retain(f.get());
-    e.enqueue_microtask(job, undefined());
+    e.enqueue_microtask(realm, job, undefined());
     e.run_microtasks(&mut h);
     assert_eq!(h.data, 0xD47A, "a host microtask carries its record in its function");
     e.release(f);

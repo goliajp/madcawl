@@ -27,7 +27,8 @@ pub(crate) type Thunk = unsafe fn(*mut Jsc, *mut (), HostFn, u64, u64, *const u6
 pub(crate) type Report = unsafe fn(*mut Jsc, *mut (), Value);
 
 pub(crate) enum FnKind {
-    Host { f: HostFn, data: u64, thunk: Thunk },
+    /// `realm` and `generation` name the realm the function was made in.
+    Host { f: HostFn, data: u64, thunk: Thunk, realm: u32, generation: u32 },
     /// `job(arg)`, both counted until it ran.
     Micro { job: Value, arg: Value, realm: u32, generation: u32 },
     Ran,
@@ -185,13 +186,15 @@ unsafe extern "C" fn call_fn(
     let e = unsafe { &mut *f.engine };
     match rec.kind {
         FnKind::Host { .. } if e.halted() => halted(exception),
-        FnKind::Host { f: hf, data, thunk } => {
+        FnKind::Host { f: hf, data, thunk, realm, generation } => {
             assert_eq!(rec.host_type, f.host_type, "one host type per isolate");
             let this = if this.is_null() { UNDEFINED.0 } else { this as u64 };
+            let saved = e.running.replace((realm, generation));
             // SAFETY: the frame's pointers; `JSValueRef` is the value word
             let r = Value(unsafe { thunk(f.engine, f.host, hf, data, this, argv.cast(), argc) });
             // SAFETY: as above
             let e = unsafe { &mut *f.engine };
+            e.running = saved;
             if r == THROWN {
                 let Some(x) = e.exception.take() else { return halted(exception) };
                 // SAFETY: the framework's exception slot

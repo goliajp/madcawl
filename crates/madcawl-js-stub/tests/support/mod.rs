@@ -3,10 +3,10 @@
 #![allow(dead_code)]
 
 use madcawl_js::{
-    Attribute, AttributeSig, Bound, ClassDef, ClassId, Control, Ctx, Effects, Engine, ErrorKind, Host, HostOps,
+    Attribute, AttributeSig, Bound, Builtins, ClassDef, ClassId, Control, Ctx, Effects, Engine, ErrorKind, Host, HostOps,
     HostRef, IdlType, Interceptors, Interrupt, Key, Owned,
 };
-use madcawl_js_stub::{Stub, Value};
+use madcawl_js_stub::{Realm, Stub, Value};
 use madcawl_str::DomString;
 
 /// A host that counts what it is told, with one host object class.
@@ -20,6 +20,8 @@ pub struct Log {
     pub clock: u64,
     /// The data word the last call of `data_word` got.
     pub data: u64,
+    /// The current realm `size` last read or was written in.
+    pub realm: Option<Realm>,
 }
 
 pub static OPS: HostOps<Stub, Log> = HostOps {
@@ -113,7 +115,8 @@ pub unsafe extern "C" fn item(ctx: *mut Ctx, _this: u64, index: u32) -> u64 {
 pub unsafe extern "C" fn size(ctx: *mut Ctx, _this: u64, _argv: *const u64, argc: usize) -> u64 {
     assert_eq!(argc, 0, "a getter gets no arguments");
     // SAFETY: called with a context for Log
-    let (_, h) = unsafe { Ctx::parts::<Stub, Log>(ctx) };
+    let (e, h) = unsafe { Ctx::parts::<Stub, Log>(ctx) };
+    h.realm = e.current_realm();
     Stub::to_bits(Stub::number(h.size))
 }
 
@@ -121,6 +124,7 @@ pub unsafe extern "C" fn set_size(ctx: *mut Ctx, _this: u64, argv: *const u64, a
     // SAFETY: called with a context for Log and its one argument
     let ((e, h), args) = unsafe { (Ctx::parts::<Stub, Log>(ctx), Stub::values(argv, argc)) };
     h.size = e.as_number(args[0]).unwrap();
+    h.realm = e.current_realm();
     Stub::to_bits(Stub::undefined())
 }
 

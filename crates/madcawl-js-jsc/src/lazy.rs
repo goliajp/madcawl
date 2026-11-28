@@ -25,7 +25,8 @@ impl Jsc {
         }
         // SAFETY: `make` reads its context as Jsc and H
         let f = unsafe { Bound::<madcawl_js::HostFn, Jsc, H>::host_fn(make::<H>) };
-        let kind = FnKind::Host { f: f.get(), data: u64::from(realm.0) | u64::from(realm.2) << 32, thunk: thunk::<H> };
+        let data = u64::from(realm.0) | u64::from(realm.2) << 32;
+        let kind = FnKind::Host { f: f.get(), data, thunk: thunk::<H>, realm: realm.0, generation: realm.2 };
         let fproto = self.helper(realm.0, Helper::FunctionProto);
         let make = make_function(self, ctx, FnRec { kind, host_type: std::any::TypeId::of::<H>() }, fproto);
         let done = self.call_helper(realm.0, Helper::Lazy, &[global, list, make]);

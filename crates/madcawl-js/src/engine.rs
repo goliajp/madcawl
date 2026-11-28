@@ -165,32 +165,6 @@ pub trait Engine: Control + crate::Builtins + crate::Windows + Sized + 'static {
         realm: Self::Realm,
         class: &'static ClassDef<Self, H>,
     ) -> Owned<Self::Value>;
-    /// Put the interface object of each of `classes` on `obj` (the
-    /// global of `realm`), in that order, as a writable, not
-    /// enumerable, configurable data property named as the class, as Web
-    /// IDL has it. `false` when it threw. The default puts each with
-    /// [`Engine::set`] of [`Engine::interface_object`], which is that for
-    /// an engine without property attributes; one with them overrides it.
-    ///
-    /// An engine may make each one when it is first read instead: the
-    /// property is there, in its place among `obj`'s own keys, from the
-    /// start, and reads as that data property once read or written.
-    /// Until then its descriptor may show an accessor.
-    fn define_interfaces<H: Host<Self>>(
-        &mut self,
-        host: &mut H,
-        realm: Self::Realm,
-        obj: Self::Value,
-        classes: &'static [&'static ClassDef<Self, H>],
-    ) -> bool {
-        classes.iter().all(|&c| {
-            let i = self.interface_object(realm, c);
-            let ok = self.set(host, obj, Key::Str(&DomString::from_wtf8(c.name.as_bytes())), i.get());
-            self.release(i);
-            ok
-        })
-    }
-
     /// Register `exception`; returns [`Engine::thrown`].
     fn throw(&mut self, exception: Owned<Self::Value>) -> Owned<Self::Value>;
     fn throw_error(&mut self, kind: ErrorKind, message: &str) -> Owned<Self::Value>;
@@ -333,10 +307,15 @@ pub trait Engine: Control + crate::Builtins + crate::Windows + Sized + 'static {
 
     /// Queue `job(arg)`; `job` is callable (a host function for a host
     /// microtask, its record in the function's data word or in `arg`).
-    /// The job's realm is the realm of its function, as a promise job's
-    /// is its handler's; a job whose realm is detached by the time it
-    /// would run is dropped unrun.
-    fn enqueue_microtask(&mut self, job: Owned<Self::Value>, arg: Owned<Self::Value>);
+    /// The job's realm is `realm`, the queueing caller's (the window whose
+    /// `queueMicrotask` was called); a job whose realm is detached, now
+    /// or by the time it would run, is dropped unrun.
+    fn enqueue_microtask(
+        &mut self,
+        realm: Self::Realm,
+        job: Owned<Self::Value>,
+        arg: Owned<Self::Value>,
+    );
     /// Run microtasks until the queue is empty. The host calls it at
     /// each checkpoint: after a call into script returns with
     /// [`Engine::in_script`] false, and at the end of every task; never

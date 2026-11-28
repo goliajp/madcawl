@@ -29,12 +29,18 @@ pub(crate) enum Helper {
     Handler = 21,
     Named = 22,
     CrossOrigin = 23,
+    // made by `DATA_HELPERS` (`data_helpers.rs`)
+    ViewRange = 24,
+    OwnEntries = 25,
+    ArrayValues = 26,
 }
 
 impl Helper {
-    /// The last of those `HELPERS` makes; `WINDOW_HELPERS` makes the rest.
+    /// The last of those `HELPERS` makes; `WINDOW_HELPERS` makes those
+    /// up to `LAST_OF_WINDOW`, and `DATA_HELPERS` the rest.
     pub(crate) const LAST_OF_FIRST: Helper = Helper::Lazy;
-    pub(crate) const LAST: Helper = Helper::CrossOrigin;
+    pub(crate) const LAST_OF_WINDOW: Helper = Helper::CrossOrigin;
+    pub(crate) const LAST: Helper = Helper::ArrayValues;
 }
 
 // Page script runs in the realm and may replace any global or
@@ -177,9 +183,11 @@ pub(crate) const HELPERS: &str = r#"(function () {
     Error.prototype,
     // prototype object `p` of a class with an index getter gets
     // `Array.prototype`'s iterator, and with `all` (a value iterator)
-    // its entries, keys, values and forEach
-    (p, all) => {
-      dp(p, iterator, ({ __proto__: null, value: iterating[2][1], writable: true, configurable: true }));
+    // its entries, keys, values and forEach; one with a pair iterator
+    // gets its own `entries`, `own`
+    (p, all, own) => {
+      const f = own === undefined ? iterating[2][1] : own;
+      dp(p, iterator, ({ __proto__: null, value: f, writable: true, configurable: true }));
       for (let i = 0; all && i < 4; i++) {
         dp(p, iterating[i][0], ({ __proto__: null, value: iterating[i][1], writable: true, enumerable: true, configurable: true }));
       }

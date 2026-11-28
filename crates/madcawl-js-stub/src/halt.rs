@@ -49,26 +49,25 @@ impl Stub {
     }
 
     pub(crate) fn drop_microtasks(&mut self) {
-        while let Some((j, a)) = self.microtasks.pop_front() {
+        while let Some((_, j, a)) = self.microtasks.pop_front() {
             self.release_value(j);
             self.release_value(a);
         }
     }
 
-    pub(crate) fn queue_microtask(&mut self, job: Value, arg: Value) {
+    pub(crate) fn queue_microtask(&mut self, realm: u32, job: Value, arg: Value) {
         self.poll_interrupt();
-        if self.halt == Halt::Terminated {
+        if self.halt == Halt::Terminated || self.realms[realm as usize].detached {
             self.release_value(job);
             self.release_value(arg);
         } else {
-            self.microtasks.push_back((job, arg));
+            self.microtasks.push_back((realm, job, arg));
         }
     }
 
     /// A queued job whose realm is detached: no script runs there.
-    pub(crate) fn detached_job(&self, job: Value) -> bool {
-        // SAFETY: a queued job is a live cell the queue holds
-        self.realms[unsafe { Cell::at(job) }.realm as usize].detached
+    pub(crate) fn detached_job(&self, realm: u32) -> bool {
+        self.realms[realm as usize].detached
     }
 
     pub(crate) fn resume_script(&mut self) {

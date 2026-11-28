@@ -98,7 +98,7 @@ fn a_page_that_replaced_the_built_ins_does_not_reach_the_helpers() {
     for _ in 0..3 {
         let job = e.retain(f.get());
         // SAFETY: a number carries no count
-        e.enqueue_microtask(job, unsafe { Owned::from_raw(Jsc::number(2.0)) });
+        e.enqueue_microtask(realm, job, unsafe { Owned::from_raw(Jsc::number(2.0)) });
     }
     e.run_microtasks(&mut h);
     assert_eq!(number(&mut e, &mut h, realm, "got"), 6.0);

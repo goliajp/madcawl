@@ -2,12 +2,22 @@
 //! the cross-origin stand-in (`weak.rs`), wrappers moving between
 //! realms (`wrap.rs`).
 
-use madcawl_js::{Owned, Windows};
+use madcawl_js::{ClassDef, Host, Owned, Windows};
 
 use crate::isolate::{Jsc, Realm};
 use crate::value::Value;
 
 impl Windows for Jsc {
+    fn define_interfaces<H: Host<Jsc>>(
+        &mut self,
+        _host: &mut H,
+        realm: Realm,
+        obj: Value,
+        classes: &'static [&'static ClassDef<Jsc, H>],
+    ) -> bool {
+        self.lazy_interfaces(realm, obj, classes)
+    }
+
     fn new_window_proxy(&mut self, realm: Realm) -> Owned<Value> {
         self.window_proxy(realm)
     }

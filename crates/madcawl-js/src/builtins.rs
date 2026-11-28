@@ -21,9 +21,23 @@ pub struct ErrorInfo {
     pub column: u32,
 }
 
+/// A pending promise and the functions that resolve and reject it,
+/// each with a count for the holder.
+pub struct Deferred<V: Copy> {
+    pub promise: Owned<V>,
+    pub resolve: Owned<V>,
+    pub reject: Owned<V>,
+}
+
 /// Each method has a default for an engine without the builtin; the
 /// methods take the engine's own types, so they are bound by `Engine`.
 pub trait Builtins {
+    /// The realm of the host function being run, the standard's current
+    /// realm: `None` outside every host function, and once it is detached.
+    fn current_realm(&self) -> Option<<Self as Engine>::Realm>
+    where
+        Self: Engine;
+
     /// The element type and the bytes (its own range of its buffer) of
     /// `v` when it is a typed array, borrowed until the next engine
     /// call; `None` for any other value. An engine without typed arrays
@@ -64,6 +78,96 @@ pub trait Builtins {
     {
         let _ = (host, realm, v);
         self.retain(Self::undefined())
+    }
+
+    /// An Array Iterator over `arr`, an array the host made, from
+    /// `realm`'s `Array.prototype.values` as it was before any page
+    /// script; thrown, with the exception registered, when that threw.
+    /// The default calls `arr`'s @@iterator, for an engine that keeps no
+    /// builtins aside.
+    fn array_values<H: crate::Host<Self>>(
+        &mut self,
+        host: &mut H,
+        realm: <Self as Engine>::Realm,
+        arr: <Self as Engine>::Value,
+    ) -> Owned<<Self as Engine>::Value>
+    where
+        Self: Engine,
+    {
+        let m = self.iterator_method(host, realm, arr);
+        if Self::is_thrown(m.get()) {
+            return m;
+        }
+        let it = self.call(host, m.get(), arr, &[]);
+        self.release(m);
+        it
+    }
+
+    /// The bytes `v` holds when it is an ArrayBuffer, or views when it is
+    /// a typed array or a DataView (its own range of its buffer),
+    /// borrowed until the next engine call: the standard's buffer source.
+    /// `None` for any other value, and when script is halted; a detached
+    /// buffer holds no bytes.
+    fn buffer_source(
+        &mut self,
+        realm: <Self as Engine>::Realm,
+        v: <Self as Engine>::Value,
+    ) -> Option<&[u8]>
+    where
+        Self: Engine,
+    {
+        let _ = realm;
+        self.typed_array(v).map(|(_, b)| &*b)
+    }
+
+    /// A new Uint8Array of `realm` holding `bytes`, or an ArrayBuffer
+    /// when `buffer`, taken without a copy where the engine can; thrown,
+    /// with nothing registered when script is halted, and with a
+    /// RangeError when the engine cannot make one that long. An engine
+    /// without typed arrays throws a TypeError.
+    fn new_bytes(
+        &mut self,
+        realm: <Self as Engine>::Realm,
+        bytes: Vec<u8>,
+        buffer: bool,
+    ) -> Owned<<Self as Engine>::Value>
+    where
+        Self: Engine,
+    {
+        let _ = (realm, bytes, buffer);
+        self.throw_error(crate::ErrorKind::Type, "no typed arrays")
+    }
+
+    /// A new pending promise of `realm` with its resolving functions;
+    /// `None` when script is halted, or the engine has no promises.
+    fn new_promise(
+        &mut self,
+        realm: <Self as Engine>::Realm,
+    ) -> Option<Deferred<<Self as Engine>::Value>>
+    where
+        Self: Engine,
+    {
+        let _ = realm;
+        None
+    }
+
+    /// The own enumerable string-keyed properties of object `v`, as a
+    /// record converts it: an array of their keys and values, each
+    /// converted by ToString as it is read, alternating, in the order of
+    /// `v`'s own keys. Thrown, with the exception registered, when a
+    /// getter, a proxy trap or a conversion threw. An engine without
+    /// property enumeration gives an empty array.
+    fn own_entries<H: crate::Host<Self>>(
+        &mut self,
+        host: &mut H,
+        realm: <Self as Engine>::Realm,
+        v: <Self as Engine>::Value,
+    ) -> Owned<<Self as Engine>::Value>
+    where
+        Self: Engine,
+    {
+        let _ = (host, v);
+        self.new_array(realm, &[])
     }
 
     /// Make `name` of `obj` an enumerable accessor property of `get` and

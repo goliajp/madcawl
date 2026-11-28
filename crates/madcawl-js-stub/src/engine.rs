@@ -287,8 +287,8 @@ impl Engine for Stub {
         self.collect(host, deadline)
     }
 
-    fn enqueue_microtask(&mut self, job: Owned<Value>, arg: Owned<Value>) {
-        self.queue_microtask(job.into_raw(), arg.into_raw());
+    fn enqueue_microtask(&mut self, realm: Realm, job: Owned<Value>, arg: Owned<Value>) {
+        self.queue_microtask(self.index(realm), job.into_raw(), arg.into_raw());
     }
 
     fn run_microtasks<H: Host<Stub>>(&mut self, host: &mut H) {
@@ -297,9 +297,9 @@ impl Engine for Stub {
             return;
         }
         while !self.halted()
-            && let Some((job, arg)) = self.microtasks.pop_front()
+            && let Some((realm, job, arg)) = self.microtasks.pop_front()
         {
-            let r = if self.detached_job(job) { UNDEFINED } else { self.call_value(host, job, UNDEFINED, &[arg]).into_raw() };
+            let r = if self.detached_job(realm) { UNDEFINED } else { self.call_value(host, job, UNDEFINED, &[arg]).into_raw() };
             if r == THROWN && !self.halted() {
                 let e = self.take_exception().expect("a thrown exception");
                 host.report_exception(self, e);

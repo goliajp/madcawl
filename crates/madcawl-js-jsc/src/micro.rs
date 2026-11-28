@@ -18,21 +18,21 @@
 use madcawl_js::{Host, Owned};
 
 use crate::ffi::{self, JSContextRef, JSValueRef};
-use crate::isolate::Jsc;
+use crate::isolate::{Jsc, Realm};
 use crate::objects::{FnKind, FnRec, Report, make_function};
 use crate::protos::Helper;
 use crate::value::Value;
 
 impl Jsc {
-    pub(crate) fn queue_job(&mut self, job: Owned<Value>, arg: Owned<Value>) {
-        let realm = self.current;
-        let detached = self.realms.get(realm as usize).is_none_or(|r| r.detached);
-        if self.halt == madcawl_js::Halt::Terminated || detached {
+    pub(crate) fn queue_job(&mut self, r: Realm, job: Owned<Value>, arg: Owned<Value>) {
+        let (realm, generation) = (self.index(r), r.2);
+        let d = &self.realms[realm as usize];
+        if self.halt == madcawl_js::Halt::Terminated || d.detached || d.generation != generation {
             self.unprotect(job.into_raw());
             self.unprotect(arg.into_raw());
             return;
         }
-        let kind = FnKind::Micro { job: job.into_raw(), arg: arg.into_raw(), realm, generation: self.realms[realm as usize].generation };
+        let kind = FnKind::Micro { job: job.into_raw(), arg: arg.into_raw(), realm, generation };
         let ctx = self.realms[realm as usize].ctx;
         let fproto = self.helper(realm, Helper::FunctionProto);
         let rec = FnRec { kind, host_type: std::any::TypeId::of::<()>() };

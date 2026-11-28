@@ -1,7 +1,7 @@
 //! Accessor properties the host defines (`Builtins::define_accessor`),
 //! deleting properties, and preserving a wrapper script wrote to.
 
-use madcawl_js::{Builtins, Host, Key};
+use madcawl_js::{Builtins, Host, HostFn, Key};
 
 use crate::cell::{Body, Cell, PropKey};
 use crate::isolate::{Realm, Stub};
@@ -26,6 +26,15 @@ impl Stub {
         // SAFETY: a live cell, read only
         let c = unsafe { Cell::at(obj) };
         c.props.iter().find(|(pk, _)| *pk == k).and_then(|&(_, v)| accessor(v))
+    }
+
+    /// A class attribute's getter or setter `f`, run in `realm`, that of
+    /// the prototype declaring it, as its function object would be.
+    pub(crate) fn invoke_in<H: Host<Stub>>(&mut self, host: &mut H, realm: u32, f: HostFn, this: Value, args: &[Value]) -> Value {
+        let saved = std::mem::replace(&mut self.current, realm);
+        let r = self.invoke(host, f, this, args, 0);
+        self.current = saved;
+        r
     }
 
     /// A write to own accessor `k` of `obj`: its setter's outcome, or
@@ -84,6 +93,15 @@ impl Stub {
 /// accessors are own properties of the object, read and written as
 /// such.
 impl Builtins for Stub {
+    /// The realm of the innermost function being called. JSC counts host
+    /// functions only; here a test's closure, standing in for a script
+    /// function, counts too, so that a test can act from inside it as a
+    /// host function of its realm would. An index getter runs in its
+    /// caller's realm on both (here the first realm's outside every call).
+    fn current_realm(&self) -> Option<Realm> {
+        (self.depth != 0 && !self.realms[self.current as usize].detached).then_some(Realm(self.current, self.id))
+    }
+
     fn define_accessor(&mut self, realm: Realm, obj: Value, name: &str, get: Value, set: Value, unforgeable: bool) -> bool {
         let obj = self.target(obj);
         let k = self.key(Key::Str(&madcawl_str::DomString::from_wtf8(name.as_bytes())));

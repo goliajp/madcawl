@@ -62,6 +62,7 @@ pub type JSClassAttributes = u32;
 pub const kJSClassAttributeNoAutomaticPrototype: u32 = 1 << 1;
 
 pub type FinalizeCallback = Option<unsafe extern "C" fn(JSObjectRef)>;
+pub type BytesDeallocator = Option<unsafe extern "C" fn(*mut c_void, *mut c_void)>;
 pub type SetPropertyCallback =
     Option<unsafe extern "C" fn(JSContextRef, JSObjectRef, JSStringRef, JSValueRef, *mut JSValueRef) -> bool>;
 pub type GetPropertyCallback =
@@ -228,4 +229,21 @@ unsafe extern "C" {
     pub fn JSObjectGetTypedArrayBytesPtr(ctx: JSContextRef, object: JSObjectRef, exception: *mut JSValueRef) -> *mut c_void;
     pub fn JSObjectGetTypedArrayByteLength(ctx: JSContextRef, object: JSObjectRef, exception: *mut JSValueRef) -> usize;
     pub fn JSObjectGetTypedArrayByteOffset(ctx: JSContextRef, object: JSObjectRef, exception: *mut JSValueRef) -> usize;
+    pub fn JSObjectMakeArrayBufferWithBytesNoCopy(
+        ctx: JSContextRef,
+        bytes: *mut c_void,
+        length: usize,
+        deallocator: BytesDeallocator,
+        context: *mut c_void,
+        exception: *mut JSValueRef,
+    ) -> JSObjectRef;
+    pub fn JSObjectMakeTypedArrayWithArrayBuffer(ctx: JSContextRef, ty: JSTypedArrayType, buffer: JSObjectRef, exception: *mut JSValueRef) -> JSObjectRef;
+    pub fn JSObjectGetArrayBufferBytesPtr(ctx: JSContextRef, object: JSObjectRef, exception: *mut JSValueRef) -> *mut c_void;
+    pub fn JSObjectGetArrayBufferByteLength(ctx: JSContextRef, object: JSObjectRef, exception: *mut JSValueRef) -> usize;
+    pub fn JSObjectMakeDeferredPromise(
+        ctx: JSContextRef,
+        resolve: *mut JSObjectRef,
+        reject: *mut JSObjectRef,
+        exception: *mut JSValueRef,
+    ) -> JSObjectRef;
 }

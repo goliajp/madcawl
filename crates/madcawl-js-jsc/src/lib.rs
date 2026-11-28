@@ -32,6 +32,7 @@
 
 mod builtins;
 mod collect;
+mod data_helpers;
 mod engine;
 mod ffi;
 mod frame;

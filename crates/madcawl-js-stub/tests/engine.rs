@@ -5,7 +5,7 @@
 
 mod support;
 
-use madcawl_js::{Deadline, Engine, ErrorKind, Halt, HostRef, Interrupt, Control, Key, Step, ValueKind, Windows};
+use madcawl_js::{Builtins, Deadline, Engine, ErrorKind, Halt, HostRef, Interrupt, Control, Key, Step, ValueKind, Windows};
 use madcawl_js_stub::Stub;
 use madcawl_str::DomString;
 use support::*;
@@ -29,6 +29,34 @@ fn class_members_are_called_through_the_c_convention_and_an_absent_index_reads_u
     assert_eq!(num(&mut e, &mut h, w.get(), "size"), 3.0);
     assert!(!e.in_script());
     e.release(w);
+    e.drain_host(&mut h);
+}
+
+#[test]
+fn a_class_attribute_runs_in_the_realm_of_the_prototype_declaring_it() {
+    let (mut e, mut h) = (Stub::new(), Log::default());
+    let (ra, rb) = (e.new_realm(), e.new_realm());
+    let obj = Box::new(0u64);
+    let w = e.new_wrapper(rb, &CLASS, HostRef::new(std::ptr::from_ref(&*obj) as usize).unwrap());
+    assert_eq!(e.current_realm(), None, "outside every call");
+    let held = e.retain(w.get());
+    let reader = e.new_closure::<Log>(
+        ra,
+        |e, h, caps, _, _| {
+            num(e, h, caps[0], "size");
+            undefined()
+        },
+        vec![held],
+    );
+    let r = e.call(&mut h, reader.get(), Stub::undefined(), &[]);
+    e.release(r);
+    assert_eq!(h.realm, Some(rb), "a getter read from a function of another realm");
+    h.realm = None;
+    put(&mut e, &mut h, w.get(), "size", 2.0);
+    assert_eq!(h.realm, Some(rb), "a setter written outside every call");
+    for v in [reader, w] {
+        e.release(v);
+    }
     e.drain_host(&mut h);
 }
 
@@ -102,7 +130,8 @@ fn a_checkpoint_follows_the_four_rules() {
         realm,
         |e, h, caps, _, _| {
             let job = e.retain(caps[1]);
-            e.enqueue_microtask(job, undefined());
+            let realm = e.current_realm().expect("in a function");
+            e.enqueue_microtask(realm, job, undefined());
             e.run_microtasks(h);
             let seen = num(e, h, caps[0], "later");
             put(e, h, caps[0], "later_seen_inside", seen);
@@ -111,8 +140,8 @@ fn a_checkpoint_follows_the_four_rules() {
         vec![l, later],
     );
     let failing = e.new_closure::<Log>(realm, |e, _, _, _, _| e.throw_error(ErrorKind::Type, "fails"), vec![]);
-    e.enqueue_microtask(first, undefined());
-    e.enqueue_microtask(failing, undefined());
+    e.enqueue_microtask(realm, first, undefined());
+    e.enqueue_microtask(realm, failing, undefined());
     e.run_microtasks(&mut h);
     assert_eq!(num(&mut e, &mut h, log.get(), "later_seen_inside"), 0.0, "a nested checkpoint returns at once");
     assert_eq!(num(&mut e, &mut h, log.get(), "later"), 1.0, "queued while draining, run in the same drain");
@@ -170,7 +199,7 @@ fn two_isolates_on_one_thread_keep_their_own_state() {
     let t = a.throw_error(ErrorKind::Type, "a's");
     let _sentinel = t.into_raw();
     let job = counter(&mut a, ra, la.get(), "ran");
-    a.enqueue_microtask(job, undefined());
+    a.enqueue_microtask(ra, job, undefined());
     assert!(b.take_exception().is_none());
     b.run_microtasks(&mut hb);
     assert_eq!(num(&mut a, &mut ha, la.get(), "ran"), 0.0, "b's checkpoint runs only b's queue");
