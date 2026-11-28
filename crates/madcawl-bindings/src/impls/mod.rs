@@ -5,6 +5,7 @@ pub(crate) mod abort_controller;
 pub(crate) mod abort_signal;
 pub(crate) mod attr;
 pub(crate) mod attributes;
+pub(crate) mod blob;
 pub(crate) mod character_data;
 pub(crate) mod collections;
 pub(crate) mod css_style_declaration;
@@ -31,6 +32,10 @@ pub(crate) mod parent;
 pub(crate) mod performance;
 pub(crate) mod performance_observer;
 mod reflect;
+pub(crate) mod text_decoder;
+pub(crate) mod text_encoder;
+pub(crate) mod url;
+pub(crate) mod url_search_params;
 
 pub(crate) use html_element::body as html_body_element;
 pub(crate) use html_elements::{anchor as html_anchor_element, iframe as html_iframe_element, image as html_image_element};

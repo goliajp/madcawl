@@ -71,6 +71,12 @@ impl<E: Engine> IntoJs<E> for DomString {
     }
 }
 
+impl<E: Engine> IntoJs<E> for String {
+    fn into_js(self, e: &mut E, _: &mut DomHost<E>) -> Owned<E::Value> {
+        e.string(DomString::from_wtf8(self.as_bytes()))
+    }
+}
+
 impl<E: Engine> IntoJs<E> for NodeId {
     fn into_js(self, e: &mut E, h: &mut DomHost<E>) -> Owned<E::Value> {
         h.wrap(e, self)
@@ -89,8 +95,13 @@ impl<E: Engine, T: IntoJs<E>> IntoJs<E> for Option<T> {
 /// An array of `items`, made from the realm's own `Array` without
 /// running script; their counts are given back.
 pub(crate) fn array_of<E: Engine>(e: &mut E, h: &mut DomHost<E>, items: Vec<Owned<E::Value>>) -> Owned<E::Value> {
+    array_in(e, h.realm, items)
+}
+
+/// [`array_of`] in `realm`.
+pub(crate) fn array_in<E: Engine>(e: &mut E, realm: E::Realm, items: Vec<Owned<E::Value>>) -> Owned<E::Value> {
     let values: Vec<E::Value> = items.iter().map(Owned::get).collect();
-    let r = e.new_array(h.realm, &values);
+    let r = e.new_array(realm, &values);
     for v in items {
         e.release(v);
     }

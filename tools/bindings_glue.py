@@ -52,7 +52,7 @@ def glue(fn, iface, body, kind, uses_args=True):
     return lines
 
 
-STRINGS = ('DOMString', 'DOMString?', '[Atom] DOMString', '[LegacyNullToEmptyString] DOMString')
+STRINGS = ('DOMString', 'DOMString?', '[Atom] DOMString', '[LegacyNullToEmptyString] DOMString', 'USVString', 'USVString?')
 # list types: a collection the implementation gives as its side object,
 # and the sequences, made arrays
 LISTS = ('NodeList', 'HTMLCollection', 'sequence<EventTarget>', 'sequence<DOMString>')

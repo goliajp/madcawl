@@ -45,6 +45,9 @@ impl<E: Engine> DomHost<E> {
                 if f.same_origin {
                     f.load = Load::Fetching;
                     self.frames.requests.push((w, u.as_str().to_owned()));
+                } else {
+                    f.load = Load::Elsewhere;
+                    self.event_loop.tasks.push_back(Task::Script(ScriptTask::Frame(w)));
                 }
             }
         }
@@ -59,7 +62,7 @@ impl<E: Engine> DomHost<E> {
     /// Request `id` ended: the URL it ended at after redirects and the
     /// document (WTF-8), or `None` when the fetch failed, which leaves
     /// `about:blank`. A document that ended at another origin is not
-    /// loaded. Its iframe's `load` follows in a task.
+    /// loaded. Either way its iframe's `load` follows in a task.
     pub fn frame_fetched(&mut self, id: u64, response: Option<(&str, &[u8])>) {
         let parent = match self.frames.live.get(&id) {
             Some(f) if matches!(f.load, Load::Fetching) => f.parent,
@@ -71,15 +74,11 @@ impl<E: Engine> DomHost<E> {
             Some((u, b)) if same_origin(&parent_origin, &u.origin()) => Load::Fetched(u, b.to_vec()),
             Some(_) => {
                 f.same_origin = false;
-                Load::Nothing
+                Load::Elsewhere
             }
             None => Load::Fetched(blank(), b"<html><head></head><body></body></html>".to_vec()),
         };
-        if matches!(f.load, Load::Nothing) {
-            self.frame_settled(parent);
-        } else {
-            self.event_loop.tasks.push_back(Task::Script(ScriptTask::Frame(id)));
-        }
+        self.event_loop.tasks.push_back(Task::Script(ScriptTask::Frame(id)));
     }
 
     /// The task of a navigation whose document is here: it replaces the
@@ -94,7 +93,7 @@ impl<E: Engine> DomHost<E> {
                 Load::Fetched(u, b) => (u, b),
                 _ => unreachable!("matched above"),
             },
-            Load::Parsed => return self.frame_complete(e, w),
+            Load::Parsed | Load::Elsewhere => return self.frame_complete(e, w),
             Load::Nothing | Load::Fetching => return,
         };
         if let Some(new) = self.dom.new_active_document(false) {

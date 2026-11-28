@@ -54,6 +54,13 @@ pub(crate) enum SideData {
     /// A `PerformanceObserver`: the kind its first `observe` gave it; its
     /// callback is in the host's `details`.
     Observer(Option<crate::impls::performance_observer::Kind>),
+    TextDecoder(Box<crate::impls::text_decoder::DecoderState>),
+    TextEncoder,
+    /// A `URL`: its `searchParams`, once read, by a count.
+    Url(Box<crate::impls::url::UrlState>),
+    /// A `URLSearchParams`: a URL's holds it, by a count.
+    SearchParams(Box<crate::impls::url_search_params::Params>),
+    Blob(crate::impls::blob::BlobData),
 }
 
 impl SideData {
@@ -65,6 +72,8 @@ impl SideData {
             SideData::Controller(s) | SideData::AttrMap(s) | SideData::TokenList(s) => f(s),
             SideData::Style(s) => f(&s.owner),
             SideData::Attr(a) => a.owner.iter().for_each(f),
+            SideData::Url(u) => u.params.iter().for_each(f),
+            SideData::SearchParams(p) => p.url.iter().for_each(f),
             _ => {}
         }
     }
@@ -77,6 +86,8 @@ impl SideData {
             SideData::Controller(s) | SideData::AttrMap(s) | SideData::TokenList(s) => out.push(std::mem::replace(s, Held::Window(0))),
             SideData::Style(s) => out.push(std::mem::replace(&mut s.owner, Held::Window(0))),
             SideData::Attr(a) => out.extend(a.owner.take()),
+            SideData::Url(u) => out.extend(u.params.take()),
+            SideData::SearchParams(p) => out.extend(p.url.take()),
             _ => {}
         }
     }
@@ -102,6 +113,11 @@ impl SideData {
             SideData::Crypto => &g::CryptoClass::<E>::DEF,
             SideData::Performance => &g::PerformanceClass::<E>::DEF,
             SideData::Observer(_) => &g::PerformanceObserverClass::<E>::DEF,
+            SideData::TextDecoder(_) => &g::TextDecoderClass::<E>::DEF,
+            SideData::TextEncoder => &g::TextEncoderClass::<E>::DEF,
+            SideData::Url(_) => &g::URLClass::<E>::DEF,
+            SideData::SearchParams(_) => &g::URLSearchParamsClass::<E>::DEF,
+            SideData::Blob(_) => &g::BlobClass::<E>::DEF,
         }
     }
 }

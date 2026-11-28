@@ -83,6 +83,8 @@ pub struct DomHost<E: Engine> {
     pub(crate) nonces: HashMap<u32, DomString>,
     /// The child navigables (`frames.rs`).
     pub(crate) frames: crate::frames::Frames<E>,
+    /// What `URL.createObjectURL` made (`blob_urls.rs`).
+    pub(crate) blob_urls: crate::blob_urls::BlobUrls,
 }
 
 impl<E: Engine> DomHost<E> {
@@ -130,6 +132,7 @@ impl<E: Engine> DomHost<E> {
             css_properties: false,
             nonces: HashMap::new(),
             frames: crate::frames::Frames::new(),
+            blob_urls: Default::default(),
             time_origin_ms: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("a clock after 1970").as_secs_f64() * 1e3,
         };
         if E::PLACES_WRAPPERS {
@@ -227,6 +230,7 @@ impl<E: Engine> DomHost<E> {
 
     pub(crate) fn shut(&mut self, e: &mut E) {
         self.close_frames(e);
+        self.blob_urls.clear();
         self.close_loop(e);
         self.close_scripts(e);
         self.close_window(e);

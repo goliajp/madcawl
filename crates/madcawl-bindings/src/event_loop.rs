@@ -42,6 +42,8 @@ pub(crate) struct Timer<E: Engine> {
 pub(crate) enum Task<E: Engine> {
     Call(Root<E>),
     Script(crate::scripts::ScriptTask),
+    /// Resolve a promise of a realm with a value, unless its window is gone.
+    Settle(E::Realm, Root<E>, Root<E>),
 }
 
 pub enum Clock {
@@ -190,6 +192,11 @@ impl<E: Engine> DomHost<E> {
         self.event_loop.tasks.push_back(Task::Call(Root::new(callback)));
     }
 
+    /// Queue a task that calls `resolve`, of a promise of `realm`, with `value`.
+    pub(crate) fn post_settle(&mut self, realm: E::Realm, resolve: Owned<E::Value>, value: Owned<E::Value>) {
+        self.event_loop.tasks.push_back(Task::Settle(realm, Root::new(resolve), Root::new(value)));
+    }
+
     pub fn event_loop(&self) -> &EventLoop<E> {
         &self.event_loop
     }
@@ -207,6 +214,14 @@ impl<E: Engine> DomHost<E> {
                         cb.release(e);
                     }
                     Task::Script(t) => self.script_task(e, t),
+                    Task::Settle(realm, resolve, value) => {
+                        if self.window_of_realm(realm).is_some() {
+                            let r = e.call(self, resolve.get(), E::undefined(), &[value.get()]);
+                            self.finish_task(e, r);
+                        }
+                        resolve.release(e);
+                        value.release(e);
+                    }
                 }
             } else if let Some(t) = self.event_loop.take_due() {
                 self.run_timer(e, t);
@@ -271,8 +286,13 @@ impl<E: Engine> DomHost<E> {
         }
         self.event_loop.by_id.clear();
         for t in std::mem::take(&mut self.event_loop.tasks) {
-            if let Task::Call(cb) = t {
-                cb.release(e);
+            match t {
+                Task::Call(cb) => cb.release(e),
+                Task::Settle(_, resolve, value) => {
+                    resolve.release(e);
+                    value.release(e);
+                }
+                Task::Script(_) => {}
             }
         }
     }

@@ -14,10 +14,12 @@ mod abort;
 mod args;
 mod attr;
 mod base64;
+mod blob_urls;
 mod convert;
 mod cookie;
 mod elements;
 mod css_props;
+mod dict;
 mod event;
 mod event_loop;
 mod fire;
@@ -46,6 +48,8 @@ mod side_members;
 mod side_ops;
 mod style_attr;
 mod trees;
+mod url_parts;
+mod window_lookup;
 mod window;
 
 #[rustfmt::skip]

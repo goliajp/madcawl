@@ -304,7 +304,7 @@ fn mark(e: &mut Stub, h: &mut DomHost<Stub>, caps: &[Value], _: Value, _: &[Valu
 /// as `other.click()` in script does.
 fn dispatch(e: &mut Stub, h: &mut DomHost<Stub>, caps: &[Value], _: Value, _: &[Value]) -> V {
     let job = e.retain(caps[2]);
-    e.enqueue_microtask(job, support::undefined());
+    e.enqueue_microtask(h.realm, job, support::undefined());
     let other = e.host_of(caps[1], &NodeClass::<Stub>::DEF).expect("a node");
     let other = h.node(other);
     assert_eq!(h.fire(e, other, atom!("click")), 2);

@@ -13,9 +13,9 @@ use madcawl_str::atom;
 use support::{Js, V, call_in};
 
 /// A listener that queues job `caps[0]`, then terminates the isolate.
-fn terminates(e: &mut Stub, _: &mut DomHost<Stub>, caps: &[Value], _: Value, _: &[Value]) -> V {
+fn terminates(e: &mut Stub, h: &mut DomHost<Stub>, caps: &[Value], _: Value, _: &[Value]) -> V {
     let job = e.retain(caps[0]);
-    e.enqueue_microtask(job, support::undefined());
+    e.enqueue_microtask(h.realm, job, support::undefined());
     e.interrupt_handle().terminate();
     support::undefined()
 }
@@ -28,7 +28,7 @@ fn aborts(e: &mut Stub, h: &mut DomHost<Stub>, caps: &[Value], _: Value, _: &[Va
     e.release(armed);
     if go {
         let job = e.retain(caps[0]);
-        e.enqueue_microtask(job, support::undefined());
+        e.enqueue_microtask(h.realm, job, support::undefined());
         e.interrupt_handle().abort().expect("the stub can abort");
     }
     support::undefined()

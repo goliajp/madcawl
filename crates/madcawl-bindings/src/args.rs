@@ -60,6 +60,27 @@ pub(crate) fn dom_string_or<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Valu
     dom_string(e, h, v)
 }
 
+/// ToString, then the standard's USVString: lone surrogates replaced by
+/// U+FFFD.
+pub(crate) fn usv_string<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Value) -> Result<String, Thrown> {
+    Ok(usv(&dom_string(e, h, v)?))
+}
+
+pub(crate) fn usv_string_or<E: Engine>(e: &mut E, h: &mut DomHost<E>, v: E::Value, default: &[u8]) -> Result<String, Thrown> {
+    if e.kind(v) == ValueKind::Undefined {
+        return Ok(String::from_utf8_lossy(default).into_owned());
+    }
+    usv_string(e, h, v)
+}
+
+/// `s` as scalar values, lone surrogates replaced by U+FFFD.
+pub(crate) fn usv(s: &DomString) -> String {
+    if let Some(a) = s.as_ascii_str() {
+        return a.to_owned();
+    }
+    char::decode_utf16(s.units()).map(|c| c.unwrap_or('\u{fffd}')).collect()
+}
+
 pub(crate) fn boolean_or<E: Engine>(e: &mut E, v: E::Value, default: bool) -> bool {
     if e.kind(v) == ValueKind::Undefined {
         default

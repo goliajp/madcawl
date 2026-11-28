@@ -15,6 +15,9 @@ converts the result. The table holds a C-ABI shell per member
 (`<glue>_abi`), which takes the words the engine passes and calls the
 glue (`shell.rs`).
 
+A `USVString` argument reaches the implementation as a `String`, its
+lone surrogates replaced.
+
 The parser reads the subset of Web IDL the files use: interfaces with
 a parent, a constructor, constants, attributes, operations (static
 ones too) with optional arguments and defaults (boolean, string
@@ -65,6 +68,7 @@ TYPES = {
     'DOMString?': 'cv::dom_string_or_null(e, h, {v})?',
     '[Atom] DOMString': 'cv::atom(e, h, {v})?',
     '[LegacyNullToEmptyString] DOMString': 'cv::dom_string_null_empty(e, h, {v})?',
+    'USVString': 'cv::usv_string(e, h, {v})?',
     'unsigned long': 'cv::to_uint32(e, h, {v})?',
     'long': 'cv::to_long(e, h, {v})?',
     'EventListener?': 'cv::callback_or_null(e, {v})?',
@@ -75,7 +79,8 @@ TYPES = {
 }
 
 # the conversion of a string argument left out for its default
-STRING_DEFAULTS = {'DOMString': 'dom_string_or', '[LegacyNullToEmptyString] DOMString': 'dom_string_null_empty_or'}
+STRING_DEFAULTS = {'DOMString': 'dom_string_or', '[LegacyNullToEmptyString] DOMString': 'dom_string_null_empty_or',
+                   'USVString': 'usv_string_or'}
 
 
 def strip(text):

@@ -12,9 +12,12 @@
 //! as it is inserted; `srcdoc` loads in a task, and a `src` of the
 //! parent's origin through the embedder ([`DomHost::take_frame_requests`],
 //! [`DomHost::frame_fetched`]). A document of another origin (a `src`
-//! elsewhere, `sandbox` without `allow-same-origin`) is not loaded:
-//! `contentDocument` is null and `contentWindow` a stand-in with the
-//! members the standard lets other origins reach (`frame_window.rs`).
+//! elsewhere, `sandbox` without `allow-same-origin`, a redirect to
+//! another origin) is not loaded or fetched: `contentDocument` is null
+//! and `contentWindow` a stand-in with the members the standard lets
+//! other origins reach (`frame_window.rs`), and `load` fires at the
+//! iframe in a task, delaying its document's own, as when such a
+//! document loads.
 //! The first document loaded keeps the window of the initial
 //! `about:blank`, as the standard does for one of the same origin. A
 //! navigable loading `srcdoc` or `src` delays the `load` of the document
@@ -57,6 +60,9 @@ pub(crate) enum Load {
     Fetched(Url, Vec<u8>),
     /// In place; its iframe's `load` waits for the navigables below.
     Parsed,
+    /// A document of another origin, which is not loaded here: its
+    /// iframe's `load` comes in a task, as the document's would.
+    Elsewhere,
 }
 
 pub(crate) struct Frame<E: Engine> {
@@ -138,39 +144,6 @@ pub(crate) fn same_origin(a: &Origin, b: &Origin) -> bool {
 }
 
 impl<E: Engine> DomHost<E> {
-    /// The window whose document `doc` is: 0 for this host's own.
-    pub(crate) fn window_of_doc(&self, doc: NodeId) -> Option<u64> {
-        if doc == self.dom.document() { Some(0) } else { self.frames.by_doc.get(&doc.index()).copied() }
-    }
-
-    pub(crate) fn doc_of_window(&self, w: u64) -> Option<NodeId> {
-        if w == 0 { Some(self.dom.document()) } else { self.frames.live.get(&w).map(|f| f.doc.id()) }
-    }
-
-    /// The realm of window `w`, while it lives.
-    pub(crate) fn realm_of(&self, w: u64) -> Option<E::Realm> {
-        if w == 0 { Some(self.realm) } else { self.frames.live.get(&w).map(|f| f.realm) }
-    }
-
-    /// Window `w` as script outside it gets it: its WindowProxy, the
-    /// top-level global, or null once it is gone.
-    pub(crate) fn window_value(&mut self, e: &mut E, w: u64) -> madcawl_js::Owned<E::Value> {
-        match self.frames.live.get(&w) {
-            _ if w == 0 => e.global(self.realm),
-            Some(f) => e.retain(f.proxy.get()),
-            None => crate::convert::plain::<E>(E::null()),
-        }
-    }
-
-    pub(crate) fn origin_of(&self, w: u64) -> Origin {
-        let Some(f) = self.frames.live.get(&w) else { return self.nav.url.origin() };
-        match () {
-            _ if !f.same_origin => Origin::Opaque,
-            _ if inherits(&f.url) => self.origin_of(f.parent),
-            _ => f.url.origin(),
-        }
-    }
-
     /// The base URL of frame document `doc`, or `None` for a document
     /// that is no navigable's.
     pub(crate) fn frame_base_url(&self, doc: NodeId) -> Option<&Url> {
@@ -260,6 +233,7 @@ impl<E: Engine> DomHost<E> {
         self.frames.by_element.remove(&f.element.id().index());
         self.frames.by_doc.remove(&f.doc.id().index());
         self.frames.requests.retain(|&(id, _)| id != w);
+        self.blob_urls.drop_window(w);
         for mut l in f.listeners {
             l.callback.clear(e);
         }

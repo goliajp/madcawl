@@ -18,7 +18,7 @@ use crate::generated::{
     HTMLHeadElementClass, HTMLHtmlElementClass, HTMLIFrameElementClass, HTMLImageElementClass, HTMLInputElementClass,
     HTMLLinkElementClass, HTMLObjectElementClass, HTMLScriptElementClass, HTMLSpanElementClass, HTMLStyleElementClass,
     HTMLUnknownElementClass, HistoryClass, LocationClass, NamedNodeMapClass, NodeClass, NodeListClass, PerformanceClass,
-    PerformanceObserverClass, TextClass,
+    PerformanceObserverClass, TextClass, BlobClass, TextDecoderClass, TextEncoderClass, URLClass, URLSearchParamsClass,
 };
 use crate::event::Target;
 use crate::host::DomHost;
@@ -75,6 +75,11 @@ impl<E: Engine> DomHost<E> {
         &CryptoClass::<E>::DEF,
         &PerformanceClass::<E>::DEF,
         &PerformanceObserverClass::<E>::DEF,
+        &TextDecoderClass::<E>::DEF,
+        &TextEncoderClass::<E>::DEF,
+        &URLClass::<E>::DEF,
+        &URLSearchParamsClass::<E>::DEF,
+        &BlobClass::<E>::DEF,
     ];
 
     /// Put the window's members on the global object of this host's
@@ -237,15 +242,19 @@ fn clear_timer<E: Engine>(e: &mut E, h: &mut DomHost<E>, w: u64, _: Value<E>, ar
     })
 }
 
-fn queue_microtask<E: Engine>(e: &mut E, h: &mut DomHost<E>, _: u64, _: Value<E>, args: &[Value<E>]) -> Owned<Value<E>> {
-    run(e, h, |e, _| {
+/// Queues in the realm of the window it is called for, which may be
+/// gone by then: the callback is then dropped unrun.
+fn queue_microtask<E: Engine>(e: &mut E, h: &mut DomHost<E>, w: u64, _: Value<E>, args: &[Value<E>]) -> Owned<Value<E>> {
+    run(e, h, |e, h| {
         let cb = arg::<E>(args, 0);
         if !e.is_callable(cb) {
             return Err(throw(e, ErrorKind::Type, "queueMicrotask takes a function"));
         }
-        let job = e.retain(cb);
-        // SAFETY: undefined carries no count
-        e.enqueue_microtask(job, unsafe { Owned::from_raw(E::undefined()) });
+        if let Some(realm) = h.realm_of(w) {
+            let job = e.retain(cb);
+            // SAFETY: undefined carries no count
+            e.enqueue_microtask(realm, job, unsafe { Owned::from_raw(E::undefined()) });
+        }
         Ok(())
     })
 }
