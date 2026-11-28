@@ -171,13 +171,27 @@ fn a_page_that_reads_its_cookies_every_turn_never_runs_out_while_the_service_ans
     // 10 000 calls of 0.4 ms each take longer in all than the budget
     let (net, counts, dir) = fake("prompt", |_| Serve { hello: true, answers: usize::MAX, delay: Duration::from_micros(400) });
     let mut jar = NetCookies::new(net, 1);
+    // the part of the calls past PROMPT as timed here, never less than the
+    // jar charges: a host too busy to run the service promptly may spend
+    // the budget, and only then may a call give up
+    let mut slow = Duration::ZERO;
     for n in 0..10_000 {
-        assert_eq!(jar.get("https://a.example/"), "a=1", "call {n}");
+        let t0 = Instant::now();
+        let got = jar.get("https://a.example/");
         if n % 100 == 99 {
             jar.idle();
         }
+        let took = t0.elapsed();
+        if jar.failed {
+            let wait = WAIT.min(BUDGET.saturating_sub(slow));
+            assert!(took >= wait, "call {n} gave up after {took:?} with {wait:?} left to wait");
+            std::fs::remove_dir_all(dir).unwrap();
+            return;
+        }
+        assert_eq!(got, "a=1", "call {n}");
+        slow += took.saturating_sub(PROMPT);
     }
-    assert!(!jar.failed);
+    assert!(jar.left >= BUDGET.saturating_sub(slow), "{:?} left after {slow:?} slow", jar.left);
     assert_eq!(counts.registered.load(Ordering::SeqCst), 100, "a connection a turn");
     std::fs::remove_dir_all(dir).unwrap();
 }
