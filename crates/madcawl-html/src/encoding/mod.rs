@@ -7,7 +7,7 @@ mod prescan;
 pub use decode::Decoder;
 pub use prescan::{extract_from_content, prescan};
 
-pub use torajs_encoding::Encoding;
+pub use torajs_encoding::{DecodeError, Encoding};
 
 pub(crate) fn is_utf16(e: Encoding) -> bool {
     matches!(e, Encoding::Utf16be | Encoding::Utf16le)
