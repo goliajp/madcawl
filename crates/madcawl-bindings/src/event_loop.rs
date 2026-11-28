@@ -9,10 +9,11 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::time::Instant;
 
-use madcawl_js::{Engine, Halt, Owned, Root, ScriptOrigin};
-use madcawl_str::DomString;
+use madcawl_js::{Engine, Halt, Owned, Root};
 
 use crate::host::DomHost;
+
+mod run;
 
 /// Nested timers past this depth wait at least `MIN_NESTED_MS`.
 const NESTING_CLAMP: u32 = 5;
@@ -31,11 +32,21 @@ pub(crate) struct Timer<E: Engine> {
     /// The interval asked for, in milliseconds.
     pub repeat: Option<u32>,
     pub nesting: u32,
-    /// The timer of `AbortSignal.timeout`: the handler is the signal's
-    /// wrapper, and its id is above any `clearTimeout` reaches.
-    pub abort: bool,
+    pub kind: TimerKind,
     /// The window that set it (`frames.rs`), 0 for the top-level one.
     pub window: u64,
+}
+
+/// What a timer is for. The host's own timers have ids above any
+/// `clearTimeout` reaches, and their handler is the wrapper they act on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TimerKind {
+    /// One script set
+    Script,
+    /// The timer of `AbortSignal.timeout`: the handler is the signal's wrapper
+    Abort,
+    /// The timeout of an XMLHttpRequest's request: the handler is its wrapper
+    XhrTimeout(u64),
 }
 
 /// A queued task: a callback script queued, or one of the host's own.
@@ -44,6 +55,10 @@ pub(crate) enum Task<E: Engine> {
     Script(crate::scripts::ScriptTask),
     /// Resolve a promise of a realm with a value, unless its window is gone.
     Settle(E::Realm, Root<E>, Root<E>),
+    /// A request script made ended (`fetches.rs`).
+    Fetched(u64),
+    /// A worker's step (`workers.rs`).
+    Worker(crate::workers::WorkerTask<E>),
 }
 
 pub enum Clock {
@@ -92,17 +107,18 @@ impl<E: Engine> EventLoop<E> {
     pub(crate) fn add_timer(&mut self, handler: Root<E>, args: Vec<Root<E>>, ms: i32, repeat: bool, window: u64) -> u32 {
         let ms = ms.max(0) as u32;
         let id = self.take_id(false);
-        let t = Timer { id, handler, args, repeat: repeat.then_some(ms), nesting: self.nesting + 1, abort: false, window };
+        let t = Timer { id, handler, args, repeat: repeat.then_some(ms), nesting: self.nesting + 1, kind: TimerKind::Script, window };
         self.schedule(t, u64::from(ms));
         id
     }
 
-    /// A timer that aborts the signal whose wrapper is `signal` after
-    /// `ms` milliseconds.
-    pub(crate) fn add_abort_timer(&mut self, signal: Root<E>, ms: u64) {
+    /// A timer of the host's own, acting on the wrapper `handler`, after
+    /// `ms` milliseconds, going with window `window`; its id.
+    pub(crate) fn add_host_timer(&mut self, handler: Root<E>, ms: u64, kind: TimerKind, window: u64) -> u32 {
         let id = self.take_id(true);
-        let t = Timer { id, handler: signal, args: Vec::new(), repeat: None, nesting: 0, abort: true, window: 0 };
+        let t = Timer { id, handler, args: Vec::new(), repeat: None, nesting: 0, kind, window };
         self.schedule(t, ms);
+        id
     }
 
     /// The next id that no live timer has, wrapping: from 1 to 2^31 - 1
@@ -157,12 +173,14 @@ impl<E: Engine> EventLoop<E> {
             .collect()
     }
 
-    /// The next timer that is due, or that virtual time can jump to.
-    fn take_due(&mut self) -> Option<Timer<E>> {
+    /// The next timer that is due, or that virtual time can jump to
+    /// unless `hold` (a request is awaited, whose answer is not timed).
+    fn take_due(&mut self, hold: bool) -> Option<Timer<E>> {
         let (&key, _) = self.timers.first_key_value()?;
         let now = self.now_ns();
         match &mut self.clock {
             Clock::Real(_) if key.0 > now => return None,
+            Clock::Virtual(_) if hold && key.0 > now => return None,
             Clock::Virtual(t) => *t = (*t).max(key.0),
             Clock::Real(_) => {}
         }
@@ -201,6 +219,11 @@ impl<E: Engine> DomHost<E> {
         &self.event_loop
     }
 
+    /// The milliseconds since the window's time origin, as `timeStamp`.
+    pub(crate) fn now_ms(&self) -> f64 {
+        self.event_loop.now_ns() as f64 / 1e6
+    }
+
     /// Run tasks and due timers, each followed by a checkpoint, until
     /// none is ready or `max` have run; how many ran.
     pub fn run_tasks(&mut self, e: &mut E, max: usize) -> usize {
@@ -222,8 +245,14 @@ impl<E: Engine> DomHost<E> {
                         resolve.release(e);
                         value.release(e);
                     }
+                    Task::Fetched(id) => {
+                        self.fetch_task(e, id);
+                        // SAFETY: undefined carries no count
+                        self.finish_task(e, unsafe { Owned::from_raw(E::undefined()) });
+                    }
+                    Task::Worker(t) => self.worker_task(e, t),
                 }
-            } else if let Some(t) = self.event_loop.take_due() {
+            } else if let Some(t) = self.event_loop.take_due(!self.fetches.waiting.is_empty()) {
                 self.run_timer(e, t);
             } else {
                 break;
@@ -231,70 +260,6 @@ impl<E: Engine> DomHost<E> {
             n += 1;
         }
         n
-    }
-
-    fn run_timer(&mut self, e: &mut E, t: Timer<E>) {
-        if t.abort {
-            self.event_loop.by_id.remove(&t.id);
-            self.timed_out(e, t.handler.get());
-            t.handler.release(e);
-            // SAFETY: undefined carries no count
-            self.finish_task(e, unsafe { Owned::from_raw(E::undefined()) });
-            return;
-        }
-        let realm = self.realm_of(t.window).expect("the timers of a window go with it");
-        let saved = std::mem::replace(&mut self.event_loop.nesting, t.nesting);
-        let r = if e.is_callable(t.handler.get()) {
-            let window = e.global(realm);
-            let args: Vec<E::Value> = t.args.iter().map(Root::get).collect();
-            let r = e.call(self, t.handler.get(), window.get(), &args);
-            e.release(window);
-            r
-        } else {
-            let src = e.as_string(t.handler.get()).unwrap_or_else(DomString::empty);
-            let url = DomString::from_wtf8(b"timer");
-            e.evaluate(self, realm, &src, &ScriptOrigin { url: &url, line: 1, column: 0 })
-        };
-        self.event_loop.nesting = saved;
-        let stopped = self.finish_task(e, r);
-        // cleared by its own callback when its entry is gone; one stopped
-        // could take every turn; one whose window went with its run is done
-        let live = self.event_loop.by_id.remove(&t.id).is_some() && self.realm_of(t.window).is_some();
-        match t.repeat {
-            Some(ms) if live && !stopped && e.halt() == Halt::Running => {
-                // each run nests one deeper, so a fast interval is clamped
-                // after the first few as nested timeouts are
-                let t = Timer { nesting: t.nesting + 1, ..t };
-                self.event_loop.schedule(t, u64::from(ms));
-            }
-            _ => {
-                t.handler.release(e);
-                for a in t.args {
-                    a.release(e);
-                }
-            }
-        }
-    }
-
-    /// Give back the timers and tasks: the window is going.
-    pub(crate) fn close_loop(&mut self, e: &mut E) {
-        for (_, t) in std::mem::take(&mut self.event_loop.timers) {
-            t.handler.release(e);
-            for a in t.args {
-                a.release(e);
-            }
-        }
-        self.event_loop.by_id.clear();
-        for t in std::mem::take(&mut self.event_loop.tasks) {
-            match t {
-                Task::Call(cb) => cb.release(e),
-                Task::Settle(_, resolve, value) => {
-                    resolve.release(e);
-                    value.release(e);
-                }
-                Task::Script(_) => {}
-            }
-        }
     }
 }
 

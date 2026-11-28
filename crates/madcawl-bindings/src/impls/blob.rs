@@ -119,7 +119,7 @@ pub(crate) fn constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, parts: E::Va
     Ok(new_blob(h, bytes.into(), ty))
 }
 
-fn new_blob<E: Engine>(h: &mut DomHost<E>, bytes: Rc<[u8]>, ty: String) -> SideRef {
+pub(crate) fn new_blob<E: Engine>(h: &mut DomHost<E>, bytes: Rc<[u8]>, ty: String) -> SideRef {
     let range = 0..bytes.len();
     h.sides.add(SideData::Blob(BlobData { bytes, range, ty }))
 }

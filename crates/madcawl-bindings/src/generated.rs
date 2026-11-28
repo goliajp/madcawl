@@ -1,4 +1,4 @@
-// CODEGEN: tools/gen-bindings.py from crates/madcawl-bindings/idl/attr.webidl, crates/madcawl-bindings/idl/cssom.webidl, crates/madcawl-bindings/idl/dom.webidl, crates/madcawl-bindings/idl/encoding.webidl, crates/madcawl-bindings/idl/file.webidl, crates/madcawl-bindings/idl/html.webidl, crates/madcawl-bindings/idl/url.webidl, crates/madcawl-bindings/idl/window.webidl
+// CODEGEN: tools/gen-bindings.py from crates/madcawl-bindings/idl/attr.webidl, crates/madcawl-bindings/idl/cssom.webidl, crates/madcawl-bindings/idl/dom.webidl, crates/madcawl-bindings/idl/encoding.webidl, crates/madcawl-bindings/idl/file.webidl, crates/madcawl-bindings/idl/html.webidl, crates/madcawl-bindings/idl/url.webidl, crates/madcawl-bindings/idl/window.webidl, crates/madcawl-bindings/idl/worker.webidl, crates/madcawl-bindings/idl/xhr.webidl
 //! The class tables of the bound interfaces, and the glue between
 //! script values and the implementations in `impls`.
 
@@ -368,7 +368,7 @@ impl<E: Engine> EventTargetClass<E> {
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "EventTarget",
         id: ClassId(3),
-        last: ClassId(28),
+        last: ClassId(31),
         parent: None,
         attributes: &[],
         operations: &[
@@ -3200,14 +3200,597 @@ fn comment_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::Value
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn comment_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, comment_constructor::<E>) } }
 
+pub struct WorkerClass<E>(PhantomData<E>);
+
+impl<E: Engine> WorkerClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "Worker",
+        id: ClassId(29),
+        last: ClassId(29),
+        parent: Some(&EventTargetClass::<E>::DEF),
+        attributes: &[
+            Attribute { name: "onmessage", get: unsafe { Bound::host_fn(worker_get_onmessage_abi::<E>) }, set: Some(unsafe { Bound::host_fn(worker_set_onmessage_abi::<E>) }), sig: AttributeSig { ty: IdlType::Callback, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+            Attribute { name: "onmessageerror", get: unsafe { Bound::host_fn(worker_get_onmessageerror_abi::<E>) }, set: Some(unsafe { Bound::host_fn(worker_set_onmessageerror_abi::<E>) }), sig: AttributeSig { ty: IdlType::Callback, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+            Attribute { name: "onerror", get: unsafe { Bound::host_fn(worker_get_onerror_abi::<E>) }, set: Some(unsafe { Bound::host_fn(worker_set_onerror_abi::<E>) }), sig: AttributeSig { ty: IdlType::Callback, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+        ],
+        operations: &[
+            Operation { name: "terminate", length: 0, call: unsafe { Bound::host_fn(worker_terminate_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Undefined, effects: Effects::NONE } },
+            Operation { name: "postMessage", length: 1, call: unsafe { Bound::host_fn(worker_post_message_abi::<E>) }, sig: Signature { args: &[IdlType::Any, IdlType::Any], result: IdlType::Undefined, effects: Effects::THROWS } },
+        ],
+        statics: &[],
+        constants: &[],
+        interceptors: None,
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: Some(unsafe { Bound::host_fn(worker_constructor_abi::<E>) }),
+        length: 1,
+        error_prototype: false,
+    };
+}
+
+fn worker_get_onmessage<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &WorkerClass::<E>::DEF)?;
+        impls::worker::onmessage(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn worker_get_onmessage_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, worker_get_onmessage::<E>) } }
+
+fn worker_set_onmessage<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &WorkerClass::<E>::DEF)?;
+        let value = cv::event_handler::<E>(e, value);
+        impls::worker::set_onmessage(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn worker_set_onmessage_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, worker_set_onmessage::<E>) } }
+
+fn worker_get_onmessageerror<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &WorkerClass::<E>::DEF)?;
+        impls::worker::onmessageerror(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn worker_get_onmessageerror_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, worker_get_onmessageerror::<E>) } }
+
+fn worker_set_onmessageerror<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &WorkerClass::<E>::DEF)?;
+        let value = cv::event_handler::<E>(e, value);
+        impls::worker::set_onmessageerror(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn worker_set_onmessageerror_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, worker_set_onmessageerror::<E>) } }
+
+fn worker_get_onerror<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &WorkerClass::<E>::DEF)?;
+        impls::worker::onerror(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn worker_get_onerror_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, worker_get_onerror::<E>) } }
+
+fn worker_set_onerror<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &WorkerClass::<E>::DEF)?;
+        let value = cv::event_handler::<E>(e, value);
+        impls::worker::set_onerror(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn worker_set_onerror_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, worker_set_onerror::<E>) } }
+
+fn worker_terminate<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &WorkerClass::<E>::DEF)?;
+        impls::worker::terminate(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn worker_terminate_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, worker_terminate::<E>) } }
+
+fn worker_post_message<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &WorkerClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::arg::<E>(args, 0);
+        let a1 = cv::arg::<E>(args, 1);
+        impls::worker::post_message(e, h, this, a0, a1)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn worker_post_message_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, worker_post_message::<E>) } }
+
+fn worker_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        cv::need(e, args, 1)?;
+        let a0 = cv::usv_string(e, h, cv::arg::<E>(args, 0))?;
+        let a1 = cv::arg::<E>(args, 1);
+        impls::worker::constructor(e, h, a0, a1)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn worker_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, worker_constructor::<E>) } }
+
+pub struct XMLHttpRequestEventTargetClass<E>(PhantomData<E>);
+
+impl<E: Engine> XMLHttpRequestEventTargetClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "XMLHttpRequestEventTarget",
+        id: ClassId(30),
+        last: ClassId(31),
+        parent: Some(&EventTargetClass::<E>::DEF),
+        attributes: &[
+            Attribute { name: "onloadstart", get: unsafe { Bound::host_fn(xml_http_request_event_target_get_onloadstart_abi::<E>) }, set: Some(unsafe { Bound::host_fn(xml_http_request_event_target_set_onloadstart_abi::<E>) }), sig: AttributeSig { ty: IdlType::Callback, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+            Attribute { name: "onprogress", get: unsafe { Bound::host_fn(xml_http_request_event_target_get_onprogress_abi::<E>) }, set: Some(unsafe { Bound::host_fn(xml_http_request_event_target_set_onprogress_abi::<E>) }), sig: AttributeSig { ty: IdlType::Callback, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+            Attribute { name: "onabort", get: unsafe { Bound::host_fn(xml_http_request_event_target_get_onabort_abi::<E>) }, set: Some(unsafe { Bound::host_fn(xml_http_request_event_target_set_onabort_abi::<E>) }), sig: AttributeSig { ty: IdlType::Callback, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+            Attribute { name: "onerror", get: unsafe { Bound::host_fn(xml_http_request_event_target_get_onerror_abi::<E>) }, set: Some(unsafe { Bound::host_fn(xml_http_request_event_target_set_onerror_abi::<E>) }), sig: AttributeSig { ty: IdlType::Callback, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+            Attribute { name: "onload", get: unsafe { Bound::host_fn(xml_http_request_event_target_get_onload_abi::<E>) }, set: Some(unsafe { Bound::host_fn(xml_http_request_event_target_set_onload_abi::<E>) }), sig: AttributeSig { ty: IdlType::Callback, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+            Attribute { name: "ontimeout", get: unsafe { Bound::host_fn(xml_http_request_event_target_get_ontimeout_abi::<E>) }, set: Some(unsafe { Bound::host_fn(xml_http_request_event_target_set_ontimeout_abi::<E>) }), sig: AttributeSig { ty: IdlType::Callback, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+            Attribute { name: "onloadend", get: unsafe { Bound::host_fn(xml_http_request_event_target_get_onloadend_abi::<E>) }, set: Some(unsafe { Bound::host_fn(xml_http_request_event_target_set_onloadend_abi::<E>) }), sig: AttributeSig { ty: IdlType::Callback, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+        ],
+        operations: &[],
+        statics: &[],
+        constants: &[],
+        interceptors: None,
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: None,
+        length: 0,
+        error_prototype: false,
+    };
+}
+
+fn xml_http_request_event_target_get_onloadstart<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestEventTargetClass::<E>::DEF)?;
+        impls::xml_http_request_event_target::onloadstart(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_event_target_get_onloadstart_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_event_target_get_onloadstart::<E>) } }
+
+fn xml_http_request_event_target_set_onloadstart<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestEventTargetClass::<E>::DEF)?;
+        let value = cv::event_handler::<E>(e, value);
+        impls::xml_http_request_event_target::set_onloadstart(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_event_target_set_onloadstart_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, xml_http_request_event_target_set_onloadstart::<E>) } }
+
+fn xml_http_request_event_target_get_onprogress<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestEventTargetClass::<E>::DEF)?;
+        impls::xml_http_request_event_target::onprogress(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_event_target_get_onprogress_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_event_target_get_onprogress::<E>) } }
+
+fn xml_http_request_event_target_set_onprogress<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestEventTargetClass::<E>::DEF)?;
+        let value = cv::event_handler::<E>(e, value);
+        impls::xml_http_request_event_target::set_onprogress(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_event_target_set_onprogress_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, xml_http_request_event_target_set_onprogress::<E>) } }
+
+fn xml_http_request_event_target_get_onabort<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestEventTargetClass::<E>::DEF)?;
+        impls::xml_http_request_event_target::onabort(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_event_target_get_onabort_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_event_target_get_onabort::<E>) } }
+
+fn xml_http_request_event_target_set_onabort<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestEventTargetClass::<E>::DEF)?;
+        let value = cv::event_handler::<E>(e, value);
+        impls::xml_http_request_event_target::set_onabort(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_event_target_set_onabort_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, xml_http_request_event_target_set_onabort::<E>) } }
+
+fn xml_http_request_event_target_get_onerror<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestEventTargetClass::<E>::DEF)?;
+        impls::xml_http_request_event_target::onerror(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_event_target_get_onerror_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_event_target_get_onerror::<E>) } }
+
+fn xml_http_request_event_target_set_onerror<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestEventTargetClass::<E>::DEF)?;
+        let value = cv::event_handler::<E>(e, value);
+        impls::xml_http_request_event_target::set_onerror(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_event_target_set_onerror_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, xml_http_request_event_target_set_onerror::<E>) } }
+
+fn xml_http_request_event_target_get_onload<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestEventTargetClass::<E>::DEF)?;
+        impls::xml_http_request_event_target::onload(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_event_target_get_onload_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_event_target_get_onload::<E>) } }
+
+fn xml_http_request_event_target_set_onload<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestEventTargetClass::<E>::DEF)?;
+        let value = cv::event_handler::<E>(e, value);
+        impls::xml_http_request_event_target::set_onload(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_event_target_set_onload_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, xml_http_request_event_target_set_onload::<E>) } }
+
+fn xml_http_request_event_target_get_ontimeout<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestEventTargetClass::<E>::DEF)?;
+        impls::xml_http_request_event_target::ontimeout(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_event_target_get_ontimeout_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_event_target_get_ontimeout::<E>) } }
+
+fn xml_http_request_event_target_set_ontimeout<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestEventTargetClass::<E>::DEF)?;
+        let value = cv::event_handler::<E>(e, value);
+        impls::xml_http_request_event_target::set_ontimeout(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_event_target_set_ontimeout_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, xml_http_request_event_target_set_ontimeout::<E>) } }
+
+fn xml_http_request_event_target_get_onloadend<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestEventTargetClass::<E>::DEF)?;
+        impls::xml_http_request_event_target::onloadend(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_event_target_get_onloadend_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_event_target_get_onloadend::<E>) } }
+
+fn xml_http_request_event_target_set_onloadend<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestEventTargetClass::<E>::DEF)?;
+        let value = cv::event_handler::<E>(e, value);
+        impls::xml_http_request_event_target::set_onloadend(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_event_target_set_onloadend_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, xml_http_request_event_target_set_onloadend::<E>) } }
+
+pub struct XMLHttpRequestClass<E>(PhantomData<E>);
+
+impl<E: Engine> XMLHttpRequestClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "XMLHttpRequest",
+        id: ClassId(31),
+        last: ClassId(31),
+        parent: Some(&XMLHttpRequestEventTargetClass::<E>::DEF),
+        attributes: &[
+            Attribute { name: "onreadystatechange", get: unsafe { Bound::host_fn(xml_http_request_get_onreadystatechange_abi::<E>) }, set: Some(unsafe { Bound::host_fn(xml_http_request_set_onreadystatechange_abi::<E>) }), sig: AttributeSig { ty: IdlType::Callback, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+            Attribute { name: "readyState", get: unsafe { Bound::host_fn(xml_http_request_get_ready_state_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "timeout", get: unsafe { Bound::host_fn(xml_http_request_get_timeout_abi::<E>) }, set: Some(unsafe { Bound::host_fn(xml_http_request_set_timeout_abi::<E>) }), sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+            Attribute { name: "withCredentials", get: unsafe { Bound::host_fn(xml_http_request_get_with_credentials_abi::<E>) }, set: Some(unsafe { Bound::host_fn(xml_http_request_set_with_credentials_abi::<E>) }), sig: AttributeSig { ty: IdlType::Boolean, get: Effects::NONE, set: Effects::THROWS.with(Effects::WRITES) } },
+            Attribute { name: "responseURL", get: unsafe { Bound::host_fn(xml_http_request_get_response_url_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "status", get: unsafe { Bound::host_fn(xml_http_request_get_status_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "statusText", get: unsafe { Bound::host_fn(xml_http_request_get_status_text_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "responseType", get: unsafe { Bound::host_fn(xml_http_request_get_response_type_abi::<E>) }, set: Some(unsafe { Bound::host_fn(xml_http_request_set_response_type_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+            Attribute { name: "response", get: unsafe { Bound::host_fn(xml_http_request_get_response_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Any, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "responseText", get: unsafe { Bound::host_fn(xml_http_request_get_response_text_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+        ],
+        operations: &[
+            Operation { name: "open", length: 2, call: unsafe { Bound::host_fn(xml_http_request_open_abi::<E>) }, sig: Signature { args: &[IdlType::String, IdlType::String, IdlType::Any], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "setRequestHeader", length: 2, call: unsafe { Bound::host_fn(xml_http_request_set_request_header_abi::<E>) }, sig: Signature { args: &[IdlType::String, IdlType::String], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "send", length: 0, call: unsafe { Bound::host_fn(xml_http_request_send_abi::<E>) }, sig: Signature { args: &[IdlType::Any], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
+            Operation { name: "abort", length: 0, call: unsafe { Bound::host_fn(xml_http_request_abort_abi::<E>) }, sig: Signature { args: &[], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::WRITES) } },
+            Operation { name: "getResponseHeader", length: 1, call: unsafe { Bound::host_fn(xml_http_request_get_response_header_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::NullableString, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+            Operation { name: "getAllResponseHeaders", length: 0, call: unsafe { Bound::host_fn(xml_http_request_get_all_response_headers_abi::<E>) }, sig: Signature { args: &[], result: IdlType::String, effects: Effects::NONE } },
+            Operation { name: "overrideMimeType", length: 1, call: unsafe { Bound::host_fn(xml_http_request_override_mime_type_abi::<E>) }, sig: Signature { args: &[IdlType::String], result: IdlType::Undefined, effects: Effects::RUNS_SCRIPT.with(Effects::THROWS) } },
+        ],
+        statics: &[],
+        constants: &[
+            Constant { name: "UNSENT", value: 0.0 },
+            Constant { name: "OPENED", value: 1.0 },
+            Constant { name: "HEADERS_RECEIVED", value: 2.0 },
+            Constant { name: "LOADING", value: 3.0 },
+            Constant { name: "DONE", value: 4.0 },
+        ],
+        interceptors: None,
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: Some(unsafe { Bound::host_fn(xml_http_request_constructor_abi::<E>) }),
+        length: 0,
+        error_prototype: false,
+    };
+}
+
+fn xml_http_request_get_onreadystatechange<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        impls::xml_http_request::onreadystatechange(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_get_onreadystatechange_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_get_onreadystatechange::<E>) } }
+
+fn xml_http_request_set_onreadystatechange<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        let value = cv::event_handler::<E>(e, value);
+        impls::xml_http_request::set_onreadystatechange(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_set_onreadystatechange_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, xml_http_request_set_onreadystatechange::<E>) } }
+
+fn xml_http_request_get_ready_state<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        impls::xml_http_request::ready_state(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_get_ready_state_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_get_ready_state::<E>) } }
+
+fn xml_http_request_get_timeout<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        impls::xml_http_request::timeout(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_get_timeout_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_get_timeout::<E>) } }
+
+fn xml_http_request_set_timeout<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        let value = cv::to_uint32(e, h, value)?;
+        impls::xml_http_request::set_timeout(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_set_timeout_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, xml_http_request_set_timeout::<E>) } }
+
+fn xml_http_request_get_with_credentials<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        impls::xml_http_request::with_credentials(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_get_with_credentials_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_get_with_credentials::<E>) } }
+
+fn xml_http_request_set_with_credentials<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        let value = e.to_boolean(value);
+        impls::xml_http_request::set_with_credentials(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_set_with_credentials_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, xml_http_request_set_with_credentials::<E>) } }
+
+fn xml_http_request_get_response_url<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        impls::xml_http_request::response_url(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_get_response_url_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_get_response_url::<E>) } }
+
+fn xml_http_request_get_status<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        impls::xml_http_request::status(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_get_status_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_get_status::<E>) } }
+
+fn xml_http_request_get_status_text<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        impls::xml_http_request::status_text(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_get_status_text_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_get_status_text::<E>) } }
+
+fn xml_http_request_get_response_type<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        impls::xml_http_request::response_type(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_get_response_type_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_get_response_type::<E>) } }
+
+fn xml_http_request_set_response_type<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, value: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        let value = cv::dom_string(e, h, value)?;
+        impls::xml_http_request::set_response_type(e, h, this, value)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_set_response_type_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::set(ctx, this, argv, argc, xml_http_request_set_response_type::<E>) } }
+
+fn xml_http_request_get_response<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        impls::xml_http_request::response(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_get_response_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_get_response::<E>) } }
+
+fn xml_http_request_get_response_text<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        impls::xml_http_request::response_text(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_get_response_text_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, xml_http_request_get_response_text::<E>) } }
+
+fn xml_http_request_open<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        cv::need(e, args, 2)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        let a1 = cv::usv_string(e, h, cv::arg::<E>(args, 1))?;
+        let a2 = cv::arg::<E>(args, 2);
+        impls::xml_http_request::open(e, h, this, a0, a1, a2)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_open_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, xml_http_request_open::<E>) } }
+
+fn xml_http_request_set_request_header<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        cv::need(e, args, 2)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        let a1 = cv::dom_string(e, h, cv::arg::<E>(args, 1))?;
+        impls::xml_http_request::set_request_header(e, h, this, a0, a1)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_set_request_header_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, xml_http_request_set_request_header::<E>) } }
+
+fn xml_http_request_send<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        let a0 = cv::any_or_null::<E>(e, cv::arg::<E>(args, 0));
+        impls::xml_http_request::send(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_send_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, xml_http_request_send::<E>) } }
+
+fn xml_http_request_abort<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        impls::xml_http_request::abort(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_abort_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, xml_http_request_abort::<E>) } }
+
+fn xml_http_request_get_response_header<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        impls::xml_http_request::get_response_header(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_get_response_header_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, xml_http_request_get_response_header::<E>) } }
+
+fn xml_http_request_get_all_response_headers<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        impls::xml_http_request::get_all_response_headers(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_get_all_response_headers_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, xml_http_request_get_all_response_headers::<E>) } }
+
+fn xml_http_request_override_mime_type<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &XMLHttpRequestClass::<E>::DEF)?;
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        impls::xml_http_request::override_mime_type(e, h, this, a0)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_override_mime_type_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, xml_http_request_override_mime_type::<E>) } }
+
+fn xml_http_request_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::Value, _args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        impls::xml_http_request::constructor(e, h)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn xml_http_request_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, xml_http_request_constructor::<E>) } }
+
 pub struct DOMExceptionClass<E>(PhantomData<E>);
 
 impl<E: Engine> DOMExceptionClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "DOMException",
-        id: ClassId(29),
-        last: ClassId(29),
+        id: ClassId(32),
+        last: ClassId(32),
         parent: None,
         attributes: &[
             Attribute { name: "name", get: unsafe { Bound::host_fn(dom_exception_get_name_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
@@ -3298,8 +3881,8 @@ impl<E: Engine> EventClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Event",
-        id: ClassId(30),
-        last: ClassId(31),
+        id: ClassId(33),
+        last: ClassId(37),
         parent: None,
         attributes: &[
             Attribute { name: "type", get: unsafe { Bound::host_fn(event_get_type_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
@@ -3562,8 +4145,8 @@ impl<E: Engine> CustomEventClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "CustomEvent",
-        id: ClassId(31),
-        last: ClassId(31),
+        id: ClassId(34),
+        last: ClassId(34),
         parent: Some(&EventClass::<E>::DEF),
         attributes: &[
             Attribute { name: "detail", get: unsafe { Bound::host_fn(custom_event_get_detail_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Any, get: Effects::NONE, set: Effects::NONE } },
@@ -3618,14 +4201,259 @@ fn custom_event_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::
 // SAFETY: called as the host function of its table entry
 unsafe extern "C" fn custom_event_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, custom_event_constructor::<E>) } }
 
+pub struct MessageEventClass<E>(PhantomData<E>);
+
+impl<E: Engine> MessageEventClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "MessageEvent",
+        id: ClassId(35),
+        last: ClassId(35),
+        parent: Some(&EventClass::<E>::DEF),
+        attributes: &[
+            Attribute { name: "data", get: unsafe { Bound::host_fn(message_event_get_data_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Any, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "origin", get: unsafe { Bound::host_fn(message_event_get_origin_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "lastEventId", get: unsafe { Bound::host_fn(message_event_get_last_event_id_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "source", get: unsafe { Bound::host_fn(message_event_get_source_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Any, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "ports", get: unsafe { Bound::host_fn(message_event_get_ports_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Any, get: Effects::NONE, set: Effects::NONE } },
+        ],
+        operations: &[],
+        statics: &[],
+        constants: &[],
+        interceptors: None,
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: Some(unsafe { Bound::host_fn(message_event_constructor_abi::<E>) }),
+        length: 1,
+        error_prototype: false,
+    };
+}
+
+fn message_event_get_data<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &MessageEventClass::<E>::DEF)?;
+        impls::message_event::data(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn message_event_get_data_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, message_event_get_data::<E>) } }
+
+fn message_event_get_origin<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &MessageEventClass::<E>::DEF)?;
+        impls::message_event::origin(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn message_event_get_origin_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, message_event_get_origin::<E>) } }
+
+fn message_event_get_last_event_id<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &MessageEventClass::<E>::DEF)?;
+        impls::message_event::last_event_id(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn message_event_get_last_event_id_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, message_event_get_last_event_id::<E>) } }
+
+fn message_event_get_source<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &MessageEventClass::<E>::DEF)?;
+        impls::message_event::source(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn message_event_get_source_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, message_event_get_source::<E>) } }
+
+fn message_event_get_ports<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &MessageEventClass::<E>::DEF)?;
+        impls::message_event::ports(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn message_event_get_ports_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, message_event_get_ports::<E>) } }
+
+fn message_event_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        let a1 = cv::arg::<E>(args, 1);
+        impls::message_event::constructor(e, h, a0, a1)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn message_event_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, message_event_constructor::<E>) } }
+
+pub struct ErrorEventClass<E>(PhantomData<E>);
+
+impl<E: Engine> ErrorEventClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "ErrorEvent",
+        id: ClassId(36),
+        last: ClassId(36),
+        parent: Some(&EventClass::<E>::DEF),
+        attributes: &[
+            Attribute { name: "message", get: unsafe { Bound::host_fn(error_event_get_message_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "filename", get: unsafe { Bound::host_fn(error_event_get_filename_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "lineno", get: unsafe { Bound::host_fn(error_event_get_lineno_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "colno", get: unsafe { Bound::host_fn(error_event_get_colno_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "error", get: unsafe { Bound::host_fn(error_event_get_error_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Any, get: Effects::NONE, set: Effects::NONE } },
+        ],
+        operations: &[],
+        statics: &[],
+        constants: &[],
+        interceptors: None,
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: Some(unsafe { Bound::host_fn(error_event_constructor_abi::<E>) }),
+        length: 1,
+        error_prototype: false,
+    };
+}
+
+fn error_event_get_message<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &ErrorEventClass::<E>::DEF)?;
+        impls::error_event::message(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn error_event_get_message_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, error_event_get_message::<E>) } }
+
+fn error_event_get_filename<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &ErrorEventClass::<E>::DEF)?;
+        impls::error_event::filename(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn error_event_get_filename_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, error_event_get_filename::<E>) } }
+
+fn error_event_get_lineno<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &ErrorEventClass::<E>::DEF)?;
+        impls::error_event::lineno(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn error_event_get_lineno_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, error_event_get_lineno::<E>) } }
+
+fn error_event_get_colno<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &ErrorEventClass::<E>::DEF)?;
+        impls::error_event::colno(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn error_event_get_colno_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, error_event_get_colno::<E>) } }
+
+fn error_event_get_error<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &ErrorEventClass::<E>::DEF)?;
+        impls::error_event::error(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn error_event_get_error_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, error_event_get_error::<E>) } }
+
+fn error_event_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        let a1 = cv::arg::<E>(args, 1);
+        impls::error_event::constructor(e, h, a0, a1)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn error_event_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, error_event_constructor::<E>) } }
+
+pub struct ProgressEventClass<E>(PhantomData<E>);
+
+impl<E: Engine> ProgressEventClass<E> {
+    // SAFETY: every shell in the table reads its context as E and DomHost<E>
+    pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
+        name: "ProgressEvent",
+        id: ClassId(37),
+        last: ClassId(37),
+        parent: Some(&EventClass::<E>::DEF),
+        attributes: &[
+            Attribute { name: "lengthComputable", get: unsafe { Bound::host_fn(progress_event_get_length_computable_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Boolean, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "loaded", get: unsafe { Bound::host_fn(progress_event_get_loaded_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
+            Attribute { name: "total", get: unsafe { Bound::host_fn(progress_event_get_total_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
+        ],
+        operations: &[],
+        statics: &[],
+        constants: &[],
+        interceptors: None,
+        ops: Some(&SideOps::<E>::OPS),
+        constructor: Some(unsafe { Bound::host_fn(progress_event_constructor_abi::<E>) }),
+        length: 1,
+        error_prototype: false,
+    };
+}
+
+fn progress_event_get_length_computable<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &ProgressEventClass::<E>::DEF)?;
+        impls::progress_event::length_computable(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn progress_event_get_length_computable_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, progress_event_get_length_computable::<E>) } }
+
+fn progress_event_get_loaded<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &ProgressEventClass::<E>::DEF)?;
+        impls::progress_event::loaded(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn progress_event_get_loaded_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, progress_event_get_loaded::<E>) } }
+
+fn progress_event_get_total<E: Engine>(e: &mut E, h: &mut DomHost<E>, this: E::Value) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        let this = cv::this_side(e, h, this, &ProgressEventClass::<E>::DEF)?;
+        impls::progress_event::total(e, h, this)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn progress_event_get_total_abi<E: Engine>(ctx: *mut Ctx, this: u64, _: *const u64, _: usize) -> u64 { unsafe { shell::get(ctx, this, progress_event_get_total::<E>) } }
+
+fn progress_event_constructor<E: Engine>(e: &mut E, h: &mut DomHost<E>, _this: E::Value, args: &[E::Value]) -> Owned<E::Value> {
+    cv::run(e, h, |e, h| {
+        cv::need(e, args, 1)?;
+        let a0 = cv::dom_string(e, h, cv::arg::<E>(args, 0))?;
+        let a1 = cv::arg::<E>(args, 1);
+        impls::progress_event::constructor(e, h, a0, a1)
+    })
+}
+
+// SAFETY: called as the host function of its table entry
+unsafe extern "C" fn progress_event_constructor_abi<E: Engine>(ctx: *mut Ctx, this: u64, argv: *const u64, argc: usize) -> u64 { unsafe { shell::op(ctx, this, argv, argc, progress_event_constructor::<E>) } }
+
 pub struct AbortControllerClass<E>(PhantomData<E>);
 
 impl<E: Engine> AbortControllerClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "AbortController",
-        id: ClassId(32),
-        last: ClassId(32),
+        id: ClassId(38),
+        last: ClassId(38),
         parent: None,
         attributes: &[
             Attribute { name: "signal", get: unsafe { Bound::host_fn(abort_controller_get_signal_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Object, get: Effects::NONE, set: Effects::NONE } },
@@ -3679,8 +4507,8 @@ impl<E: Engine> NodeListClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "NodeList",
-        id: ClassId(33),
-        last: ClassId(33),
+        id: ClassId(39),
+        last: ClassId(39),
         parent: None,
         attributes: &[
             Attribute { name: "length", get: unsafe { Bound::host_fn(node_list_get_length_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
@@ -3751,8 +4579,8 @@ impl<E: Engine> HTMLCollectionClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "HTMLCollection",
-        id: ClassId(34),
-        last: ClassId(34),
+        id: ClassId(40),
+        last: ClassId(40),
         parent: None,
         attributes: &[
             Attribute { name: "length", get: unsafe { Bound::host_fn(html_collection_get_length_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
@@ -3847,8 +4675,8 @@ impl<E: Engine> DOMTokenListClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "DOMTokenList",
-        id: ClassId(35),
-        last: ClassId(35),
+        id: ClassId(41),
+        last: ClassId(41),
         parent: None,
         attributes: &[
             Attribute { name: "length", get: unsafe { Bound::host_fn(dom_token_list_get_length_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
@@ -4032,8 +4860,8 @@ impl<E: Engine> TextDecoderClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "TextDecoder",
-        id: ClassId(36),
-        last: ClassId(36),
+        id: ClassId(42),
+        last: ClassId(42),
         parent: None,
         attributes: &[
             Attribute { name: "encoding", get: unsafe { Bound::host_fn(text_decoder_get_encoding_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
@@ -4112,8 +4940,8 @@ impl<E: Engine> TextEncoderClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "TextEncoder",
-        id: ClassId(37),
-        last: ClassId(37),
+        id: ClassId(43),
+        last: ClassId(43),
         parent: None,
         attributes: &[
             Attribute { name: "encoding", get: unsafe { Bound::host_fn(text_encoder_get_encoding_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::NONE } },
@@ -4181,8 +5009,8 @@ impl<E: Engine> BlobClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Blob",
-        id: ClassId(38),
-        last: ClassId(38),
+        id: ClassId(44),
+        last: ClassId(44),
         parent: None,
         attributes: &[
             Attribute { name: "size", get: unsafe { Bound::host_fn(blob_get_size_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
@@ -4273,8 +5101,8 @@ impl<E: Engine> URLClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "URL",
-        id: ClassId(39),
-        last: ClassId(39),
+        id: ClassId(45),
+        last: ClassId(45),
         parent: None,
         attributes: &[
             Attribute { name: "href", get: unsafe { Bound::host_fn(url_get_href_abi::<E>) }, set: Some(unsafe { Bound::host_fn(url_set_href_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
@@ -4623,8 +5451,8 @@ impl<E: Engine> URLSearchParamsClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "URLSearchParams",
-        id: ClassId(40),
-        last: ClassId(40),
+        id: ClassId(46),
+        last: ClassId(46),
         parent: None,
         attributes: &[
             Attribute { name: "size", get: unsafe { Bound::host_fn(url_search_params_get_size_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
@@ -4818,8 +5646,8 @@ impl<E: Engine> LocationClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Location",
-        id: ClassId(41),
-        last: ClassId(41),
+        id: ClassId(47),
+        last: ClassId(47),
         parent: None,
         attributes: &[
             Attribute { name: "href", get: unsafe { Bound::host_fn(location_get_href_abi::<E>) }, set: Some(unsafe { Bound::host_fn(location_set_href_abi::<E>) }), sig: AttributeSig { ty: IdlType::String, get: Effects::NONE, set: Effects::RUNS_SCRIPT.with(Effects::THROWS).with(Effects::WRITES) } },
@@ -5010,8 +5838,8 @@ impl<E: Engine> HistoryClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "History",
-        id: ClassId(42),
-        last: ClassId(42),
+        id: ClassId(48),
+        last: ClassId(48),
         parent: None,
         attributes: &[
             Attribute { name: "length", get: unsafe { Bound::host_fn(history_get_length_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
@@ -5119,8 +5947,8 @@ impl<E: Engine> CryptoClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Crypto",
-        id: ClassId(43),
-        last: ClassId(43),
+        id: ClassId(49),
+        last: ClassId(49),
         parent: None,
         attributes: &[],
         operations: &[
@@ -5165,8 +5993,8 @@ impl<E: Engine> PerformanceClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "Performance",
-        id: ClassId(44),
-        last: ClassId(44),
+        id: ClassId(50),
+        last: ClassId(50),
         parent: None,
         attributes: &[
             Attribute { name: "timeOrigin", get: unsafe { Bound::host_fn(performance_get_time_origin_abi::<E>) }, set: None, sig: AttributeSig { ty: IdlType::Number, get: Effects::NONE, set: Effects::NONE } },
@@ -5248,8 +6076,8 @@ impl<E: Engine> PerformanceObserverClass<E> {
     // SAFETY: every shell in the table reads its context as E and DomHost<E>
     pub const DEF: ClassDef<E, DomHost<E>> = ClassDef {
         name: "PerformanceObserver",
-        id: ClassId(45),
-        last: ClassId(45),
+        id: ClassId(51),
+        last: ClassId(51),
         parent: None,
         attributes: &[],
         operations: &[

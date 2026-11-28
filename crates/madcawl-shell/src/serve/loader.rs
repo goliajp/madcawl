@@ -35,12 +35,15 @@ pub(crate) struct Pending {
     pub mask: Vec<String>,
     started: Instant,
     head_at: Option<Instant>,
-    status: Option<u16>,
-    final_url: Option<String>,
+    pub(super) status: Option<u16>,
+    pub(super) reason: String,
+    pub(super) final_url: Option<String>,
+    /// The response headers, kept for a request script made
+    pub(super) headers: Vec<(String, Vec<u8>)>,
     content_type: String,
-    body: Vec<u8>,
+    pub(super) body: Vec<u8>,
     download: Option<(String, u64)>,
-    failed: Option<String>,
+    pub(super) failed: Option<String>,
     done: bool,
 }
 
@@ -54,7 +57,9 @@ impl Pending {
             started: Instant::now(),
             head_at: None,
             status: None,
+            reason: String::new(),
             final_url: None,
+            headers: Vec::new(),
             content_type: String::new(),
             body: Vec::new(),
             download: None,
@@ -71,6 +76,7 @@ impl Pending {
                 self.final_url = f.all(tag::URL).last().map(|u| String::from_utf8_lossy(u).into_owned());
                 let ct = f.headers().into_iter().find(|(n, _)| n.eq_ignore_ascii_case("content-type"));
                 self.content_type = ct.map(|(_, v)| String::from_utf8_lossy(&v).into_owned()).unwrap_or_default();
+                self.keep_head(f);
             }
             kind::BODY => {
                 let b = f.field(tag::BODY).unwrap_or_default();
@@ -196,7 +202,7 @@ impl Loader {
             if let Some(out) = out {
                 return Ok(out);
             }
-            if matches!(self.stage, Stage::Idle) {
+            if self.is_idle() {
                 return Ok(Loaded::Pending);
             }
             let Some(f) = conn.next(self.read_until(deadline))? else {
@@ -207,6 +213,7 @@ impl Loader {
                 p.take(&f);
                 if p.done {
                     log.push(p.entry());
+                    self.drop_script_responses();
                 }
             }
         }

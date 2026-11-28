@@ -80,6 +80,12 @@ impl<E: Engine> DomHost<E> {
         &URLClass::<E>::DEF,
         &URLSearchParamsClass::<E>::DEF,
         &BlobClass::<E>::DEF,
+        &crate::generated::XMLHttpRequestEventTargetClass::<E>::DEF,
+        &crate::generated::XMLHttpRequestClass::<E>::DEF,
+        &crate::generated::ProgressEventClass::<E>::DEF,
+        &crate::generated::WorkerClass::<E>::DEF,
+        &crate::generated::MessageEventClass::<E>::DEF,
+        &crate::generated::ErrorEventClass::<E>::DEF,
     ];
 
     /// Put the window's members on the global object of this host's
@@ -171,7 +177,7 @@ fn listener<E: Engine>(e: &mut E, h: &mut DomHost<E>, w: u64, args: &[Value<E>],
     let cb = crate::convert::callback_or_null(e, arg::<E>(args, 1))?;
     let o = crate::listeners::options(e, h, arg::<E>(args, 2), add)?;
     let Some(cb) = cb else { return Ok(()) };
-    if w != 0 && !h.frames.live.contains_key(&w) {
+    if !h.window_alive(w) {
         return Ok(());
     }
     if add {
@@ -210,7 +216,7 @@ fn timer<E: Engine>(e: &mut E, h: &mut DomHost<E>, w: u64, args: &[Value<E>], re
         },
         None => 0,
     };
-    if w != 0 && !h.frames.live.contains_key(&w) {
+    if !h.window_alive(w) {
         e.release(handler);
         return Ok(0);
     }

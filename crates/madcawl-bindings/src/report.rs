@@ -71,16 +71,17 @@ fn joined(name: Option<&DomString>, message: Option<&DomString>) -> String {
 
 impl<E: Engine> DomHost<E> {
     pub(crate) fn record_exception(&mut self, e: &mut E, x: E::Value) {
-        let err = self.describe(e, x);
+        let err = self.describe(e, self.realm, x);
         self.note(Note::Exception(err));
     }
 
-    fn describe(&mut self, e: &mut E, x: E::Value) -> ScriptError {
+    /// What exception `x` says of itself, read through `realm`'s builtins.
+    pub(crate) fn describe(&mut self, e: &mut E, realm: E::Realm, x: E::Value) -> ScriptError {
         let mut err = ScriptError { message: String::new(), source: String::new(), line: 0, column: 0 };
         let side = e.host_of(x, &DOMExceptionClass::<E>::DEF).and_then(|obj| self.sides.of(obj));
         if let Some(SideData::DomException(d)) = side.map(|r| &self.sides.get(r).data) {
             err.message = joined(Some(&d.name), Some(&d.message));
-        } else if let Some(info) = e.error_info(self.realm, x, MAX_MESSAGE) {
+        } else if let Some(info) = e.error_info(realm, x, MAX_MESSAGE) {
             let ErrorInfo { name, message, source, line, column } = info;
             err.message = match e.kind(x) {
                 ValueKind::String => message.map_or_else(String::new, |m| text(&m, MAX_MESSAGE)),

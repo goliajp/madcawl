@@ -15,7 +15,9 @@ pub(crate) fn abort<E: Engine>(e: &mut E, h: &mut DomHost<E>, reason: E::Value) 
 }
 
 pub(crate) fn timeout<E: Engine>(e: &mut E, h: &mut DomHost<E>, ms: u64) -> Result<SideRef, Thrown> {
-    Ok(h.timeout_signal(e, ms))
+    let realm = h.caller_realm(e)?;
+    let w = h.window_of_realm(realm).expect("a live window's realm");
+    Ok(h.timeout_signal(e, ms, w))
 }
 
 pub(crate) fn aborted<E: Engine>(_: &mut E, h: &mut DomHost<E>, this: SideRef) -> Result<bool, Thrown> {

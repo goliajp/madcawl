@@ -34,7 +34,7 @@ pub(crate) fn replace_list<E: Engine>(h: &mut DomHost<E>, r: SideRef, list: Vec<
     params(h, r).list = list;
 }
 
-fn serialize(list: &[(String, String)]) -> String {
+pub(crate) fn serialize(list: &[(String, String)]) -> String {
     let mut out = String::new();
     for (i, (k, v)) in list.iter().enumerate() {
         if i > 0 {

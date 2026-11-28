@@ -170,6 +170,50 @@ pub trait Builtins {
         self.new_array(realm, &[])
     }
 
+    /// JSON text `text` parsed by `realm`'s own `JSON.parse`, as it was
+    /// before any page script: `None` when it is no JSON, when script is
+    /// halted, and on an engine without the builtin. Nothing is
+    /// registered either way.
+    fn parse_json(
+        &mut self,
+        realm: <Self as Engine>::Realm,
+        text: &DomString,
+    ) -> Option<Owned<<Self as Engine>::Value>>
+    where
+        Self: Engine,
+    {
+        let _ = (realm, text);
+        None
+    }
+
+    /// `v` as the structured clone algorithm copies it into `realm`, a
+    /// realm of this isolate: primitives as they are; arrays, plain
+    /// objects (their own enumerable string-keyed properties, read with
+    /// their getters), Map, Set, Date, RegExp, ArrayBuffer, typed arrays,
+    /// DataView and errors made anew in `realm`, with shared references
+    /// and cycles kept. `None` when `v` holds a function, a symbol or a
+    /// platform object (a wrapper; a Blob is not copied either), with
+    /// nothing registered; thrown, with the exception registered, when a
+    /// getter or proxy trap threw. A Proxy is copied through its traps as
+    /// what it stands for, where the standard refuses one: no engine
+    /// interface allowed here tells one apart. The default clones
+    /// primitives only.
+    fn clone_value<H: crate::Host<Self>>(
+        &mut self,
+        host: &mut H,
+        realm: <Self as Engine>::Realm,
+        v: <Self as Engine>::Value,
+    ) -> Option<Owned<<Self as Engine>::Value>>
+    where
+        Self: Engine,
+    {
+        let _ = (host, realm);
+        match self.kind(v) {
+            crate::ValueKind::Object | crate::ValueKind::Function | crate::ValueKind::Symbol => None,
+            _ => Some(self.retain(v)),
+        }
+    }
+
     /// Make `name` of `obj` an enumerable accessor property of `get` and
     /// `set` (borrowed functions; undefined for no setter), not
     /// configurable when `unforgeable`. `false` when it threw.

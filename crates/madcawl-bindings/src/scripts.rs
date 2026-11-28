@@ -277,7 +277,8 @@ impl<E: Engine> DomHost<E> {
     /// Nanoseconds until the window has something to run: 0 with a task
     /// or a source request waiting, else the next timer's, if any.
     pub fn next_work_in(&self) -> Option<u64> {
-        if !self.scripts.requests.is_empty() || !self.frames.requests.is_empty() || !self.event_loop.tasks.is_empty() {
+        let asked = !self.scripts.requests.is_empty() || !self.frames.requests.is_empty() || !self.fetches.requests.is_empty();
+        if asked || !self.event_loop.tasks.is_empty() {
             return Some(0);
         }
         self.event_loop.next_due_in()

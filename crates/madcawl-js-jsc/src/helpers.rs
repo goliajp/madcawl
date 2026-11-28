@@ -33,6 +33,8 @@ pub(crate) enum Helper {
     ViewRange = 24,
     OwnEntries = 25,
     ArrayValues = 26,
+    Clone = 27,
+    Json = 28,
 }
 
 impl Helper {
@@ -40,7 +42,7 @@ impl Helper {
     /// up to `LAST_OF_WINDOW`, and `DATA_HELPERS` the rest.
     pub(crate) const LAST_OF_FIRST: Helper = Helper::Lazy;
     pub(crate) const LAST_OF_WINDOW: Helper = Helper::CrossOrigin;
-    pub(crate) const LAST: Helper = Helper::ArrayValues;
+    pub(crate) const LAST: Helper = Helper::Json;
 }
 
 // Page script runs in the realm and may replace any global or

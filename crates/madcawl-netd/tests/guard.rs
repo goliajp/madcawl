@@ -243,7 +243,7 @@ fn a_content_process_cannot_claim_a_navigation_or_raise_its_credentials() {
     // credentials may be lowered, never raised: of two values the lower one holds
     let creds = Frame::new(kind::FETCH).num(tag::ID, 4).str(tag::URL, &echo).num(tag::CREDENTIALS, 1).num(tag::CREDENTIALS, 0);
     assert_eq!(exchange(&mut a, creds), Ok(String::new()));
-    let odd = Frame::new(kind::FETCH).num(tag::ID, 5).str(tag::URL, &echo).num(tag::CREDENTIALS, 2);
+    let odd = Frame::new(kind::FETCH).num(tag::ID, 5).str(tag::URL, &echo).num(tag::CREDENTIALS, 3);
     assert_refused(&exchange(&mut a, odd).unwrap_err(), 5);
     assert_eq!(netd.refused(None), 3);
 }

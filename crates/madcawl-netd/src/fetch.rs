@@ -3,7 +3,7 @@
 
 use crate::download::{Downloads, Tee};
 use crate::{Writer, error, is_hidden_response_header, parse_url, send};
-use madcawl_net::fetch::{Redirect, Request, Sink, is_forbidden_method};
+use madcawl_net::fetch::{Credentials, Mode, Redirect, Request, Sink, is_forbidden_method};
 use madcawl_net::partition::PROFILE;
 use madcawl_net::sock::Cancel;
 use madcawl_net::wire::{BODY_CHUNK, Frame, kind, tag};
@@ -24,7 +24,18 @@ fn request_of(mut frame: Frame) -> Result<Request, String> {
     req.body = frame.take(tag::BODY);
     req.navigation = frame.get_num(tag::NAVIGATION).unwrap_or(0) != 0;
     req.initiator = parse_url(&frame, tag::INITIATOR);
-    req.credentials = frame.get_num(tag::CREDENTIALS).unwrap_or(1) != 0;
+    req.credentials = match frame.get_num(tag::CREDENTIALS).unwrap_or(1) {
+        0 => Credentials::Omit,
+        1 => Credentials::Include,
+        2 => Credentials::SameOrigin,
+        v => return Err(format!("credentials value {v}")),
+    };
+    req.mode = match frame.get_num(tag::MODE).unwrap_or(0) {
+        0 => Mode::NoCors,
+        1 => Mode::Cors,
+        2 => Mode::SameOrigin,
+        v => return Err(format!("mode value {v}")),
+    };
     req.partition = frame.get_num(tag::PARTITION).unwrap_or(PROFILE);
     req.body_origins = frame.all(tag::BODY_ORIGIN).map(|o| String::from_utf8_lossy(o).into_owned()).collect();
     req.redirect = match frame.get_num(tag::REDIRECT).unwrap_or(0) {
@@ -121,4 +132,21 @@ pub(crate) fn run_fetch(
         out.flush()?;
     }
     send(w, &Frame::new(kind::END).num(tag::ID, id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn credentials_and_mode_come_from_their_values() {
+        let fetch = |creds: u64, mode: u64| request_of(Frame::new(kind::FETCH).str(tag::URL, "https://a.test/").num(tag::CREDENTIALS, creds).num(tag::MODE, mode));
+        let got = |c, m| fetch(c, m).map(|r| (r.credentials, r.mode));
+        assert_eq!(got(0, 0), Ok((Credentials::Omit, Mode::NoCors)));
+        assert_eq!(got(1, 1), Ok((Credentials::Include, Mode::Cors)));
+        assert_eq!(got(2, 2), Ok((Credentials::SameOrigin, Mode::SameOrigin)));
+        assert!(fetch(3, 0).is_err() && fetch(0, 3).is_err());
+        let plain = request_of(Frame::new(kind::FETCH).str(tag::URL, "https://a.test/")).unwrap();
+        assert_eq!((plain.credentials, plain.mode), (Credentials::Include, Mode::NoCors));
+    }
 }

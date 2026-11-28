@@ -6,11 +6,12 @@
 
 use std::time::Duration;
 
-use madcawl_bindings::{CookieStore, DomHost};
+use madcawl_bindings::{CookieStore, Credentials, DomHost, FetchResponse, Mode};
 use madcawl_dom::Dom;
 use madcawl_js::Control;
 use madcawl_js_jsc::Jsc;
 use madcawl_shell::serve::cookies::Cookies;
+use madcawl_shell::serve::script_fetch::{self, ScriptFetch, ScriptResponse};
 use madcawl_shell::serve::scripts::ScriptPage;
 use madcawl_str::DomString;
 
@@ -81,6 +82,32 @@ impl ScriptPage for JscPage {
     fn frame_fetched(&mut self, id: u64, response: Option<(&str, &str)>) {
         let (_, h) = self.host();
         h.frame_fetched(id, response.map(|(url, text)| (url, text.as_bytes())));
+    }
+
+    fn fetches(&mut self) -> Vec<ScriptFetch> {
+        let (_, h) = self.host();
+        h.take_fetches()
+            .into_iter()
+            .map(|r| {
+                let credentials = match r.credentials {
+                    Credentials::Omit => script_fetch::Credentials::Omit,
+                    Credentials::SameOrigin => script_fetch::Credentials::SameOrigin,
+                    Credentials::Include => script_fetch::Credentials::Include,
+                };
+                let mode = match r.mode {
+                    Mode::Cors => script_fetch::Mode::Cors,
+                    Mode::SameOrigin => script_fetch::Mode::SameOrigin,
+                };
+                let (id, what, method, url, headers, body, initiator) = (r.id, r.destination, r.method, r.url, r.headers, r.body, r.initiator);
+                ScriptFetch { id, what, method, url, headers, body, initiator, credentials, mode }
+            })
+            .collect()
+    }
+
+    fn fetch_done(&mut self, id: u64, response: Option<ScriptResponse>) {
+        let (_, h) = self.host();
+        let r = response.map(|r| FetchResponse { status: r.status, status_text: r.status_text, url: r.url, headers: r.headers, body: r.body });
+        h.fetch_done(id, r);
     }
 
     fn run(&mut self, max: usize) -> bool {

@@ -102,7 +102,10 @@ impl<E: Engine> DomHost<E> {
             Target::Node(n) => self.listeners.get(&n.index()).map_or(&[], Vec::as_slice),
             Target::Side(r) => self.side_listeners.get(&r).map_or(&[], Vec::as_slice),
             Target::Window(0) => &self.window_listeners,
-            Target::Window(w) => self.frames.listeners(w),
+            Target::Window(w) => match self.workers.live.get(&w) {
+                Some(k) => &k.listeners,
+                None => self.frames.listeners(w),
+            },
         }
     }
 
@@ -146,7 +149,10 @@ impl<E: Engine> DomHost<E> {
             Target::Node(n) => self.listeners.entry(n.index()).or_default(),
             Target::Side(r) => self.side_listeners.entry(r).or_default(),
             Target::Window(0) => &mut self.window_listeners,
-            Target::Window(w) => self.frames.listeners_mut(w),
+            Target::Window(w) => match self.workers.live.get_mut(&w) {
+                Some(k) => &mut k.listeners,
+                None => self.frames.listeners_mut(w),
+            },
         }
     }
 
@@ -182,7 +188,10 @@ impl<E: Engine> DomHost<E> {
             Target::Node(n) => self.listeners.get_mut(&n.index()),
             Target::Side(r) => self.side_listeners.get_mut(&r),
             Target::Window(0) => Some(&mut self.window_listeners),
-            Target::Window(w) => self.frames.live.get_mut(&w).map(|f| &mut f.listeners),
+            Target::Window(w) => match self.workers.live.get_mut(&w) {
+                Some(k) => Some(&mut k.listeners),
+                None => self.frames.live.get_mut(&w).map(|f| &mut f.listeners),
+            },
         };
         let Some(list) = list else { return };
         let Some(i) = list.iter().position(at) else { return };

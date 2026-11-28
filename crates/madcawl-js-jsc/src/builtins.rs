@@ -1,7 +1,7 @@
 //! The host's reads and definitions through a realm's own builtins
 //! (`helpers.rs`).
 
-use madcawl_js::{ArrayType, Builtins, Deferred, ErrorInfo, Host, Owned};
+use madcawl_js::{ArrayType, Builtins, Deferred, Engine, ErrorInfo, Host, Owned};
 use madcawl_str::DomString;
 
 use crate::ffi;
@@ -81,6 +81,47 @@ impl Builtins for Jsc {
         self.call_value(host, f, UNDEFINED, &[v])
     }
 
+    fn parse_json(&mut self, realm: Realm, text: &DomString) -> Option<Owned<Value>> {
+        if self.halted() {
+            return None;
+        }
+        let r = self.index(realm);
+        let s = self.string_of(text);
+        let out = self.call_helper(r, Helper::Json, &[s]);
+        self.unprotect(s);
+        let out = match out {
+            Ok(out) if out.is_cell() => out,
+            Ok(_) => return None,
+            Err(_) => {
+                self.after_stop();
+                return None;
+            }
+        };
+        let ctx = self.realms[r as usize].ctx;
+        // SAFETY: the array of one the helper just returned, on the stack
+        let v = Value::from_ref(unsafe { ffi::JSObjectGetPropertyAtIndex(ctx, out.0 as _, 0, std::ptr::null_mut()) });
+        Some(self.take(v))
+    }
+
+    fn clone_value<H: Host<Jsc>>(&mut self, host: &mut H, realm: Realm, v: Value) -> Option<Owned<Value>> {
+        let f = self.helper(self.index(realm), Helper::Clone);
+        let platform = self.platform_test();
+        let out = self.call_value(host, f, UNDEFINED, &[v, platform]);
+        let o = out.get();
+        if Jsc::is_thrown(o) {
+            return Some(out);
+        }
+        if !o.is_cell() {
+            return None;
+        }
+        let ctx = self.realms[self.index(realm) as usize].ctx;
+        // SAFETY: the array of one the helper just returned, which `out` holds
+        let c = Value::from_ref(unsafe { ffi::JSObjectGetPropertyAtIndex(ctx, o.0 as _, 0, std::ptr::null_mut()) });
+        let c = self.take(c);
+        self.release(out);
+        Some(c)
+    }
+
     fn define_accessor(&mut self, realm: Realm, obj: Value, name: &str, get: Value, set: Value, unforgeable: bool) -> bool {
         let r = self.index(realm);
         let n = self.string_of(&DomString::from_wtf8(name.as_bytes()));
@@ -91,5 +132,34 @@ impl Builtins for Jsc {
             self.after_stop();
         }
         ok
+    }
+}
+
+// whether its one argument is a platform object: a wrapper, of a class
+// with private data, which the structured clone refuses
+unsafe extern "C" fn is_platform(
+    ctx: ffi::JSContextRef,
+    _: ffi::JSObjectRef,
+    _: ffi::JSObjectRef,
+    argc: usize,
+    argv: *const ffi::JSValueRef,
+    _: *mut ffi::JSValueRef,
+) -> ffi::JSValueRef {
+    // SAFETY: the framework passes `argc` live arguments; the clone helper passes objects only
+    let platform = argc == 1 && unsafe { ffi::JSValueGetType(ctx, *argv) == ffi::kJSTypeObject && !ffi::JSObjectGetPrivate((*argv).cast_mut()).is_null() };
+    // SAFETY: a live context
+    unsafe { ffi::JSValueMakeBoolean(ctx, platform) }
+}
+
+impl Jsc {
+    /// The function the clone helper asks whether an object is a platform
+    /// object, made once on the base context, so that it holds no realm.
+    fn platform_test(&mut self) -> Value {
+        if self.platform == Value(0) {
+            // SAFETY: a function of a plain callback, on the isolate's live base context
+            self.platform = Value::from_ref(unsafe { ffi::JSObjectMakeFunctionWithCallback(self.base, std::ptr::null_mut(), Some(is_platform)) }.cast_const());
+            self.protect(self.platform);
+        }
+        self.platform
     }
 }
