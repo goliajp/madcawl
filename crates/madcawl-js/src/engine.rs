@@ -180,6 +180,31 @@ pub trait Engine: Control + crate::Builtins + Sized + 'static {
         realm: Self::Realm,
         class: &'static ClassDef<Self, H>,
     ) -> Owned<Self::Value>;
+    /// Put the interface object of each of `classes` on `obj` (the
+    /// global of `realm`), in that order, as a writable, not
+    /// enumerable, configurable data property named as the class, as Web
+    /// IDL has it. `false` when it threw. The default puts each with
+    /// [`Engine::set`] of [`Engine::interface_object`], which is that for
+    /// an engine without property attributes; one with them overrides it.
+    ///
+    /// An engine may make each one when it is first read instead: the
+    /// property is there, in its place among `obj`'s own keys, from the
+    /// start, and reads as that data property once read or written.
+    /// Until then its descriptor may show an accessor.
+    fn define_interfaces<H: Host<Self>>(
+        &mut self,
+        host: &mut H,
+        realm: Self::Realm,
+        obj: Self::Value,
+        classes: &'static [&'static ClassDef<Self, H>],
+    ) -> bool {
+        classes.iter().all(|&c| {
+            let i = self.interface_object(realm, c);
+            let ok = self.set(host, obj, Key::Str(&DomString::from_wtf8(c.name.as_bytes())), i.get());
+            self.release(i);
+            ok
+        })
+    }
 
     /// Register `exception`; returns [`Engine::thrown`].
     fn throw(&mut self, exception: Owned<Self::Value>) -> Owned<Self::Value>;

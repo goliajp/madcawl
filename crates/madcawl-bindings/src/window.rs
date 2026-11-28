@@ -32,6 +32,51 @@ fn put<E: Engine>(e: &mut E, h: &mut DomHost<E>, obj: Value<E>, name: &str, v: V
 }
 
 impl<E: Engine> DomHost<E> {
+    /// The interfaces on the global object, in the order of its own
+    /// keys.
+    const INTERFACES: &'static [&'static ClassDef<E, DomHost<E>>] = &[
+        &AbortControllerClass::<E>::DEF,
+        &AbortSignalClass::<E>::DEF,
+        &AttrClass::<E>::DEF,
+        &NamedNodeMapClass::<E>::DEF,
+        &DOMTokenListClass::<E>::DEF,
+        &CSSStyleDeclarationClass::<E>::DEF,
+        &CharacterDataClass::<E>::DEF,
+        &TextClass::<E>::DEF,
+        &CommentClass::<E>::DEF,
+        &DocumentFragmentClass::<E>::DEF,
+        &CustomEventClass::<E>::DEF,
+        &DOMExceptionClass::<E>::DEF,
+        &EventTargetClass::<E>::DEF,
+        &NodeClass::<E>::DEF,
+        &ElementClass::<E>::DEF,
+        &DocumentClass::<E>::DEF,
+        &HTMLElementClass::<E>::DEF,
+        &HTMLUnknownElementClass::<E>::DEF,
+        &HTMLHtmlElementClass::<E>::DEF,
+        &HTMLHeadElementClass::<E>::DEF,
+        &HTMLBodyElementClass::<E>::DEF,
+        &HTMLDivElementClass::<E>::DEF,
+        &HTMLSpanElementClass::<E>::DEF,
+        &HTMLAnchorElementClass::<E>::DEF,
+        &HTMLLinkElementClass::<E>::DEF,
+        &HTMLStyleElementClass::<E>::DEF,
+        &HTMLImageElementClass::<E>::DEF,
+        &HTMLIFrameElementClass::<E>::DEF,
+        &HTMLObjectElementClass::<E>::DEF,
+        &HTMLButtonElementClass::<E>::DEF,
+        &HTMLInputElementClass::<E>::DEF,
+        &HTMLScriptElementClass::<E>::DEF,
+        &EventClass::<E>::DEF,
+        &NodeListClass::<E>::DEF,
+        &HTMLCollectionClass::<E>::DEF,
+        &LocationClass::<E>::DEF,
+        &HistoryClass::<E>::DEF,
+        &CryptoClass::<E>::DEF,
+        &PerformanceClass::<E>::DEF,
+        &PerformanceObserverClass::<E>::DEF,
+    ];
+
     /// Put the window's members on the global object of this host's
     /// realm.
     pub fn install_window(&mut self, e: &mut E) {
@@ -44,53 +89,8 @@ impl<E: Engine> DomHost<E> {
         let d = self.wrap(e, doc);
         put(e, self, global.get(), "document", d.get());
         e.release(d);
-        let classes: [&'static ClassDef<E, DomHost<E>>; 40] = [
-            &AbortControllerClass::<E>::DEF,
-            &AbortSignalClass::<E>::DEF,
-            &AttrClass::<E>::DEF,
-            &NamedNodeMapClass::<E>::DEF,
-            &DOMTokenListClass::<E>::DEF,
-            &CSSStyleDeclarationClass::<E>::DEF,
-            &CharacterDataClass::<E>::DEF,
-            &TextClass::<E>::DEF,
-            &CommentClass::<E>::DEF,
-            &DocumentFragmentClass::<E>::DEF,
-            &CustomEventClass::<E>::DEF,
-            &DOMExceptionClass::<E>::DEF,
-            &EventTargetClass::<E>::DEF,
-            &NodeClass::<E>::DEF,
-            &ElementClass::<E>::DEF,
-            &DocumentClass::<E>::DEF,
-            &HTMLElementClass::<E>::DEF,
-            &HTMLUnknownElementClass::<E>::DEF,
-            &HTMLHtmlElementClass::<E>::DEF,
-            &HTMLHeadElementClass::<E>::DEF,
-            &HTMLBodyElementClass::<E>::DEF,
-            &HTMLDivElementClass::<E>::DEF,
-            &HTMLSpanElementClass::<E>::DEF,
-            &HTMLAnchorElementClass::<E>::DEF,
-            &HTMLLinkElementClass::<E>::DEF,
-            &HTMLStyleElementClass::<E>::DEF,
-            &HTMLImageElementClass::<E>::DEF,
-            &HTMLIFrameElementClass::<E>::DEF,
-            &HTMLObjectElementClass::<E>::DEF,
-            &HTMLButtonElementClass::<E>::DEF,
-            &HTMLInputElementClass::<E>::DEF,
-            &HTMLScriptElementClass::<E>::DEF,
-            &EventClass::<E>::DEF,
-            &NodeListClass::<E>::DEF,
-            &HTMLCollectionClass::<E>::DEF,
-            &LocationClass::<E>::DEF,
-            &HistoryClass::<E>::DEF,
-            &CryptoClass::<E>::DEF,
-            &PerformanceClass::<E>::DEF,
-            &PerformanceObserverClass::<E>::DEF,
-        ];
-        for c in classes {
-            let i = e.interface_object(self.realm, c);
-            put(e, self, global.get(), c.name, i.get());
-            e.release(i);
-        }
+        let ok = e.define_interfaces(self, self.realm, global.get(), Self::INTERFACES);
+        assert!(ok, "putting the interface objects on the global object");
         self.install_functions(e, global.get());
         self.install_objects(e, global.get());
         e.release(global);
