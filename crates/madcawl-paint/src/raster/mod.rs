@@ -26,7 +26,25 @@ pub struct Bitmap {
     pub data: Vec<u8>,
 }
 
+/// Pixels to draw into that someone else holds, such as shared memory:
+/// premultiplied BGRA, top row first, rows `stride` bytes apart.
+pub struct Canvas<'a> {
+    pub data: &'a mut [u8],
+    pub width: usize,
+    pub height: usize,
+    pub stride: usize,
+}
+
 impl Bitmap {
+    pub fn canvas(&mut self) -> Canvas<'_> {
+        Canvas {
+            width: self.width,
+            height: self.height,
+            stride: self.width * 4,
+            data: &mut self.data,
+        }
+    }
+
     /// The pixel at device `(x, y)` as (b, g, r, a).
     pub fn pixel(&self, x: usize, y: usize) -> [u8; 4] {
         let i = (y * self.width + x) * 4;
@@ -83,9 +101,16 @@ impl Raster {
             height,
             data: vec![0u8; width * height * 4],
         };
-        // SAFETY: the context draws into `bm`, which outlives it; it is released below
+        self.draw_into(list, fonts, &mut bm.canvas());
+        bm
+    }
+
+    /// Draws `list` into `canvas`, over what it holds, as [`Raster::draw`] does into a bitmap of its own;
+    /// the view is drawn from the canvas's top left at `scale`, as far as the canvas reaches.
+    pub fn draw_into(&self, list: &DisplayList, fonts: &mut Fonts, canvas: &mut Canvas) {
+        // SAFETY: the context draws into `canvas`, which outlives it; it is released below
         unsafe {
-            let ctx = context(&mut bm, self.scale, self.view);
+            let ctx = context(canvas, self.scale, self.view);
             fill(ctx, list.canvas);
             ffi::CGContextFillRect(
                 ctx,
@@ -115,15 +140,16 @@ impl Raster {
             }
             ffi::CGContextRelease(ctx);
         }
-        bm
     }
 }
 
 /// A bitmap context drawing into `bm` in CSS px of `view` at `scale` device pixels each; the caller
 /// releases it.
-// SAFETY: `bm` must outlive the context, and its data must hold `width * height` BGRA pixels
-pub(crate) unsafe fn context(bm: &mut Bitmap, scale: f32, view: RectF) -> Ref {
-    // SAFETY: as the caller promises; the color space is released once the context holds it
+// SAFETY: `bm` must outlive the context
+pub(crate) unsafe fn context(bm: &mut Canvas, scale: f32, view: RectF) -> Ref {
+    assert!(bm.stride >= bm.width * 4 && bm.data.len() >= bm.stride * bm.height);
+    // SAFETY: as the caller promises, over rows the canvas holds; the color space is released once
+    // the context holds it
     unsafe {
         let cs = ffi::CGColorSpaceCreateWithName(ffi::kCGColorSpaceSRGB);
         let ctx = ffi::CGBitmapContextCreate(
@@ -131,7 +157,7 @@ pub(crate) unsafe fn context(bm: &mut Bitmap, scale: f32, view: RectF) -> Ref {
             bm.width,
             bm.height,
             8,
-            bm.width * 4,
+            bm.stride,
             cs,
             ffi::kCGImageAlphaPremultipliedFirst | ffi::kCGBitmapByteOrder32Little,
         );
